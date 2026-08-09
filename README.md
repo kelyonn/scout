@@ -20,8 +20,10 @@ something is worth the interruption.
 
 ## Status
 
-**Foundation built, not yet deployed (P0).** The specification set is complete,
-and so is everything in P0 that lives in this repository:
+**P0 is built. P1's collector core is built and running end-to-end against a
+real Postgres. No adapter exists yet, so nothing has been discovered.**
+
+P0 — hosting, CI, backup, the pieces that make the repo deployable:
 
 - Database schema — five migrations, applied by `golang-migrate`
 - Local and production Compose stacks; hardened, distroless, ARM64 service images
@@ -30,17 +32,50 @@ and so is everything in P0 that lives in this repository:
 - The dead-man's switch — the collector reports in every 5 minutes
 - Deploy over Tailscale SSH, with a health gate that rolls back on its own
 - Tiered backup and a restore drill, both `age`-encrypted ([ADR-017](docs/adr/ADR-017-tiered-backup-without-object-storage.md))
-- CI: compliance, Go build/vet/test, golangci-lint, migrations, sqlfluff, shellcheck
 
-What is left in P0 needs a host, an account, or physical media rather than code:
-provisioning the Oracle A1 instance, arming the billing alert, running the first
-real deploy, and writing the `age` key and Android keystore to offline media.
+What's left in P0 needs a host, an account, or physical media rather than code —
+provisioning the Oracle A1 instance, arming the billing alert, the first real
+deploy, and writing the `age` key and Android keystore to offline media.
 [`docs/19-roadmap.md`](docs/19-roadmap.md) lists exactly which exit criteria
 those are and why they cannot be closed from here.
 
-Everything past P0 is specified and not yet built — no adapters, no pipeline, no
-ranking, no notifications, no dashboard. The roadmap says what lands when, with
+P1 — the ingestion pipeline itself, per [`docs/06-ingestion-pipeline.md`](docs/06-ingestion-pipeline.md):
+
+- **Politeness gate** — all six checks (legal posture, robots.txt, rate budget,
+  concurrency, crawl-delay, circuit breaker), in spec order, backed by a real
+  RFC 9309 robots.txt parser and a Redis-backed per-domain token bucket
+- **SSRF-safe fetcher** — conditional GET, the full tiered timeout table, a 10MB
+  body cap, redirect re-validation on every hop
+- **Change detection** — Layer 2 content hashing, stripping the render
+  timestamps and CSRF tokens that would otherwise make every poll look different
+- **Adaptive scheduler** — the yield/recency/season/failure interval formula,
+  jitter, `FOR UPDATE SKIP LOCKED` batch claiming, the circuit breaker backoff
+
+Verified against the real Docker stack and a real Postgres, not only unit
+tests — a seeded source gets claimed, polled, and rescheduled correctly.
+
+**Not built yet:** any adapter (Greenhouse, Lever, Ashby), which means Layer 3
+change detection and observation writing have nothing to call — normalization,
+dedup, scoring, notifications, or the dashboard. Nothing has actually been
+discovered by this codebase yet. The roadmap says what lands when, with
 estimates that are honest rather than optimistic.
+
+---
+
+## Quickstart
+
+```bash
+git clone https://github.com/kelyonn/scout.git && cd scout
+make dev            # full local stack, migrated, from a clean clone
+make test           # everything, including the Postgres/Redis-backed suites
+```
+
+`make dev` never touches the live internet — `SCOUT_FIXTURES_ONLY=true` is the
+local default, and the collector's scheduler refuses to start at all under it
+rather than trust an empty source table to stay empty. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the full command list and
+[`docs/15-infrastructure-deployment.md`](docs/15-infrastructure-deployment.md)
+for how the pieces fit together.
 
 ---
 
@@ -197,6 +232,7 @@ scout/
 │   ├── web/              TypeScript — Next.js dashboard
 │   └── mobile/           Capacitor shell — Android, FCM push
 ├── packages/
+│   ├── db/               sqlc-generated query layer (packages/db/queries → gen)
 │   ├── schema/           Shared canonical job schema (source of truth)
 │   ├── taxonomy/         Role, skill, location, company taxonomies
 │   └── prompts/          Versioned prompt files
