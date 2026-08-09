@@ -1,107 +1,20 @@
 # Scout
 
-**An autonomous internship and new-grad discovery platform, built for one person
-and running on ₹0.**
-
-Scout continuously watches the parts of the internet where software engineering
-internships and graduate roles are announced, normalizes what it finds into a
-single canonical job record, ranks each opportunity against one candidate
-profile, and pushes a notification within minutes of discovery.
-
-The design goal is a single sentence:
+Scout is an autonomous discovery platform for software engineering internships
+and new-grad roles. It continuously monitors the sources where these positions
+are announced, normalizes each posting into a canonical job record, ranks it
+against a candidate profile, and delivers a notification within minutes of
+discovery.
 
 > Never miss a relevant internship or new-grad software engineering role.
 
-Scout is not a job board. A job board waits for you to search it. Scout runs a
-discovery loop on a schedule, decides what matters, and interrupts you only when
-something is worth the interruption.
+Scout is not a job board — it does not wait to be searched. It runs a
+discovery loop on a schedule, applies a scoring model to what it finds, and
+surfaces only what clears the bar for a notification.
 
 ---
 
-## Status
-
-**P0 is built. P1's collector core is built and running end-to-end against a
-real Postgres. No adapter exists yet, so nothing has been discovered.**
-
-P0 — hosting, CI, backup, the pieces that make the repo deployable:
-
-- Database schema — five migrations, applied by `golang-migrate`
-- Local and production Compose stacks; hardened, distroless, ARM64 service images
-- `make dev` brings the whole local stack up, migrated, from a clean clone
-- Bearer-token auth behind the Tailscale network gate ([ADR-015](docs/adr/ADR-015-single-user-auth.md))
-- The dead-man's switch — the collector reports in every 5 minutes
-- Deploy over Tailscale SSH, with a health gate that rolls back on its own
-- Tiered backup and a restore drill, both `age`-encrypted ([ADR-017](docs/adr/ADR-017-tiered-backup-without-object-storage.md))
-
-What's left in P0 needs a host, an account, or physical media rather than code —
-provisioning the Oracle A1 instance, arming the billing alert, the first real
-deploy, and writing the `age` key and Android keystore to offline media.
-[`docs/19-roadmap.md`](docs/19-roadmap.md) lists exactly which exit criteria
-those are and why they cannot be closed from here.
-
-P1 — the ingestion pipeline itself, per [`docs/06-ingestion-pipeline.md`](docs/06-ingestion-pipeline.md):
-
-- **Politeness gate** — all six checks (legal posture, robots.txt, rate budget,
-  concurrency, crawl-delay, circuit breaker), in spec order, backed by a real
-  RFC 9309 robots.txt parser and a Redis-backed per-domain token bucket
-- **SSRF-safe fetcher** — conditional GET, the full tiered timeout table, a 10MB
-  body cap, redirect re-validation on every hop
-- **Change detection** — Layer 2 content hashing, stripping the render
-  timestamps and CSRF tokens that would otherwise make every poll look different
-- **Adaptive scheduler** — the yield/recency/season/failure interval formula,
-  jitter, `FOR UPDATE SKIP LOCKED` batch claiming, the circuit breaker backoff
-
-Verified against the real Docker stack and a real Postgres, not only unit
-tests — a seeded source gets claimed, polled, and rescheduled correctly.
-
-**Not built yet:** any adapter (Greenhouse, Lever, Ashby), which means Layer 3
-change detection and observation writing have nothing to call — normalization,
-dedup, scoring, notifications, or the dashboard. Nothing has actually been
-discovered by this codebase yet. The roadmap says what lands when, with
-estimates that are honest rather than optimistic.
-
----
-
-## Quickstart
-
-```bash
-git clone https://github.com/kelyonn/scout.git && cd scout
-make dev            # full local stack, migrated, from a clean clone
-make test           # everything, including the Postgres/Redis-backed suites
-```
-
-`make dev` never touches the live internet — `SCOUT_FIXTURES_ONLY=true` is the
-local default, and the collector's scheduler refuses to start at all under it
-rather than trust an empty source table to stay empty. See
-[`CONTRIBUTING.md`](CONTRIBUTING.md) for the full command list and
-[`docs/15-infrastructure-deployment.md`](docs/15-infrastructure-deployment.md)
-for how the pieces fit together.
-
----
-
-## Two constraints shape everything
-
-**1. It is for one person.** Not one *tenant* — one person. There is no
-multi-user path being kept warm, no Row-Level Security, no per-user score fanout,
-no scaling stages. `user_id` stays in the schema because it is already there and
-free; nothing else is spent on a second user who may never exist. If one ever
-does, the migration is one paragraph in
-[`docs/02-architecture.md`](docs/02-architecture.md) section 6 and about three
-weeks — which is the right time to pay for it.
-
-**2. It costs ₹0.** Not "cheap" — zero, with no recurring line item of any size.
-A ₹1,200/month tool is a decision that gets re-made every month and eventually
-gets switched off during exam week. A ₹0 tool has no month in which it is
-reconsidered.
-
-The second constraint changed more of the design than the first. It also made
-three of the four things it touched **simpler**, which is worth noticing rather
-than treating as luck — the paid budget had been quietly permitting complexity
-that nothing needed.
-
----
-
-## The shape of the system
+## How it works
 
 ```
    DISCOVERY            INGESTION           INTELLIGENCE          DELIVERY
@@ -114,109 +27,98 @@ that nothing needed.
  feeds / APIs         validate             score
 ```
 
-Five stages, each independently deployable, each with its own failure domain.
-A source outage degrades coverage for that source and nothing else.
+Four stages, each independently deployable with its own failure domain. A
+source going down degrades coverage for that source only — it does not affect
+the rest of the pipeline.
 
----
+- **Discovery** — a registry of sources (ATS boards, company career pages,
+  RSS/JSON feeds, email alerts) is polled on an adaptive schedule that speeds
+  up for high-yield sources and slows down for dormant ones.
+- **Ingestion** — every fetch passes through a compliance gate (robots.txt,
+  rate limits, legal posture, a circuit breaker) before it happens. Conditional
+  requests and layered change detection keep bandwidth and parse cost low.
+- **Intelligence** — normalization, classification, deduplication, embedding,
+  and scoring turn a raw posting into a ranked, canonical job record.
+- **Delivery** — ranked jobs reach the user through push notifications, a
+  dashboard, and a digest, gated by per-channel budgets and quiet hours.
 
-## Start here
+## Architecture
 
-| If you want to... | Read |
-| --- | --- |
-| Understand what we are building and why | [`docs/01-prd.md`](docs/01-prd.md) |
-| Understand how it is built | [`docs/02-architecture.md`](docs/02-architecture.md) |
-| Understand how it costs nothing | [`docs/18-cost-model.md`](docs/18-cost-model.md) |
-| See the full document map | [`docs/00-index.md`](docs/00-index.md) |
-| See what ships when | [`docs/19-roadmap.md`](docs/19-roadmap.md) |
-| See what I need you to decide | [`docs/22-open-questions.md`](docs/22-open-questions.md) |
-| Write code here | [`AGENTS.md`](AGENTS.md) / [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+Scout is a monorepo split by language along task boundaries:
 
----
-
-## Headline technical decisions
-
-Each links to a full Architecture Decision Record with the alternatives that were
-rejected and the conditions that would reverse it.
-
-| Decision | Choice | Why |
+| Service | Language | Responsibility |
 | --- | --- | --- |
-| [ADR-001](docs/adr/ADR-001-monorepo-and-language-split.md) | Monorepo, Go + Python + TypeScript | Each language does what it is best at |
-| [ADR-002](docs/adr/ADR-002-postgres-as-the-primary-store.md) | PostgreSQL for everything | One store, one backup, one mental model |
-| [ADR-003](docs/adr/ADR-003-job-queue-over-kafka.md) | **Postgres-backed queue, not Kafka** | Our peak is ~1.4 msg/s. Kafka is built for millions. |
-| [ADR-004](docs/adr/ADR-004-search-strategy.md) | **Postgres FTS + pgvector, not Elasticsearch** | A single ES node wants more RAM than the whole app |
-| [ADR-005](docs/adr/ADR-005-llm-cascade.md) | Tiered model cascade | 92% of decisions never reach an LLM |
-| [ADR-007](docs/adr/ADR-007-no-tos-violating-scraping.md) | **No LinkedIn/Indeed/Glassdoor scraping** | Legally hostile; email-alert ingestion covers it |
-| [ADR-008](docs/adr/ADR-008-three-stage-deduplication.md) | Three-stage dedup | Exact, structural, then semantic |
-| [ADR-012](docs/adr/ADR-012-native-app-shell.md) | **Native Android app (Capacitor)** | Real FCM notifications, one UI codebase, ₹0 |
-| [ADR-013](docs/adr/ADR-013-whatsapp-channel.md) | WhatsApp — *rejected* | Needs a dedicated number that can't be yours |
-| [**ADR-014**](docs/adr/ADR-014-zero-cost-hosting.md) | **Free-tier host, Tailscale-only, portable in ≤1h** | At ₹0 the risk is revocation, not cost — so the decision is portability |
-| [**ADR-015**](docs/adr/ADR-015-single-user-auth.md) | **Network gate + bearer token, not passkeys** | A week of WebAuthn defends an endpoint strangers cannot reach |
-| [**ADR-016**](docs/adr/ADR-016-free-tier-llm-cascade.md) | **Free tiers + local Ollama; budgets in requests** | Free tiers rate-limit, they don't bill — so *wait*, don't degrade |
-| [**ADR-017**](docs/adr/ADR-017-tiered-backup-without-object-storage.md) | **Back up by recoverability class** | 95% of the data can be re-fetched from the internet |
+| `apps/collector` | Go | Scheduling, fetching, politeness, change detection |
+| `apps/brain` | Python | Normalization, classification, embeddings, scoring |
+| `apps/notifier` | Go | Notification triggers, budgets, channel delivery |
+| `apps/api` | Go | HTTP API, authentication, serving |
+| `apps/web` | TypeScript (Next.js) | Dashboard |
+| `apps/mobile` | Capacitor | Android shell around the web app, push notifications |
 
-ADR-014 supersedes [006](docs/adr/ADR-006-deployment-topology.md); ADR-015
-supersedes [010](docs/adr/ADR-010-authentication.md). Both originals stay in
-place — a record showing only the current answer hides the reasoning.
+PostgreSQL (with `pgvector`) is the single data store for everything —
+relational data, full-text search, and vector similarity — backed by a
+Postgres-native job queue rather than a separate message broker. Redis is used
+only for ephemeral state (rate limits, caches); nothing durable lives there.
+Access is restricted to a private network (Tailscale) with no public ingress,
+and the system is designed for a single operator rather than multi-tenancy.
 
----
-
-## What ₹0 actually changed
-
-| | Was | Now |
-| --- | --- | --- |
-| Host | Hetzner CX32, €7.05/mo, 8 GB | Free-tier ARM64, **24 GB** |
-| Access | Public domain + Cloudflare + WAF | Tailscale only — **no public ingress at all** |
-| Auth | Passkeys + magic link (~1 week) | Bearer token behind the network gate (~50 lines) |
-| Backup | `pgbackrest` + WAL → R2, PITR | Tiered `pg_dump` → MacBook + Drive, `age`-encrypted |
-| LLM | 4-tier cascade, $20/mo cap | 3 tiers + local; **no frontier tier**, budgets in requests |
-| Email in | Cloudflare Routing → webhook | IMAP poll |
-| Telegram | Webhook + secret verification | Long-poll |
-| Digest out | Resend (needs a domain) | Telegram |
-| Monthly cost | ₹1,193 | **₹0** |
-
-**It is not all upside, and the docs say so.** No SLA, no support, no
-point-in-time recovery, no generated cover letters, capacity that may not exist
-at signup, and about three hours a quarter on migration and restore drills. The
-full accounting is [`docs/18-cost-model.md`](docs/18-cost-model.md) section 3 —
-the bills are paid in time, risk, and capability rather than rupees, and
-pretending otherwise is how a zero-cost design becomes an abandoned one.
+Each major design decision — language split, data store, queueing, search,
+auth, hosting, backups — is recorded as an Architecture Decision Record under
+[`docs/adr/`](docs/adr/), with the alternatives considered and the conditions
+that would revisit the decision.
 
 ---
 
-## Where I disagreed with the brief
+## Status
 
-The brief asked for Kafka, Elasticsearch, LinkedIn/Indeed/Glassdoor monitoring,
-and mobile push. I proposed something different for all four. Three departures
-were accepted; the fourth was overruled, and correctly so.
+**Foundation and core ingestion pipeline are built. No source adapter exists
+yet, so nothing has been discovered in production.**
 
-**Kafka and Elasticsearch are the wrong size.** Peak queue throughput is about
-1.4 messages/second at MVP and 10 at Year 1. Kafka is designed for millions and
-costs more to operate than every other component combined. Postgres handles this
-with room to spare, and the migration path to NATS JetStream is documented and
-cheap. Same story for Elasticsearch.
+**Infrastructure**
+- Database schema, applied via `golang-migrate`
+- Local and production Docker Compose stacks; hardened, distroless, ARM64
+  service images
+- Bearer-token authentication behind the network gate
+- An external dead-man's switch that alerts if the collector stops reporting
+- Deployment over SSH with an automatic health-gate rollback
+- Tiered, encrypted backups with a scripted restore drill
 
-**Scraping LinkedIn, Indeed, Glassdoor, and Handshake is not something I will
-build.** All four prohibit it, all four enforce it, and Handshake is tied to your
-university identity — losing that account would cost more than Scout could ever
-earn you. The legitimate route: subscribe to their job alert emails using a
-Scout-owned address, and Scout parses your own inbox. You are entitled to the
-mail sent to you. It is a first-class ingestion adapter, not a workaround.
+**Ingestion pipeline** (`apps/collector`), per
+[`docs/06-ingestion-pipeline.md`](docs/06-ingestion-pipeline.md):
+- A politeness gate enforcing legal posture, robots.txt (RFC 9309), per-domain
+  rate limiting, concurrency limits, crawl-delay, and a circuit breaker
+- An SSRF-safe fetcher with conditional GET, tiered timeouts, and redirect
+  re-validation on every hop
+- Content-hash change detection that strips volatile page elements (render
+  timestamps, CSRF tokens) so unrelated noise doesn't register as a change
+- An adaptive scheduler that varies poll frequency by source yield, recency,
+  and season, claiming work in short transactions so a large batch never holds
+  a lock across a live network fetch
 
-**On the native app, I was wrong and reversed it.** Two of the three original
-premises did not hold: app-store review latency does not apply to a personal app
-you sideload, and the "second codebase" cost assumed a React Native UI rather
-than a WebView shell. Scout ships a Capacitor shell around the same web app —
-real FCM notifications, one UI to maintain, Android only, ₹0.
+This has been verified end-to-end against a real Postgres and Redis instance,
+not only with unit tests.
 
-**WhatsApp was specified, then dropped.** The Cloud API needs a number registered
-to a Business Account, and that number **cannot also be an ordinary WhatsApp
-account** — so a personal number is ineligible. [ADR-013](docs/adr/ADR-013-whatsapp-channel.md)
-is kept as a `Rejected` record rather than deleted, because the constraint is not
-obvious until you go looking and this gets re-proposed.
+**Not yet built:** any source adapter (Greenhouse, Lever, Ashby, etc.), and
+everything downstream of one — structural change detection, normalization,
+deduplication, scoring, notifications, and the dashboard.
+[`docs/19-roadmap.md`](docs/19-roadmap.md) lists what ships in each milestone.
 
-One part stands regardless: `whatsapp-web.js` and Baileys are prohibited,
-enforced by a CI dependency check. They skip every constraint above, and Meta
-enforces its terms by banning the **phone number**.
+---
+
+## Getting started
+
+```bash
+git clone https://github.com/kelyonn/scout.git && cd scout
+make dev      # starts the full local stack, migrated, from a clean clone
+make test     # runs the full test suite, including database-backed tests
+```
+
+Local development never reaches the live internet — `SCOUT_FIXTURES_ONLY=true`
+is the default, and the collector's scheduler will not start without it being
+explicitly disabled. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full
+command reference and
+[`docs/15-infrastructure-deployment.md`](docs/15-infrastructure-deployment.md)
+for how the pieces fit together in production.
 
 ---
 
@@ -232,7 +134,7 @@ scout/
 │   ├── web/              TypeScript — Next.js dashboard
 │   └── mobile/           Capacitor shell — Android, FCM push
 ├── packages/
-│   ├── db/               sqlc-generated query layer (packages/db/queries → gen)
+│   ├── db/               sqlc-generated query layer
 │   ├── schema/           Shared canonical job schema (source of truth)
 │   ├── taxonomy/         Role, skill, location, company taxonomies
 │   └── prompts/          Versioned prompt files
@@ -240,54 +142,61 @@ scout/
 ├── infra/
 │   ├── compose/          Docker Compose stacks — local and production
 │   ├── docker/           Service images
-│   ├── caddy/            Ingress routing, behind `tailscale serve`
+│   ├── caddy/            Ingress routing
 │   ├── migrations/       Versioned SQL migrations
-│   ├── host/             Host cron for the backup jobs
+│   ├── host/             Host cron for backup jobs
 │   └── scripts/          Compliance gate, deploy, health gate, backup, restore
 ├── evals/                Golden datasets and scoring harnesses
 ├── .github/workflows/    CI
-└── docs/                 You are here
+└── docs/                 Specifications and architecture decision records
 ```
 
 ---
 
-## A note on this repository being public
+## Documentation
 
-It is public so that GitHub Actions minutes are unlimited, which is what makes CI
-a ₹0 line. That has a consequence with teeth: **the resume, application history,
-interview notes, and personal seed lists must never be committed.** All of it
-lives in Postgres rather than in files, `gitleaks` runs pre-commit and in CI, and
-[`docs/13-security-privacy.md`](docs/13-security-privacy.md) section 3 is the
-list.
+| Topic | Reference |
+| --- | --- |
+| Product goals and scope | [`docs/01-prd.md`](docs/01-prd.md) |
+| System architecture | [`docs/02-architecture.md`](docs/02-architecture.md) |
+| Data model | [`docs/03-data-model.md`](docs/03-data-model.md) |
+| Ingestion pipeline | [`docs/06-ingestion-pipeline.md`](docs/06-ingestion-pipeline.md) |
+| Legal and compliance posture | [`docs/14-legal-compliance.md`](docs/14-legal-compliance.md) |
+| Infrastructure and deployment | [`docs/15-infrastructure-deployment.md`](docs/15-infrastructure-deployment.md) |
+| Full document index | [`docs/00-index.md`](docs/00-index.md) |
+| Roadmap | [`docs/19-roadmap.md`](docs/19-roadmap.md) |
+| Contributing | [`AGENTS.md`](AGENTS.md) / [`CONTRIBUTING.md`](CONTRIBUTING.md) |
 
-The *generic* seed lists — company board tokens, GCC entities, the taxonomy — are
-public information and are probably the most useful part of this repository to
-anyone else. Only the personal layer stays out.
+This repository is specification-first: the documents under `docs/` are
+prescriptive, not descriptive. Where code and specification disagree, that is
+treated as a bug in one of them.
 
 ---
 
-## Success criteria
+## Testing and CI
 
-Scout works when all five of these are true:
+CI runs on every push and pull request: a dependency compliance scan, Go
+build/vet/test, `golangci-lint`, migration validation against a real
+Postgres instance, SQL linting, and `shellcheck` over the operational scripts.
+Tests that require Postgres or Redis run against real instances rather than
+mocks — the query correctness and Redis wire-format behavior they verify are
+exactly what a mock would hide.
 
-1. **Scout-first** — of the roles you applied to, 90% were surfaced by Scout
-   before you saw them anywhere else.
-2. **Latency** — p50 under 10 minutes from posting to notification for Tier 1.
-3. **Precision** — fewer than 1 in 10 notifications is one you would call noise.
-4. **Zero duplicates** — you are never notified twice for the same role.
-5. **Replacement** — you stop opening job boards.
+---
 
-Criterion 1 replaced a "≥95% discovery recall, audited weekly against 20
-hand-searched roles" target that could not be measured by that instrument — at
-n=20 one miss is exactly 95%. The reasoning is in
-[`docs/16-observability.md`](docs/16-observability.md) section 2.1, and it is
-worth reading as an example of a metric that looked rigorous and was not.
+## Security and compliance
 
-Criterion 5 is the one that actually decides it.
+Every outbound request the collector makes passes through a compliance gate
+before it happens — legal posture, `robots.txt`, and rate limits are checked
+first, with zero exceptions. Sources whose access is legally prohibited never
+generate a request at any point in the code path. SSRF protections resolve
+and validate the destination IP before connecting, on every request and every
+redirect hop. See [`docs/14-legal-compliance.md`](docs/14-legal-compliance.md)
+and [`docs/13-security-privacy.md`](docs/13-security-privacy.md) for the full
+policy.
 
 ---
 
 ## License
 
-Private. Not yet licensed for redistribution. (Public repository, all rights
-reserved — see the note above for why it is public.)
+Private. Not currently licensed for redistribution.
