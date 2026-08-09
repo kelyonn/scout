@@ -1,0 +1,225 @@
+# CI for Scout.
+#
+# This workflow exists because README.md, AGENTS.md rule 1a, and
+# infra/scripts/check-banned-deps.mjs all claim that CI enforces the compliance
+# gate. Until this file existed, that claim was false. A prohibition that only
+# lives in a document is a preference.
+#
+# Jobs only cover what actually exists today. Python, TypeScript, eval, and
+# Playwright jobs are added by the milestone that introduces them — a workflow
+# full of skipped jobs teaches you to ignore a red X.
+#
+# Keep this repo PUBLIC. GitHub Actions is unlimited on public repositories and
+# capped at 2,000 minutes/month on private ones, and Scout's budget is zero.
+# See docs/13-security-privacy.md section 3 for what must therefore stay out of
+# the repository (profile, resume, seed lists, secrets).
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compliance:
+    name: compliance gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      # AGENTS.md rule 1a. Fails the build if an unofficial WhatsApp library
+      # appears in any dependency manifest, at any depth.
+      - run: node infra/scripts/check-banned-deps.mjs
+
+  go:
+    name: go build, vet, test
+    runs-on: ubuntu-latest
+    # The robots.txt cache (apps/collector/internal/robots) is tested against a
+    # real Redis rather than a fake — the wire-format round trip and the TTL
+    # expiry are exactly the kind of thing a mock quietly gets right while the
+    # real client doesn't. Tests that can't reach SCOUT_TEST_REDIS_URL skip
+    # instead of failing, so this service exists to make sure they don't.
+    services:
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 10
+    env:
+      SCOUT_TEST_REDIS_URL: redis://localhost:6379/1
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      # AGENTS.md: "Queries via sqlc — never string-concatenated SQL." That
+      # rule only holds if the generated code actually reflects the current
+      # schema and queries — this catches a migration or a queries.sql edit
+      # that landed without `make db-generate` before it was committed.
+      - run: make db-verify
+      - run: go build ./...
+      - run: go vet ./...
+      # -count=1 disables the test result cache. A cached pass on a changed
+      # dependency is a false green.
+      - run: go test -count=1 ./...
+
+  golangci:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+          cache: true
+      - uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+
+  migrations:
+    name: migrations apply
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        # Must match infra/compose/local.yml. pgvector, pg_trgm, citext, and
+        # pgcrypto are all required by 000001.
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: scout
+          POSTGRES_PASSWORD: scout_ci
+          POSTGRES_DB: scout
+        options: >-
+          --health-cmd "pg_isready -U scout -d scout"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    steps:
+      - uses: actions/checkout@v4
+
+      # Applied with psql rather than golang-migrate because there is no Go
+      # migration runner yet and this checks the only thing that matters right
+      # now: that the SQL is valid and applies in order from empty.
+      #
+      # ON_ERROR_STOP=1 is load-bearing. Without it psql reports success after
+      # a failed statement, which is how a broken migration reaches production.
+      - name: apply migrations
+        env:
+          PGPASSWORD: scout_ci
+        run: |
+          set -euo pipefail
+          for f in infra/migrations/*.up.sql; do
+            echo "--- $f"
+            psql -v ON_ERROR_STOP=1 -h localhost -U scout -d scout -f "$f"
+          done
+
+      # Re-applying must fail. Migrations are forward-only and not idempotent by
+      # design; if this passes, a migration is silently doing nothing and the
+      # schema in CI is not the schema you think you have.
+      - name: verify migrations are not accidentally re-runnable
+        env:
+          PGPASSWORD: scout_ci
+        run: |
+          if psql -v ON_ERROR_STOP=1 -h localhost -U scout -d scout \
+               -f infra/migrations/000003_company.up.sql 2>/dev/null; then
+            echo "ERROR: 000003 re-applied cleanly; it should have failed"
+            exit 1
+          fi
+          echo "ok: re-apply correctly rejected"
+
+      # The DEFAULT partition must be empty at all times. See
+      # 000005_raw_observation.up.sql — a non-empty default means the partition
+      # maintenance job stopped running.
+      - name: assert default partition is empty
+        env:
+          PGPASSWORD: scout_ci
+        run: |
+          set -euo pipefail
+          n=$(psql -tAX -h localhost -U scout -d scout \
+                -c 'SELECT count(*) FROM raw_observation_default')
+          test "$n" = "0" || { echo "default partition has $n rows"; exit 1; }
+          echo "ok: default partition empty"
+
+  sql-lint:
+    name: sqlfluff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install "sqlfluff==3.*"
+      - run: sqlfluff lint infra/migrations --dialect postgres
+      # Application queries: lowercase keywords, checked against the separate
+      # .sqlfluff-queries config — see the note at the top of that file for why
+      # migrations and queries need different rules.
+      - run: sqlfluff lint packages/db/queries --config .sqlfluff-queries --dialect postgres
+
+  shell:
+    name: shellcheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The deploy health gate is a security control written in bash: it is the
+      # thing that fails a deploy when a container acquires a published host
+      # port, which is the check standing between Scout and a public surface.
+      # The backup script is the other one that matters — a silent failure there
+      # is the risk ADR-017 names as the real one in the design.
+      #
+      # Both were written on macOS and run on Linux, where the shells and the
+      # coreutils differ. A `grep -E '->'` that BSD grep rejects as a flag is the
+      # exact class of bug this catches, and it is the class that fails open.
+      - name: shellcheck
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -x infra/scripts/*.sh
+
+      # The compose files are the deployment topology. A YAML typo in them fails
+      # at deploy time on the only host that exists, which is the worst place to
+      # find out.
+      - name: validate compose files
+        env:
+          SCOUT_PG_PASSWORD: ci-validation-only
+        run: |
+          set -euo pipefail
+          cp .env.example .env
+          docker compose --env-file .env -f infra/compose/local.yml config >/dev/null
+          docker compose --env-file .env -f infra/compose/production.yml config >/dev/null
+          echo "ok: both compose files parse"
+
+      # The property from docs/15 section 2 that everything else rests on. The
+      # health gate checks it against the running stack at deploy time; this
+      # checks it against the file at review time, so a stray `ports:` entry is
+      # caught in the pull request that adds it rather than on the host.
+      - name: assert production publishes no host ports
+        env:
+          SCOUT_PG_PASSWORD: ci-validation-only
+        run: |
+          set -euo pipefail
+          published=$(docker compose --env-file .env \
+            -f infra/compose/production.yml config --format json \
+            | jq -r '[.services | to_entries[] | select(.value.ports != null) | .key] | join(", ")')
+          if [ -n "${published}" ]; then
+            echo "these production services publish host ports: ${published}" >&2
+            echo "Scout must have no public surface — see docs/15 section 2." >&2
+            exit 1
+          fi
+          echo "ok: no production service publishes a host port"

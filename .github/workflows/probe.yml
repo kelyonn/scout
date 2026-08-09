@@ -1,0 +1,115 @@
+# The backup for the backup.
+#
+# docs/16 section 2.2 specifies three layers of outside-in monitoring, and this
+# is the third. The first two both run through healthchecks.io: the collector
+# pings every 5 minutes, the backup job pings hourly, and healthchecks.io alerts
+# Telegram when the pings stop.
+#
+# healthchecks.io is itself a free tier. It can be withdrawn, rate-limited, or
+# simply go away, and if it does, the alerting for the entire system goes quiet
+# in exactly the way that is indistinguishable from everything being fine. That
+# is the same failure this whole section exists to prevent, one level up.
+#
+# So: a scheduled job on a different provider asks healthchecks.io how the checks
+# are doing, and alerts Telegram directly if the answer is bad or if there is no
+# answer at all. Two independent free services, neither running on the host being
+# watched, and neither able to fail silently on its own.
+#
+# Requires three repository secrets:
+#   HEALTHCHECKS_API_KEY   read-only project API key from healthchecks.io
+#   TELEGRAM_BOT_TOKEN
+#   TELEGRAM_CHAT_ID
+#
+# The repository is public, so these are secrets rather than variables, and this
+# workflow never runs on pull requests — a fork must not be able to trigger a job
+# with access to them.
+
+name: probe
+
+on:
+  schedule:
+    # 08:00 IST daily. Early enough that a failure found here is dealt with the
+    # same day, late enough that the 03:00 nightly has finished and reported.
+    - cron: '30 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    name: probe the dead-man's switches
+    runs-on: ubuntu-latest
+    steps:
+      - name: query healthchecks.io
+        id: query
+        env:
+          API_KEY: ${{ secrets.HEALTHCHECKS_API_KEY }}
+        run: |
+          set -uo pipefail
+
+          if [ -z "${API_KEY}" ]; then
+            echo "HEALTHCHECKS_API_KEY is not set; nothing to probe." >&2
+            echo "status=unconfigured" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # --max-time so a hung provider fails the probe rather than burning
+          # the job's timeout and reporting nothing.
+          http_code=$(curl --silent --show-error --max-time 30 \
+            --output checks.json --write-out '%{http_code}' \
+            --header "X-Api-Key: ${API_KEY}" \
+            https://healthchecks.io/api/v3/checks/ || echo "000")
+
+          if [ "${http_code}" != "200" ]; then
+            # This is the case the workflow exists for: the monitoring itself is
+            # unreachable, which no amount of self-hosted monitoring can report.
+            echo "status=unreachable" >> "$GITHUB_OUTPUT"
+            echo "detail=healthchecks.io returned HTTP ${http_code}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          down=$(jq -r '[.checks[] | select(.status == "down") | .name] | join(", ")' checks.json)
+          total=$(jq -r '.checks | length' checks.json)
+
+          if [ -n "${down}" ]; then
+            echo "status=down" >> "$GITHUB_OUTPUT"
+            echo "detail=${down}" >> "$GITHUB_OUTPUT"
+          elif [ "${total}" = "0" ]; then
+            # Zero checks means nothing is being monitored, which reads as
+            # healthy to anything that only looks for failures.
+            echo "status=empty" >> "$GITHUB_OUTPUT"
+            echo "detail=the healthchecks.io project has no checks configured" >> "$GITHUB_OUTPUT"
+          else
+            echo "status=ok" >> "$GITHUB_OUTPUT"
+            echo "detail=${total} checks up" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: alert on anything but ok
+        if: steps.query.outputs.status != 'ok' && steps.query.outputs.status != 'unconfigured'
+        env:
+          BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          STATUS: ${{ steps.query.outputs.status }}
+          DETAIL: ${{ steps.query.outputs.detail }}
+        run: |
+          set -uo pipefail
+
+          message="Scout external probe: ${STATUS}. ${DETAIL}"
+          echo "${message}"
+
+          if [ -z "${BOT_TOKEN}" ] || [ -z "${CHAT_ID}" ]; then
+            echo "Telegram is not configured; the alert above went nowhere." >&2
+            exit 1
+          fi
+
+          curl --silent --show-error --max-time 15 --output /dev/null \
+            --data-urlencode "chat_id=${CHAT_ID}" \
+            --data-urlencode "text=${message}" \
+            "https://api.telegram.org/bot${BOT_TOKEN}/sendMessage"
+
+      - name: fail the run so it is visible in the Actions tab
+        if: steps.query.outputs.status != 'ok' && steps.query.outputs.status != 'unconfigured'
+        run: |
+          echo "probe status: ${{ steps.query.outputs.status }}"
+          exit 1
