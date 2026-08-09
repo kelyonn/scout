@@ -1,0 +1,54 @@
+[sqlfluff]
+dialect = postgres
+templater = raw
+max_line_length = 100
+
+# LT01 (layout.spacing) is excluded HERE ONLY, and deliberately.
+#
+# Migrations column-align their type declarations, which makes a 60-column table
+# readable as a table instead of as prose. sqlfluff's `spacing_before = align` /
+# `align_within = create_table_statement` cannot express "align within each
+# CREATE TABLE independently" when a file declares more than one table, so it
+# reports every aligned column in the second table as an error.
+#
+# The choice is: reformat readable schema to satisfy a formatter that cannot
+# describe the intent, or scope out one rule. Scoping out the rule is correct.
+# .sqlfluff-queries (application queries, not column-aligned) keeps LT01 on.
+#
+# CP05 (capitalisation.types) is excluded for the same class of reason. The
+# convention in this schema is UPPERCASE for built-in types (UUID, TIMESTAMPTZ)
+# and lowercase for the user-defined enums declared in 000002 (source_kind,
+# role_family, legal_posture) — because those are identifiers we named, and they
+# are created lowercase. sqlfluff cannot tell a built-in type from a
+# CREATE TYPE one, so it demands a single policy for both. Uppercasing
+# `SOURCE_KIND` would satisfy the linter and misrepresent the schema.
+exclude_rules = RF04, ST06, AM04, RF02, LT01, CP05
+
+# AGENTS.md: uppercase keywords in migrations, lowercase in application queries.
+# This config covers infra/migrations. Application queries under
+# packages/db/queries are linted with .sqlfluff-queries — see the Makefile.
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.identifiers]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = upper
+
+[sqlfluff:rules:capitalisation.types]
+extended_capitalisation_policy = upper
+
+[sqlfluff:indentation]
+indented_joins = false
+indented_using_on = true
+tab_space_size = 4
+
+[sqlfluff:layout:type:comma]
+line_position = trailing
+
+[sqlfluff:rules:ambiguous.column_references]
+group_by_and_order_by_style = explicit
