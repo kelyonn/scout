@@ -42,10 +42,21 @@ func nextCircuitState(currentFailures int, success bool, now time.Time) (failure
 		return failures, nil
 	}
 
-	backoff := time.Duration(float64(circuitBaseBackoff) * math.Pow(2, float64(failures-circuitOpenThreshold)))
-	if backoff > circuitMaxBackoff {
-		backoff = circuitMaxBackoff
-	}
+	// Clamp in float64 space BEFORE converting to time.Duration (an int64
+	// count of nanoseconds). 2^(failures-5) grows without bound as failures
+	// grows, and converting an out-of-int64-range float64 to an integer type
+	// is implementation-defined per the Go spec once it overflows — arm64 and
+	// amd64 disagree about the result. At failures=100 this produced a huge
+	// positive duration on arm64 (still under the cap check, so it slipped
+	// through) and math.MinInt64 nanoseconds — a negative duration — on
+	// amd64, which is what CI's linux/amd64 runner caught and a local arm64
+	// Mac could not. Clamping the multiplier itself, before any conversion to
+	// Duration, keeps the value always in int64 range, which makes the
+	// conversion well-defined on every architecture instead of merely
+	// well-behaved on the ones tested so far.
+	backoffSeconds := math.Min(circuitBaseBackoff.Seconds()*math.Pow(2, float64(failures-circuitOpenThreshold)),
+		circuitMaxBackoff.Seconds())
+	backoff := time.Duration(backoffSeconds * float64(time.Second))
 
 	until := now.Add(backoff)
 	return failures, &until
