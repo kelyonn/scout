@@ -94,6 +94,29 @@ func TestNextCircuitStateBackoffDoublesAndCaps(t *testing.T) {
 			t.Errorf("backoff = %v, want exactly the %v cap", got, circuitMaxBackoff)
 		}
 	})
+
+	// Regression test: 2^(failures-5) grows without bound, and at
+	// failures=100 the pre-clamp float64 result is astronomically larger
+	// than int64 nanoseconds can hold. Converting an out-of-range float64 to
+	// an integer type is implementation-defined in Go — this produced a huge
+	// (still-positive, still passing the cap check) value on arm64 and
+	// math.MinInt64 nanoseconds (a NEGATIVE duration) on amd64, which is
+	// exactly the kind of divergence a single-architecture CI run can hide
+	// indefinitely. Every case here must clamp to exactly circuitMaxBackoff,
+	// on every architecture this test runs on.
+	t.Run("extreme failure counts never overflow into a negative backoff", func(t *testing.T) {
+		for _, failures := range []int{50, 100, 1000, 1_000_000} {
+			_, openUntil := nextCircuitState(failures, false, now)
+			if openUntil == nil {
+				t.Fatalf("failures=%d: openUntil = nil, want open", failures)
+			}
+			got := openUntil.Sub(now)
+			if got != circuitMaxBackoff {
+				t.Errorf("failures=%d: backoff = %v, want exactly the %v cap (negative means int64 overflow)",
+					failures, got, circuitMaxBackoff)
+			}
+		}
+	})
 }
 
 func TestNextCircuitStateNeverGoesNegative(t *testing.T) {
