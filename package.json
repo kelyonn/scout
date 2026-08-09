@@ -1,0 +1,16 @@
+{
+  "name": "scout",
+  "private": true,
+  "version": "0.0.0",
+  "description": "Autonomous internship and new-grad opportunity discovery",
+  "engines": {
+    "node": ">=22"
+  },
+  "packageManager": "pnpm@9.15.0",
+  "scripts": {
+    "compliance": "node infra/scripts/check-banned-deps.mjs"
+  },
+  "comment": "Workspace root. No TypeScript packages exist yet — apps/web is M3. This file exists so the banned-dependency compliance gate has a manifest to scan from day one.",
+  "dependencies": {},
+  "devDependencies": {}
+}

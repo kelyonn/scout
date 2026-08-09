@@ -1,0 +1,39 @@
+# Build output
+/bin/
+/dist/
+*.exe
+
+# Go
+*.test
+*.out
+vendor/
+
+# Node
+node_modules/
+.next/
+.turbo/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+
+# Secrets — never commit. Encrypted SOPS files (*.enc.yaml) are the exception.
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.jks
+*.keystore
+google-services.json
+
+# Local state
+/infra/compose/.data/
+*.log
+
+# macOS
+.DS_Store
