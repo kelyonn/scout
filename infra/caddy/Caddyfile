@@ -1,0 +1,69 @@
+# Caddy routes requests inside the Docker network. It does not terminate TLS and
+# it does not listen on a host port.
+#
+# The ingress chain is:
+#
+#   phone / laptop
+#     → tailnet (WireGuard)
+#       → tailscaled ON THE HOST, `tailscale serve` (terminates TLS with a real
+#         Let's Encrypt cert for scout.<tailnet>.ts.net, issued by `tailscale
+#         cert` — no ACME challenge, no domain, no public DNS)
+#         → this Caddy, at a fixed address on the Docker bridge network
+#           → api / web
+#
+# The host can route to a bridge-network container address directly, which is
+# what makes the middle hop work with no `ports:` entry anywhere in the stack.
+# That is not a detail — it is the property docs/15 section 2 describes as "the
+# absence of a public surface", and infra/scripts/health-gate.sh fails the deploy
+# if any container acquires a published port.
+#
+# Because nothing but tailscaled can reach this listener, TLS here would be
+# encrypting a hop that never leaves the host. See docs/15 section 2 and
+# infra/compose/production.yml.
+
+{
+	# No automatic HTTPS: `tailscale serve` owns the certificate, and Caddy
+	# trying to provision one would attempt an ACME challenge against a name
+	# that has no public DNS record.
+	auto_https off
+
+	admin off
+
+	log {
+		format json
+	}
+}
+
+:8080 {
+	# Health of the proxy itself. Distinct from the API's /health so that "Caddy
+	# is up" and "the API is up" are separable when something is wrong at 2am.
+	handle /_caddy/health {
+		respond "ok" 200
+	}
+
+	handle /api/* {
+		uri strip_prefix /api
+		reverse_proxy api:8080
+	}
+
+	# The API's own health check, reachable without the /api prefix so that the
+	# deploy health gate and the API's container healthcheck probe the same path.
+	handle /health {
+		reverse_proxy api:8080
+	}
+
+	handle /auth/* {
+		reverse_proxy api:8080
+	}
+
+	# The dashboard lands at P3. Until then, every other path is a 404 from Caddy
+	# rather than a confusing connection error — a placeholder that says which
+	# milestone is missing beats one that looks like an outage.
+	handle {
+		respond "scout: dashboard not built yet (P3)" 404
+	}
+
+	log {
+		format json
+	}
+}

@@ -1,0 +1,184 @@
+# Local development stack. See docs/15-infrastructure-deployment.md section 1.
+#
+# Local differs from production in two deliberate ways:
+#   1. Host ports are published, so a service can be run natively against the
+#      containerised database (`make dev-db`). Production publishes only 80/443.
+#   2. No live fetching. The collector will replay recorded fixtures rather than
+#      reaching the internet, so a debugging session cannot hammer a real
+#      company's careers page.
+#
+# Postgres, Redis, and the two Go services that do something. The notifier,
+# brain, and web join on the milestone that gives them work — see the note at the
+# top of production.yml for why a container that logs "not implemented" and
+# restarts is worse than an absent one.
+#
+# PORTS ARE NON-DEFAULT ON PURPOSE. Scout uses 5433/6380 rather than 5432/6379
+# so it can coexist with another project's stack on the same machine. A
+# collision here is nasty to diagnose because `psql` connects successfully to
+# the wrong database. Override with SCOUT_PG_PORT / SCOUT_REDIS_PORT.
+
+name: scout-local
+
+services:
+  postgres:
+    # pgvector is required by docs/03: job.embedding and resume.embedding are
+    # vector(384). The image is Postgres 16 with the extension prebuilt, which
+    # avoids compiling it in a Dockerfile.
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scout
+      POSTGRES_PASSWORD: scout_local_dev_only
+      POSTGRES_DB: scout
+      # Deterministic collation. Without this, index ordering can differ between
+      # a developer machine and CI, which produces test failures that look like
+      # logic bugs.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "127.0.0.1:${SCOUT_PG_PORT:-5433}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    command:
+      # Tuned for an 8GB developer machine, not for production. Production
+      # values are in the deployment spec.
+      - postgres
+      - -c
+      - shared_buffers=256MB
+      - -c
+      - work_mem=16MB
+      - -c
+      - maintenance_work_mem=128MB
+      - -c
+      - max_connections=100
+      # Log slow queries locally so an accidental sequential scan is visible
+      # while developing rather than in production.
+      - -c
+      - log_min_duration_statement=200ms
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scout -d scout"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    mem_limit: 1g
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${SCOUT_REDIS_PORT:-6380}:6379"
+    command:
+      # Redis holds nothing durable (AGENTS.md rule 8). Persistence is disabled
+      # locally on purpose: if losing Redis loses data, the data was in the wrong
+      # place, and a developer machine is the right place to find that out.
+      - redis-server
+      - --save
+      - ""
+      - --appendonly
+      - "no"
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    mem_limit: 320m
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/go-service.Dockerfile
+      args:
+        SERVICE: api
+    restart: unless-stopped
+    environment:
+      SCOUT_API_ADDR: ":8080"
+      SCOUT_ENV: local
+      # Local-only token. It is in the repository on purpose: it guards a
+      # database of fixtures on a laptop, and a placeholder that has to be
+      # invented per-developer is a placeholder that ends up as "test". The real
+      # one is generated at setup and lives in the SOPS-encrypted environment
+      # file — see ADR-015 and docs/13 section 3.
+      SCOUT_AUTH_TOKEN: ${SCOUT_AUTH_TOKEN:-local-development-token-not-a-secret-000}
+    ports:
+      - "127.0.0.1:${SCOUT_API_PORT:-8081}:8080"
+    healthcheck:
+      test: ["CMD", "/app/app", "healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    mem_limit: 256m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  collector:
+    build:
+      context: ../..
+      dockerfile: infra/docker/go-service.Dockerfile
+      args:
+        SERVICE: collector
+    restart: unless-stopped
+    environment:
+      SCOUT_ENV: local
+      # No live fetching, ever, from a developer machine. A debugging session
+      # must not be able to hammer a real company's careers page.
+      SCOUT_FIXTURES_ONLY: "true"
+      # No SCOUT_HEALTHCHECK_URL: the dead-man's switch is not wired up locally.
+      # A laptop that gets closed at night is not a host outage, and a nightly
+      # false alarm is how the one alert that always means something gets muted.
+      #
+      # redis:6379 and postgres:5432 are the container-network addresses (the
+      # service names on this Compose network), not the host-side ones from
+      # .env — a container reaching for localhost would be reaching for
+      # itself.
+      SCOUT_REDIS_URL: redis://redis:6379/0
+      SCOUT_DATABASE_URL: postgres://scout:scout_local_dev_only@postgres:5432/scout?sslmode=disable
+      # Required by the politeness gate at startup (SCOUT-LEGAL-003) even though
+      # SCOUT_FIXTURES_ONLY means it never actually sends a request locally — the
+      # gate refuses to construct itself without these, on purpose, so a
+      # misconfiguration is caught here rather than for the first time in
+      # production. Placeholder values, not secrets: the contact URL and
+      # operator email are meant to be public, published in every request's
+      # User-Agent by design.
+      SCOUT_COLLECTOR_CONTACT_URL: https://github.com/kelyon/scout
+      SCOUT_COLLECTOR_OPERATOR_EMAIL: scout-dev@localhost
+    healthcheck:
+      test: ["CMD", "/app/app", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    mem_limit: 256m
+    depends_on:
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  # Not started by `up`. `make migrate` runs it explicitly. Same image and same
+  # version as production, so a migration cannot pass locally and fail on the
+  # only database that matters because of a tool version difference.
+  migrate:
+    image: migrate/migrate:v4.18.1
+    profiles: [tools]
+    restart: "no"
+    volumes:
+      - ../migrations:/migrations:ro
+    entrypoint:
+      - migrate
+      - -path=/migrations
+      - -database=postgres://scout:scout_local_dev_only@postgres:5432/scout?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+    driver: local

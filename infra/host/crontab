@@ -1,0 +1,32 @@
+# Scout's host cron. Install with:
+#
+#   crontab infra/host/crontab
+#
+# Run as the user that owns /opt/scout and is in the docker group — not root.
+# Verify with `crontab -l` and check the first run actually produced a file in
+# ${SCOUT_BACKUP_DIR}; a cron job that silently never ran is the failure mode
+# ADR-017 names as the real risk in this design.
+#
+# Times are the host's local time. Set the host to Asia/Kolkata (`timedatectl
+# set-timezone Asia/Kolkata`) so 03:00 here means the 03:00 IST that docs/15
+# section 5 specifies, rather than 03:00 in whatever region the free tier had
+# capacity in.
+
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin
+
+# Hourly: the irreplaceable set. Applications, interview notes, saved state,
+# feedback labels, the profile. Kilobytes, and the only data in the system that
+# nothing in the world has a second copy of. RPO ≤1 hour.
+7 * * * * cd /opt/scout && ./infra/scripts/backup.sh irreplaceable >> /var/log/scout-backup.log 2>&1
+
+# Nightly at 03:00: everything. Bulk data is re-derivable by re-polling, so a
+# day of granularity is the right price for it. RPO ≤24 hours.
+0 3 * * * cd /opt/scout && ./infra/scripts/backup.sh full >> /var/log/scout-backup.log 2>&1
+
+# Weekly: drop snapshot rows past their 30-day expiry, so the disk does not fill.
+# Raw HTML is deliberately not backed up (ADR-017) — it exists for adapter
+# debugging and expires regardless.
+#
+# Commented out until raw_observation has data worth pruning; uncomment at P1.
+# 30 4 * * 0 cd /opt/scout && ./infra/scripts/prune-snapshots.sh >> /var/log/scout-backup.log 2>&1
