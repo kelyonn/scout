@@ -1,0 +1,21 @@
+{
+  "total": 2,
+  "jobPostings": [
+    {
+      "title": "Software Engineering Intern",
+      "externalPath": "/job/Bengaluru/Software-Engineering-Intern_R-12345",
+      "locationsText": "Bengaluru, India",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": ["R-12345"],
+      "timeType": "Full time"
+    },
+    {
+      "title": "Software Engineering Intern (duplicate)",
+      "externalPath": "/job/Bengaluru/Software-Engineering-Intern-Dup_R-12345",
+      "locationsText": "Bengaluru, India",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": ["R-12345"],
+      "timeType": "Full time"
+    }
+  ]
+}
