@@ -1,0 +1,41 @@
+# Minimal single-binary Loki config — local filesystem storage (ADR-014's
+# zero-cost constraint, no object store), 14-day retention per
+# docs/16-observability.md section 6's log retention table and ADR-011's
+# stack table.
+
+auth_enabled: false
+
+server:
+  http_listen_port: 3100
+
+common:
+  path_prefix: /loki
+  storage:
+    filesystem:
+      chunks_directory: /loki/chunks
+      rules_directory: /loki/rules
+  replication_factor: 1
+  ring:
+    kvstore:
+      store: inmemory
+
+schema_config:
+  configs:
+    - from: 2024-01-01
+      store: tsdb
+      object_store: filesystem
+      schema: v13
+      index:
+        prefix: index_
+        period: 24h
+
+limits_config:
+  retention_period: 336h # 14 days
+
+compactor:
+  working_directory: /loki/compactor
+  retention_enabled: true
+  # Required by Loki whenever retention is enabled, even with no object
+  # store configured (ADR-014: filesystem only) — it's where compaction
+  # tracks pending deletion requests, not a second storage backend.
+  delete_request_store: filesystem

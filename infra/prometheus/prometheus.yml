@@ -1,0 +1,36 @@
+# Scrape config for the metrics packages/metrics (Go) and
+# scout_brain/metrics.py (Python) actually emit — see those packages' own
+# comments for which subset of docs/16-observability.md section 4's
+# catalog that is.
+#
+# notifier is listed even though infra/compose/local.yml and
+# production.yml don't containerize it yet (it runs natively during
+# local development, per HANDOFF.md) — Prometheus just shows it "down"
+# until that changes, the same honest signal an actually-broken target
+# would produce, rather than a special case to remove and re-add later.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: scout-api
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["api:8080"]
+
+  - job_name: scout-collector
+    static_configs:
+      - targets: ["collector:9090"]
+
+  - job_name: scout-notifier
+    static_configs:
+      - targets: ["notifier:9090"]
+
+  - job_name: scout-brain
+    static_configs:
+      - targets: ["brain:9090"]
+
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9091"]
