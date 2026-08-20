@@ -1,0 +1,57 @@
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    # 9091, not Prometheus's usual default 9090 — infra/compose/
+    # observability.yml's prometheus service deliberately listens on
+    # 9091 because 9090 is every Scout service's own /metrics port on
+    # this same network. This datasource pointed at 9090 until this fix
+    # — meaning it had never actually worked, silently: every panel on
+    # every dashboard showed "No data" with a connection-refused error a
+    # click away, not a wrong number, so it read as "no traffic yet"
+    # rather than "broken," which is exactly how this went unnoticed.
+    url: http://prometheus:9091
+    isDefault: true
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # Click a log line's trace_id (docs/16 section 6's structured log
+      # shape) to jump straight to that trace — the "click-through
+      # correlation" ADR-011 names as this stack's whole reason to be one
+      # tool rather than three separate ones.
+      derivedFields:
+        - datasourceUid: tempo
+          matcherRegex: '"trace_id":"(\w+)"'
+          name: TraceID
+          url: "$${__value.raw}"
+
+  - name: Tempo
+    type: tempo
+    access: proxy
+    url: http://tempo:3200
+    uid: tempo
+
+  - name: Postgres
+    type: postgres
+    access: proxy
+    url: postgres:5432
+    database: $SCOUT_PG_DATABASE
+    user: $SCOUT_PG_USER
+    # $VAR is Grafana's own provisioning-file env expansion (distinct
+    # from Compose's ${VAR:-default} syntax used elsewhere in this repo)
+    # — read from the values infra/compose/observability.yml's grafana
+    # service sets. Used for read-only dashboard queries against the
+    # `source` table (docs/16 section 8, dashboard 2's "worst-performing
+    # sources" table) — nothing Prometheus tracks per-row, only
+    # aggregates.
+    secureJsonData:
+      password: $SCOUT_PG_PASSWORD
+    jsonData:
+      sslmode: disable
+      postgresVersion: 1600
+      timescaledb: false

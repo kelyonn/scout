@@ -1,0 +1,119 @@
+{
+  "title": "Scout Ingestion",
+  "uid": "scout-ingestion",
+  "schemaVersion": 39,
+  "version": 1,
+  "editable": true,
+  "timezone": "browser",
+  "time": { "from": "now-24h", "to": "now" },
+  "refresh": "30s",
+  "panels": [
+    {
+      "id": 1,
+      "title": "Fetch success rate, by source_kind",
+      "description": "success / (success + failure), excluding not_modified — a 304 isn't a failure to poll, it's the fast path working as designed.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (source_kind) (rate(scout_source_fetch_total{status=\"success\"}[1h])) / sum by (source_kind) (rate(scout_source_fetch_total{status!=\"not_modified\"}[1h]))",
+          "legendFormat": "{{source_kind}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 2,
+      "title": "Yield ratio, by source_kind",
+      "description": "docs/16 section 3.2 — new jobs / polls, the rolling EMA apps/collector/internal/interval already computes for scheduling. Low and falling is the earliest signal a source or an entire adapter has quietly broken.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        { "expr": "scout_source_yield_ratio", "legendFormat": "{{source_kind}}" }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 3,
+      "title": "304 ratio (conditional-GET hit rate), by source_kind",
+      "description": "not_modified / total. docs/06 section 5 targets 85% here — most polls should cost ~500 bytes, not a full response.",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "sum by (source_kind) (rate(scout_source_fetch_total{status=\"not_modified\"}[1h])) / sum by (source_kind) (rate(scout_source_fetch_total[1h]))",
+          "legendFormat": "{{source_kind}}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": { "unit": "percentunit", "min": 0, "max": 1 },
+        "overrides": []
+      }
+    },
+    {
+      "id": 4,
+      "title": "Fetch duration (p50 / p95), by source_kind",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "datasource": { "type": "prometheus", "uid": "Prometheus" },
+      "targets": [
+        {
+          "expr": "histogram_quantile(0.5, sum by (le, source_kind) (rate(scout_source_fetch_duration_seconds_bucket[15m])))",
+          "legendFormat": "{{source_kind}} p50"
+        },
+        {
+          "expr": "histogram_quantile(0.95, sum by (le, source_kind) (rate(scout_source_fetch_duration_seconds_bucket[15m])))",
+          "legendFormat": "{{source_kind}} p95"
+        }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "title": "Sources with an open circuit breaker",
+      "description": "circuit_open_until in the future — the source is being backed off after repeated failures, per docs/06's circuit-breaker predicate (also re-checked by the politeness gate before every fetch, independent of this).",
+      "type": "table",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "select c.canonical_name as company, s.kind as source_kind, s.consecutive_failures, s.circuit_open_until, s.last_polled_at, s.url from source s join company c on c.id = s.company_id where s.circuit_open_until > now() order by s.circuit_open_until desc limit 50",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": { "defaults": {}, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "title": "20 worst-performing sources, by yield",
+      "description": "docs/16 section 8's own spec for this dashboard: \"a table of the 20 worst-performing sources sorted by yield decline.\" Filtered to sources with at least 10 polls — a brand-new source's yield_ratio starts at 0 by construction (packages/db/queries/source.sql's UpdateSourceAfterPoll EMA), which isn't the same signal as an established source's yield actually dropping.",
+      "type": "table",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 24 },
+      "datasource": { "type": "postgres", "uid": "Postgres" },
+      "targets": [
+        {
+          "rawSql": "select c.canonical_name as company, s.kind as source_kind, s.yield_ratio, s.total_polls, s.total_jobs_found, s.total_new_jobs, s.consecutive_failures, s.status, s.last_polled_at from source s join company c on c.id = s.company_id where s.total_polls >= 10 order by s.yield_ratio asc limit 20",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": [
+          {
+            "matcher": { "id": "byName", "options": "yield_ratio" },
+            "properties": [{ "id": "unit", "value": "percentunit" }]
+          }
+        ]
+      }
+    }
+  ]
+}

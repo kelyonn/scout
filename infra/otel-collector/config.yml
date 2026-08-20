@@ -1,0 +1,29 @@
+# Receives OTLP from apps/api (packages/tracing) over HTTP and forwards
+# to Tempo. ADR-011's stated role for this component ("receives all
+# telemetry, processes, routes") is only exercised for traces today —
+# metrics go straight from each service's /metrics endpoint to
+# Prometheus's own pull-based scrape (infra/prometheus/prometheus.yml),
+# which needs no relay. See packages/tracing's own comment for what's
+# built vs. deferred on the tracing side.
+
+receivers:
+  otlp:
+    protocols:
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  batch: {}
+
+exporters:
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls:
+      insecure: true
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [otlp/tempo]
