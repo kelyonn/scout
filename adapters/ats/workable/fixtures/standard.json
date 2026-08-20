@@ -1,0 +1,54 @@
+{
+  "name": "Acme Robotics",
+  "description": "Acme Robotics builds autonomous warehouse robots.",
+  "jobs": [
+    {
+      "title": "Backend Engineering Intern",
+      "shortcode": "ABCD1234",
+      "code": "REQ-2026-001",
+      "employment_type": "Full-time",
+      "telecommute": false,
+      "department": "Engineering",
+      "url": "https://apply.workable.com/acme-robotics/j/ABCD1234/",
+      "shortlink": "https://apply.workable.com/j/ABCD1234/",
+      "application_url": "https://apply.workable.com/acme-robotics/j/ABCD1234/apply/",
+      "published_on": "2026-08-01",
+      "created_at": "2026-08-01T10:00:00.000Z",
+      "country": "India",
+      "city": "Bengaluru",
+      "state": "Karnataka"
+    },
+    {
+      "title": "Remote Site Reliability Engineer",
+      "shortcode": "EFGH5678",
+      "code": "REQ-2026-002",
+      "employment_type": "Full-time",
+      "telecommute": true,
+      "department": "Infrastructure",
+      "url": "https://apply.workable.com/acme-robotics/j/EFGH5678/",
+      "shortlink": "https://apply.workable.com/j/EFGH5678/",
+      "application_url": "https://apply.workable.com/acme-robotics/j/EFGH5678/apply/",
+      "published_on": "2026-07-15",
+      "created_at": "2026-07-15T09:00:00.000Z",
+      "country": "",
+      "city": "",
+      "state": ""
+    },
+    {
+      "title": "Robotics Firmware Intern",
+      "shortcode": "IJKL9012",
+      "code": "REQ-2026-003",
+      "employment_type": "Internship",
+      "telecommute": false,
+      "department": "",
+      "url": "https://apply.workable.com/acme-robotics/j/IJKL9012/",
+      "shortlink": "https://apply.workable.com/j/IJKL9012/",
+      "application_url": "https://apply.workable.com/acme-robotics/j/IJKL9012/apply/",
+      "published_on": "2026-08-10",
+      "created_at": "2026-08-10T14:30:00.000Z",
+      "country": "Germany",
+      "city": "Munich",
+      "state": ""
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "name": "Acme Robotics",
+  "jobs": [
+    {
+      "job_title": "Backend Engineering Intern",
+      "shortcode": "ABCD1234",
+      "employment_type": "Full-time",
+      "telecommute": false,
+      "department": "Engineering",
+      "url": "https://apply.workable.com/acme-robotics/j/ABCD1234/",
+      "application_url": "https://apply.workable.com/acme-robotics/j/ABCD1234/apply/",
+      "published_on": "2026-08-01",
+      "country": "India",
+      "city": "Bengaluru",
+      "state": "Karnataka"
+    }
+  ]
+}
