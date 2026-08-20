@@ -15,9 +15,9 @@ import (
 
 	db "github.com/kelyon/scout/packages/db/gen"
 
-	"github.com/kelyon/scout/apps/collector/internal/fetch"
 	"github.com/kelyon/scout/apps/collector/internal/politeness"
 	"github.com/kelyon/scout/apps/collector/internal/source"
+	"github.com/kelyon/scout/packages/fetch"
 )
 
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
@@ -92,11 +92,22 @@ func insertTestSource(t *testing.T, pool *pgxpool.Pool, o testSourceOpts) pgtype
 	// digest(..., 'sha256') is pgcrypto's function (infra/migrations/000001),
 	// not a bare sha256() — Postgres has no built-in hash function of that
 	// name.
+	// priority_tier 1 and an epoch next_poll_at are what make this row always
+	// win SelectDueSources's `order by priority_tier asc, next_poll_at asc` —
+	// the local dev database this test suite runs against (testPool, not an
+	// isolated schema) carries 1,400+ real seeded sources at tier 3 and
+	// tier 5 (see infra/seed/gcc_sources.sql), and since 2026-08-20's shadow-
+	// run change made SelectDueSources admit 'pending_review' rows too, a
+	// test fixture with an ordinary recent next_poll_at at the default tier
+	// (3) reliably loses that race and a WithBatchLimit(1)/(10) test claims
+	// real seed rows instead of its own fixture. No real source is seeded at
+	// tier 1, so this fixture is always first regardless of how much seed
+	// data exists.
 	var id pgtype.UUID
 	err := pool.QueryRow(context.Background(), `
 		insert into source (kind, status, legal_posture, url, url_hash, max_rps, max_concurrency,
-		                     base_interval_s, min_interval_s, max_interval_s, next_poll_at)
-		values ($1, 'active', $2, $3, digest($3, 'sha256'), $4, $5, $6, $7, $8, now() - interval '1 minute')
+		                     base_interval_s, min_interval_s, max_interval_s, next_poll_at, priority_tier)
+		values ($1, 'active', $2, $3, digest($3, 'sha256'), $4, $5, $6, $7, $8, '1970-01-01'::timestamptz, 1)
 		returning id
 	`, o.kind, o.legalPosture, url, o.maxRPS, o.maxConcurrency, o.baseInterval, o.minInterval, o.maxInterval).
 		Scan(&id)

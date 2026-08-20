@@ -2,7 +2,10 @@ package scheduler
 
 import (
 	"encoding/binary"
+	"encoding/json"
+	"fmt"
 	"math/rand/v2"
+	"net/http"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -10,6 +13,8 @@ import (
 	db "github.com/kelyon/scout/packages/db/gen"
 
 	"github.com/kelyon/scout/apps/collector/internal/source"
+	padapter "github.com/kelyon/scout/packages/adapter"
+	"github.com/kelyon/scout/packages/fetch"
 )
 
 // toSource narrows a SelectDueSources row to exactly the fields
@@ -35,6 +40,41 @@ func toSource(row db.SelectDueSourcesRow) source.Source {
 		MaxConcurrency:    int(row.MaxConcurrency),
 		RobotsCrawlDelayS: crawlDelay,
 		CircuitOpenUntil:  fromTimestamptz(row.CircuitOpenUntil),
+	}
+}
+
+// toAdapterSource narrows a SelectDueSources row to padapter.Source — the
+// single place row.AdapterConfig's jsonb gets decoded, used both by
+// fetchResult (for an OwnFetcher adapter's Fetch) and runIngestion (for
+// every adapter's Parse), so a source's per-adapter config is available
+// consistently wherever a padapter.Source gets built from a row rather
+// than only at one of the two call sites.
+func toAdapterSource(row db.SelectDueSourcesRow) (padapter.Source, error) {
+	config := map[string]any{}
+	if len(row.AdapterConfig) > 0 {
+		if err := json.Unmarshal(row.AdapterConfig, &config); err != nil {
+			return padapter.Source{}, fmt.Errorf("decode adapter_config: %w", err)
+		}
+	}
+	return padapter.Source{ID: row.ID.String(), URL: row.Url, AdapterConfig: config}, nil
+}
+
+// resultFromRaw is NewRawResponse's inverse — needed because fetchResult
+// hands an OwnFetcher adapter's RawResponse to the same pollOne logic
+// (classifyStatus, outcomeFromResult, change detection) that otherwise
+// consumes a *fetch.Result straight from s.fetcher. NotModified is derived
+// rather than carried, matching fetch.Result's own doc comment describing
+// it as "a convenience for StatusCode == http.StatusNotModified" — the
+// same derivation, just computed here instead of inside package fetch.
+func resultFromRaw(raw *padapter.RawResponse) *fetch.Result {
+	return &fetch.Result{
+		StatusCode:   raw.StatusCode,
+		Body:         raw.Body,
+		ETag:         raw.ETag,
+		LastModified: raw.LastModified,
+		RetryAfter:   raw.RetryAfter,
+		NotModified:  raw.StatusCode == http.StatusNotModified,
+		FetchedAt:    raw.FetchedAt,
 	}
 }
 
