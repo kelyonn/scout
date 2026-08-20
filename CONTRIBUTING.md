@@ -206,8 +206,29 @@ silently degrade classification across the whole corpus.
 
 ## Adding a source
 
-For a company already on a known ATS this is automated. For anything else, use
-the admin UI or:
+For a company already on a known ATS this is automated:
+
+```bash
+make discover-sources
+```
+
+This pulls fresh company-slug candidates from a small set of pinned,
+MIT-licensed lists (`apps/collector/cmd/discover/main.go`), skips anything
+already in the `company` table, verifies each new candidate live against
+its real ATS API, and only inserts the ones with at least one current
+software/entry-level posting (`apps/collector/internal/discovery`'s
+`Assess` — the same classify logic the ingestion pipeline itself trusts,
+not a separate heuristic). Everything lands `pending_review`, same as
+every other source — this never auto-activates anything. Safe to run
+repeatedly; each run only looks at candidates not seen before.
+
+Meant to run on a schedule, not just by hand — e.g. weekly from cron:
+
+```cron
+0 3 * * 0 cd /path/to/scout && make discover-sources >> logs/discover.log 2>&1
+```
+
+For anything not on a known ATS, use the admin UI or:
 
 ```sql
 INSERT INTO source (company_id, kind, url, url_hash, legal_posture,

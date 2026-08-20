@@ -5,9 +5,9 @@
 # gate. Until this file existed, that claim was false. A prohibition that only
 # lives in a document is a preference.
 #
-# Jobs only cover what actually exists today. Python, TypeScript, eval, and
-# Playwright jobs are added by the milestone that introduces them — a workflow
-# full of skipped jobs teaches you to ignore a red X.
+# Jobs only cover what actually exists today. Playwright is added by the
+# milestone that introduces it — a workflow full of skipped jobs teaches you
+# to ignore a red X.
 #
 # Keep this repo PUBLIC. GitHub Actions is unlimited on public repositories and
 # capped at 2,000 minutes/month on private ones, and Scout's budget is zero.
@@ -155,6 +155,89 @@ jobs:
                 -c 'SELECT count(*) FROM raw_observation_default')
           test "$n" = "0" || { echo "default partition has $n rows"; exit 1; }
           echo "ok: default partition empty"
+
+  python:
+    name: python lint and test
+    runs-on: ubuntu-latest
+    # apps/brain's and packages/riverpy's own tests already skip anything
+    # needing a real Postgres or Ollama (see e.g.
+    # apps/brain/tests/test_summarize.py's _conn_string()) rather than
+    # fail, so this job runs green even without either service — it
+    # exists to catch what doesn't need them: ruff, mypy --strict, import
+    # errors, and every unit test that doesn't touch I/O (including
+    # scout_brain.llm's cascade/rate-limiter tests, which are the bulk of
+    # what ADR-016's cascade needs covered).
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v3
+      - run: make lint-py
+      - run: cd apps/brain && uv run pytest
+      - run: cd packages/riverpy && uv run pytest
+
+  web:
+    name: web lint, typecheck, build
+    runs-on: ubuntu-latest
+    # No Go API or Postgres here — apps/web's own tests don't exist yet
+    # (P4/P5 scope), so this job covers what doesn't need a running
+    # backend: eslint, tsc --noEmit, and a real `next build` (catches
+    # server/client boundary violations tsc alone misses).
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run lint
+      - run: pnpm run typecheck
+      - run: pnpm run build
+
+  evals:
+    name: eval harness
+    runs-on: ubuntu-latest
+    # No Postgres here — every suite evals/ currently runs (classify_role,
+    # dedup, explanation) calls a real production prompt against the LLM
+    # directly, deliberately without a DB dependency, so this job only needs
+    # Python and Ollama. See evals/README.md for what is and isn't covered
+    # and for why this job is expected to show red on classify_role/dedup
+    # without hosted provider secrets configured (a real, measured quality
+    # gap at the local-only fallback tier, not a broken workflow).
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: astral-sh/setup-uv@v3
+
+      - name: install and start ollama
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:11434/ >/dev/null 2>&1 && break
+            sleep 1
+          done
+          ollama pull qwen2.5:3b-instruct
+
+      # ADR-016's hosted-provider tiers — optional. A fork's pull_request run
+      # never receives these (GitHub does not pass secrets to fork PRs), so
+      # the cascade falls back to local Ollama, same as any dev host with no
+      # signups. See infra/config/llm_providers.yaml.
+      - name: run eval harness
+        env:
+          SCOUT_BRAIN_GEMINI_API_KEY: ${{ secrets.SCOUT_BRAIN_GEMINI_API_KEY }}
+          SCOUT_BRAIN_GROQ_API_KEY: ${{ secrets.SCOUT_BRAIN_GROQ_API_KEY }}
+          SCOUT_BRAIN_OPENROUTER_API_KEY: ${{ secrets.SCOUT_BRAIN_OPENROUTER_API_KEY }}
+        run: make evals
 
   sql-lint:
     name: sqlfluff

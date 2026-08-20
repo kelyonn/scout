@@ -16,6 +16,11 @@ ENV_FILE ?= .env
 
 COMPOSE_LOCAL := docker compose --env-file $(ENV_FILE) -f infra/compose/local.yml
 COMPOSE_PROD  := docker compose --env-file $(ENV_FILE) -f infra/compose/production.yml
+# infra/compose/observability.yml's own comment explains why it's always
+# merged with local.yml here rather than offered as a separate prod
+# target too — SCOUT_COMPOSE_NETWORK in the environment file is what
+# actually decides which real network it joins either way.
+COMPOSE_OBSERVABILITY := $(COMPOSE_LOCAL) -f infra/compose/observability.yml
 
 # The tailnet name of the production host. Overridable so the fallback
 # configuration (the MacBook as production) does not need a code change.
@@ -36,6 +41,7 @@ $(ENV_FILE):
 dev: $(ENV_FILE) ## Start the full local stack, migrated and ready
 	$(COMPOSE_LOCAL) up -d --build --wait
 	@$(MAKE) --no-print-directory migrate
+	@$(MAKE) --no-print-directory seed
 	@echo
 	@echo "  api      http://127.0.0.1:$${SCOUT_API_PORT:-8081}/health"
 	@echo "  postgres postgres://scout@127.0.0.1:$${SCOUT_PG_PORT:-5433}/scout"
@@ -44,6 +50,18 @@ dev: $(ENV_FILE) ## Start the full local stack, migrated and ready
 .PHONY: dev-db
 dev-db: $(ENV_FILE) ## Start only Postgres and Redis, for running one service natively
 	$(COMPOSE_LOCAL) up -d --wait postgres redis
+
+.PHONY: observability-up
+observability-up: $(ENV_FILE) ## Start Prometheus/Loki/Tempo/Grafana alongside `make dev` (docs/16, ADR-011)
+	$(COMPOSE_OBSERVABILITY) up -d
+	@echo
+	@echo "  Grafana has no published port (production.yml's own \"nothing"
+	@echo "  publishes a host port\" rule) — see infra/compose/observability.yml's"
+	@echo "  own comment for how to reach it locally."
+
+.PHONY: observability-down
+observability-down: $(ENV_FILE) ## Stop the observability stack, keeping its data volumes
+	$(COMPOSE_OBSERVABILITY) down
 	@$(MAKE) --no-print-directory migrate
 
 .PHONY: down
@@ -73,6 +91,30 @@ migrate: $(ENV_FILE) ## Apply pending migrations to the local database
 migrate-status: $(ENV_FILE) ## Show the current local schema version
 	$(COMPOSE_LOCAL) --profile tools run --rm migrate version
 
+.PHONY: seed
+seed: $(ENV_FILE) ## Bootstrap the single app_user and the active weight_version
+	@set -a; . $(ENV_FILE); set +a; ENV_FILE=$(ENV_FILE) ./infra/scripts/seed.sh
+
+.PHONY: seed-sources
+seed-sources: $(ENV_FILE) ## Seed the starter list of real, verified source boards (Greenhouse/Lever/Ashby)
+	@ENV_FILE=$(ENV_FILE) ./infra/scripts/seed-sources.sh
+
+.PHONY: seed-gcc-sources
+seed-gcc-sources: $(ENV_FILE) ## Seed real, verified GCC/enterprise source boards (Workday/SmartRecruiters)
+	@ENV_FILE=$(ENV_FILE) ./infra/scripts/seed-gcc-sources.sh
+
+.PHONY: discover-sources
+discover-sources: $(ENV_FILE) ## Find new ATS-hosted companies worth adding (pending_review) — safe to run repeatedly, e.g. from cron
+	@set -a; . $(ENV_FILE); set +a; go run ./apps/collector/cmd/discover
+
+.PHONY: seed-resume
+seed-resume: $(ENV_FILE) ## Seed resume.raw_text for resume_match embeddings
+	@set -a; . $(ENV_FILE); set +a; ENV_FILE=$(ENV_FILE) ./infra/scripts/seed-resume.sh
+
+.PHONY: seed-companies
+seed-companies: $(ENV_FILE) ## Populate company.company_type/hq_country from packages/taxonomy/companies.yaml
+	@ENV_FILE=$(ENV_FILE) ./infra/scripts/seed-companies.sh
+
 # sqlc runs from the pinned sqlc/sqlc image for the same reason migrate does:
 # reproducible codegen without every contributor's local sqlc binary having to
 # match. AGENTS.md: "Queries via sqlc — never string-concatenated SQL." Output
@@ -101,12 +143,14 @@ db-verify: ## Fail if packages/db/gen is stale relative to the schema and querie
 .PHONY: test
 test: ## Run all tests, all languages
 	go test -count=1 ./...
-	@# Python (P2) and TypeScript (P3) test invocations join this target with the
-	@# milestone that introduces them. Adding empty ones now would make a green
+	cd apps/brain && uv run pytest
+	cd packages/riverpy && uv run pytest
+	@# TypeScript (P3) test invocations join this target with the milestone
+	@# that introduces them. Adding an empty one now would make a green
 	@# `make test` mean less than it does today.
 
 .PHONY: lint
-lint: lint-go lint-sql ## Run every linter
+lint: lint-go lint-sql lint-py lint-web ## Run every linter
 
 .PHONY: lint-go
 lint-go: ## Run golangci-lint
@@ -127,6 +171,18 @@ lint-sql: ## Run sqlfluff over migrations and application queries
 		echo "no application queries yet; skipping .sqlfluff-queries"; \
 	fi
 
+.PHONY: lint-py
+lint-py: ## Run ruff and mypy --strict over apps/brain, evals, and packages/riverpy
+	cd apps/brain && uv run ruff check . ../../evals
+	cd apps/brain && uv run mypy
+	cd packages/riverpy && uv run ruff check .
+	cd packages/riverpy && uv run mypy
+
+.PHONY: lint-web
+lint-web: ## Run eslint and tsc --noEmit over apps/web
+	cd apps/web && pnpm run lint
+	cd apps/web && pnpm run typecheck
+
 .PHONY: fmt
 fmt: ## Format Go code
 	gofmt -w apps packages
@@ -142,16 +198,12 @@ compliance: ## Run the banned-dependency gate (AGENTS.md rule 1a)
 # "not yet" and exits 0 is worse, because a script calling it believes it worked.
 
 .PHONY: evals
-evals: ## Run the quality eval harness
-	@echo "no eval harness yet — it lands with the dedup and scoring work at P2."
-	@echo "see docs/17-testing-qa.md and evals/README.md."
-	@exit 1
+evals: ## Run the quality eval harness (SUITE=name for one suite; all suites otherwise)
+	cd apps/brain && PYTHONPATH="$(CURDIR)" uv run python -m evals.run $(SUITE)
 
 .PHONY: evals-report
 evals-report: ## Per-suite eval diff against the last passing run
-	@echo "no eval harness yet — see docs/runbooks/quality-regression.md, which"
-	@echo "references this target, and docs/17-testing-qa.md. Lands at P2."
-	@exit 1
+	cd apps/brain && PYTHONPATH="$(CURDIR)" uv run python -m evals.report
 
 .PHONY: fixtures
 fixtures: ## Re-record adapter fixtures (requires network and approval)
