@@ -1,0 +1,177 @@
+# Company taxonomy — docs/07-normalization-taxonomy.md's company_type
+# registry, docs/09-ranking-scoring.md section 3.3's own note that
+# `company_type` "appears in no [company_quality] term... never a ranking
+# input, in either direction" (adapter selection, scheduling, competition
+# estimation, coverage auditing only).
+#
+# Scoped to the ~74 companies actually in infra/seed/sources.sql (P1's 73
+# plus Thoughtworks, live-verified for this pass), not a fabricated
+# 400-entry registry — see the plan's own scope decision on this. EPAM,
+# Globant, Nagarro, and Publicis Sapient (also named in the roadmap) were
+# checked live against all three adapters and none resolved — they are not
+# on Greenhouse, Lever, or Ashby under any guessed slug, so they aren't
+# addressable by this pass's adapters and are left out rather than guessed.
+#
+# `well_known` is this file's own field, not part of docs/07's
+# company_type schema — used only by competition_estimate's
+# brand-recognition proxy (docs/09 section 3.9: "-25 company is widely
+# known... uses brand recognition, not size"), since P2 has no live
+# GitHub-stars/press-mentions data source to compute that signal from.
+# Deliberately excluded from feeding company_quality, matching docs/09's
+# own "company_type appears in no term" rule for that score.
+#
+# hq_country is ISO 3166-1 alpha-2. Every company sourced through this
+# project's three ATS adapters happens to be a venture-backed product
+# company except Thoughtworks — an accurate reflection of what
+# Greenhouse/Lever/Ashby actually skew toward, not a labeling shortcut.
+
+affirm:        {type: product, hq_country: US, well_known: true}
+airbyte:       {type: product, hq_country: US, well_known: false}
+airtable:      {type: product, hq_country: US, well_known: true}
+amplitude:     {type: product, hq_country: US, well_known: true}
+asana:         {type: product, hq_country: US, well_known: true}
+attio:         {type: product, hq_country: US, well_known: false}
+block:         {type: product, hq_country: US, well_known: true}
+brex:          {type: product, hq_country: US, well_known: true}
+calendly:      {type: product, hq_country: US, well_known: true}
+carta:         {type: product, hq_country: US, well_known: true}
+checkr:        {type: product, hq_country: US, well_known: false}
+clickhouse:    {type: product, hq_country: US, well_known: false}
+cloudflare:    {type: product, hq_country: US, well_known: true}
+coinbase:      {type: product, hq_country: US, well_known: true}
+column:        {type: product, hq_country: US, well_known: false}
+coursera:      {type: product, hq_country: US, well_known: true}
+cred:          {type: product, hq_country: IN, well_known: true}
+cursor:        {type: product, hq_country: US, well_known: true}
+databricks:    {type: product, hq_country: US, well_known: true}
+datadog:       {type: product, hq_country: US, well_known: true}
+discord:       {type: product, hq_country: US, well_known: true}
+doximity:      {type: product, hq_country: US, well_known: false}
+dropbox:       {type: product, hq_country: US, well_known: true}
+druva:         {type: product, hq_country: US, well_known: false}
+duolingo:      {type: product, hq_country: US, well_known: true}
+elastic:       {type: product, hq_country: US, well_known: true}
+figma:         {type: product, hq_country: US, well_known: true}
+fireworks:     {type: product, hq_country: US, well_known: false}
+fivetran:      {type: product, hq_country: US, well_known: false}
+flexport:      {type: product, hq_country: US, well_known: false}
+gitlab:        {type: product, hq_country: US, well_known: true}
+glance:        {type: product, hq_country: IN, well_known: false}
+grafanalabs:   {type: product, hq_country: US, well_known: true}
+gusto:         {type: product, hq_country: US, well_known: true}
+hex:           {type: product, hq_country: US, well_known: false}
+highradius:    {type: product, hq_country: US, well_known: false}
+imprint:       {type: product, hq_country: US, well_known: false}
+instacart:     {type: product, hq_country: US, well_known: true}
+instawork:     {type: product, hq_country: US, well_known: false}
+linear:        {type: product, hq_country: US, well_known: true}
+lyft:          {type: product, hq_country: US, well_known: true}
+meesho:        {type: product, hq_country: IN, well_known: true}
+mercury:       {type: product, hq_country: US, well_known: true}
+minio:         {type: product, hq_country: US, well_known: false}
+mixpanel:      {type: product, hq_country: US, well_known: true}
+modal:         {type: product, hq_country: US, well_known: false}
+mongodb:       {type: product, hq_country: US, well_known: true}
+notion:        {type: product, hq_country: US, well_known: true}
+openai:        {type: product, hq_country: US, well_known: true}
+paytm:         {type: product, hq_country: IN, well_known: true}
+pinterest:     {type: product, hq_country: US, well_known: true}
+posthog:       {type: product, hq_country: US, well_known: false}
+postman:       {type: product, hq_country: US, well_known: true}
+ramp:          {type: product, hq_country: US, well_known: true}
+reddit:        {type: product, hq_country: US, well_known: true}
+render:        {type: product, hq_country: US, well_known: false}
+replit:        {type: product, hq_country: US, well_known: true}
+resend:        {type: product, hq_country: US, well_known: false}
+robinhood:     {type: product, hq_country: US, well_known: true}
+sardine:       {type: product, hq_country: US, well_known: false}
+slice:         {type: product, hq_country: IN, well_known: true}
+stripe:        {type: product, hq_country: US, well_known: true}
+stytch:        {type: product, hq_country: US, well_known: false}
+substack:      {type: product, hq_country: US, well_known: true}
+supabase:      {type: product, hq_country: US, well_known: true}
+temporal:      {type: product, hq_country: US, well_known: false}
+twilio:        {type: product, hq_country: US, well_known: true}
+udemy:         {type: product, hq_country: US, well_known: true}
+warp:          {type: product, hq_country: US, well_known: false}
+watershed:     {type: product, hq_country: US, well_known: false}
+webflow:       {type: product, hq_country: US, well_known: true}
+zenoti:        {type: product, hq_country: US, well_known: false}
+zocdoc:        {type: product, hq_country: US, well_known: true}
+thoughtworks:  {type: services_engineering, hq_country: US, well_known: true}
+
+# P2 Phase L (post-plan expansion): 72 companies added in the same batch
+# as infra/seed/sources.sql's own Phase L block -- see that file's header
+# comment for the live-verification methodology.
+6sense:        {type: product, hq_country: US, well_known: false}
+adyen:         {type: product, hq_country: NL, well_known: true}
+airbnb:        {type: product, hq_country: US, well_known: true}
+airwallex:     {type: product, hq_country: SG, well_known: true}
+alloy:         {type: product, hq_country: US, well_known: false}
+anthropic:     {type: product, hq_country: US, well_known: true}
+anyscale:      {type: product, hq_country: US, well_known: false}
+apolloio:      {type: product, hq_country: US, well_known: false}
+bandwidth:     {type: product, hq_country: US, well_known: false}
+baseten:       {type: product, hq_country: US, well_known: false}
+braze:         {type: product, hq_country: US, well_known: true}
+buildkite:     {type: product, hq_country: AU, well_known: false}
+cerebras:      {type: product, hq_country: US, well_known: false}
+chime:         {type: product, hq_country: US, well_known: true}
+circleci:      {type: product, hq_country: US, well_known: true}
+clickup:       {type: product, hq_country: US, well_known: true}
+cockroachlabs: {type: product, hq_country: US, well_known: true}
+cognism:       {type: product, hq_country: GB, well_known: false}
+contentful:    {type: product, hq_country: US, well_known: true}
+customerio:    {type: product, hq_country: US, well_known: false}
+demandbase:    {type: product, hq_country: US, well_known: false}
+descript:      {type: product, hq_country: US, well_known: false}
+dremio:        {type: product, hq_country: US, well_known: false}
+faire:         {type: product, hq_country: US, well_known: false}
+forter:        {type: product, hq_country: US, well_known: false}
+groww:         {type: product, hq_country: IN, well_known: true}
+harvey:        {type: product, hq_country: US, well_known: false}
+highnote:      {type: product, hq_country: US, well_known: false}
+hightouch:     {type: product, hq_country: US, well_known: false}
+iterable:      {type: product, hq_country: US, well_known: false}
+justworks:     {type: product, hq_country: US, well_known: false}
+karat:         {type: product, hq_country: US, well_known: false}
+launchdarkly:  {type: product, hq_country: US, well_known: true}
+level-ai:      {type: product, hq_country: US, well_known: false}
+lithic:        {type: product, hq_country: US, well_known: false}
+livekit:       {type: product, hq_country: US, well_known: false}
+marqeta:       {type: product, hq_country: US, well_known: true}
+melio:         {type: product, hq_country: US, well_known: false}
+mercor:        {type: product, hq_country: US, well_known: false}
+midjourney:    {type: product, hq_country: US, well_known: true}
+monzo:         {type: product, hq_country: GB, well_known: true}
+motherduck:    {type: product, hq_country: US, well_known: false}
+n26:           {type: product, hq_country: DE, well_known: true}
+neo4j:         {type: product, hq_country: US, well_known: false}
+netlify:       {type: product, hq_country: US, well_known: true}
+opusclip:      {type: product, hq_country: US, well_known: false}
+pandadoc:      {type: product, hq_country: US, well_known: false}
+parloa:        {type: product, hq_country: DE, well_known: false}
+pendo:         {type: product, hq_country: US, well_known: false}
+persona:       {type: product, hq_country: US, well_known: false}
+phonepe:       {type: product, hq_country: IN, well_known: true}
+planetscale:   {type: product, hq_country: US, well_known: false}
+prisma:        {type: product, hq_country: DE, well_known: false}
+railway:       {type: product, hq_country: US, well_known: false}
+riskified:     {type: product, hq_country: IL, well_known: false}
+runpod:        {type: product, hq_country: US, well_known: false}
+salesloft:     {type: product, hq_country: US, well_known: false}
+scaleai:       {type: product, hq_country: US, well_known: true}
+semgrep:       {type: product, hq_country: US, well_known: false}
+sentry:        {type: product, hq_country: US, well_known: true}
+sofi:          {type: product, hq_country: US, well_known: true}
+stackblitz:    {type: product, hq_country: US, well_known: false}
+storyblok:     {type: product, hq_country: AT, well_known: false}
+sumologic:     {type: product, hq_country: US, well_known: false}
+synthesia:     {type: product, hq_country: GB, well_known: false}
+togetherai:    {type: product, hq_country: US, well_known: false}
+vanta:         {type: product, hq_country: US, well_known: false}
+vercel:        {type: product, hq_country: US, well_known: true}
+vonage:        {type: product, hq_country: US, well_known: true}
+whereby:       {type: product, hq_country: NO, well_known: false}
+zapier:        {type: product, hq_country: US, well_known: true}
+zoominfo:      {type: product, hq_country: US, well_known: true}

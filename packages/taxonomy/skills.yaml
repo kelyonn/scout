@@ -1,0 +1,367 @@
+# Curated skill ontology. docs/07-normalization-taxonomy.md section 8 calls
+# for ~1,200 entries with alias and `implies` edges. This is the P1
+# scope-down: languages, frameworks, and tools common in SWE internship
+# postings, enough for skill_match (docs/09 section 3.1) to mean something.
+# `implies` is out of scope for P1 — coverage(s) uses only direct
+# user_level(s) matches, not the implied-skill credit the formula allows for.
+# Extend this file directly; the loader
+# (apps/collector/internal/skills/skills.go) does not change.
+#
+# Matching is alias word-boundary, case-insensitive, over title +
+# requirements + description text (apps/collector/internal/skills). Section
+# weighting from docs/07 section 8 ("Requirements counts double") is not
+# implemented — every match is treated as w(s) = 1.0 ("required"), a
+# documented P1 simplification.
+
+- id: go
+  display: Go
+  aliases: [go, golang, "go lang"]
+  category: language
+- id: python
+  display: Python
+  aliases: [python, python3]
+  category: language
+- id: java
+  display: Java
+  aliases: [java]
+  category: language
+- id: javascript
+  display: JavaScript
+  aliases: [javascript, js, "es6", ecmascript]
+  category: language
+- id: typescript
+  display: TypeScript
+  aliases: [typescript, ts]
+  category: language
+- id: cpp
+  display: C++
+  aliases: ["c++", cpp]
+  category: language
+- id: c
+  display: C
+  aliases: ["c programming"]
+  category: language
+- id: csharp
+  display: C#
+  aliases: ["c#", csharp, "dot net", ".net"]
+  category: language
+- id: rust
+  display: Rust
+  aliases: [rust]
+  category: language
+- id: kotlin
+  display: Kotlin
+  aliases: [kotlin]
+  category: language
+- id: swift
+  display: Swift
+  aliases: [swift]
+  category: language
+- id: ruby
+  display: Ruby
+  aliases: [ruby]
+  category: language
+- id: php
+  display: PHP
+  aliases: [php]
+  category: language
+- id: scala
+  display: Scala
+  aliases: [scala]
+  category: language
+- id: sql
+  display: SQL
+  aliases: [sql]
+  category: language
+
+- id: react
+  display: React
+  aliases: [react, reactjs, "react.js"]
+  category: framework
+- id: nodejs
+  display: Node.js
+  aliases: ["node.js", nodejs, node]
+  category: framework
+- id: django
+  display: Django
+  aliases: [django]
+  category: framework
+- id: flask
+  display: Flask
+  aliases: [flask]
+  category: framework
+- id: fastapi
+  display: FastAPI
+  aliases: [fastapi]
+  category: framework
+- id: spring
+  display: Spring
+  aliases: [spring, "spring boot"]
+  category: framework
+- id: angular
+  display: Angular
+  aliases: [angular, angularjs]
+  category: framework
+- id: vue
+  display: Vue
+  aliases: [vue, vuejs, "vue.js"]
+  category: framework
+- id: express
+  display: Express
+  aliases: [express, expressjs, "express.js"]
+  category: framework
+- id: rails
+  display: Ruby on Rails
+  aliases: [rails, "ruby on rails"]
+  category: framework
+- id: nextjs
+  display: Next.js
+  aliases: ["next.js", nextjs]
+  category: framework
+
+- id: aws
+  display: AWS
+  aliases: [aws, "amazon web services"]
+  category: infrastructure
+- id: gcp
+  display: GCP
+  aliases: [gcp, "google cloud", "google cloud platform"]
+  category: infrastructure
+- id: azure
+  display: Azure
+  aliases: [azure]
+  category: infrastructure
+- id: docker
+  display: Docker
+  aliases: [docker, containers, containerization]
+  category: infrastructure
+- id: kubernetes
+  display: Kubernetes
+  aliases: [kubernetes, k8s, kube]
+  category: infrastructure
+- id: terraform
+  display: Terraform
+  aliases: [terraform]
+  category: infrastructure
+- id: linux
+  display: Linux
+  aliases: [linux, unix]
+  category: infrastructure
+- id: ci_cd
+  display: CI/CD
+  aliases: ["ci/cd", "continuous integration", "continuous deployment"]
+  category: infrastructure
+- id: git
+  display: Git
+  aliases: [git, github, gitlab, "version control"]
+  category: infrastructure
+
+- id: postgresql
+  display: PostgreSQL
+  aliases: [postgresql, postgres]
+  category: data
+- id: mysql
+  display: MySQL
+  aliases: [mysql]
+  category: data
+- id: mongodb
+  display: MongoDB
+  aliases: [mongodb, mongo]
+  category: data
+- id: redis
+  display: Redis
+  aliases: [redis]
+  category: data
+- id: kafka
+  display: Kafka
+  aliases: [kafka]
+  category: data
+- id: spark
+  display: Spark
+  aliases: [spark, "apache spark"]
+  category: data
+- id: hadoop
+  display: Hadoop
+  aliases: [hadoop]
+  category: data
+
+- id: tensorflow
+  display: TensorFlow
+  aliases: [tensorflow]
+  category: ml
+- id: pytorch
+  display: PyTorch
+  aliases: [pytorch]
+  category: ml
+- id: scikit_learn
+  display: scikit-learn
+  aliases: ["scikit-learn", sklearn]
+  category: ml
+- id: pandas
+  display: Pandas
+  aliases: [pandas]
+  category: ml
+- id: numpy
+  display: NumPy
+  aliases: [numpy]
+  category: ml
+- id: machine_learning
+  display: Machine Learning
+  aliases: ["machine learning", "ml models"]
+  category: ml
+
+- id: android
+  display: Android
+  aliases: [android]
+  category: mobile
+- id: ios
+  display: iOS
+  aliases: [ios]
+  category: mobile
+- id: react_native
+  display: React Native
+  aliases: ["react native"]
+  category: mobile
+- id: flutter
+  display: Flutter
+  aliases: [flutter]
+  category: mobile
+
+- id: data_structures
+  display: Data Structures
+  aliases: ["data structures"]
+  category: fundamentals
+- id: algorithms
+  display: Algorithms
+  aliases: [algorithms, algorithm]
+  category: fundamentals
+- id: system_design
+  display: System Design
+  aliases: ["system design", "distributed systems"]
+  category: fundamentals
+- id: rest_api
+  display: REST APIs
+  aliases: ["rest api", "restful", "rest apis"]
+  category: fundamentals
+- id: graphql
+  display: GraphQL
+  aliases: [graphql]
+  category: fundamentals
+- id: grpc
+  display: gRPC
+  aliases: [grpc]
+  category: fundamentals
+- id: microservices
+  display: Microservices
+  aliases: [microservices, microservice]
+  category: fundamentals
+- id: oop
+  display: Object-Oriented Programming
+  aliases: ["object-oriented", "object oriented programming", oop]
+  category: fundamentals
+- id: testing
+  display: Testing
+  aliases: ["unit testing", "test-driven", "tdd", "unit tests"]
+  category: fundamentals
+- id: websockets
+  display: WebSockets
+  aliases: [websocket, websockets, "web socket"]
+  category: fundamentals
+
+- id: consensus_algorithms
+  display: Consensus Algorithms
+  aliases: [raft, paxos, "consensus algorithm", "consensus algorithms", "leader election"]
+  category: systems
+- id: linux_namespaces
+  display: Linux Namespaces
+  aliases: ["linux namespaces", "pid namespace", "mount namespace", "network namespace"]
+  category: systems
+- id: cgroups
+  display: cgroups
+  aliases: [cgroups, "cgroup v2", "cgroups v2"]
+  category: systems
+- id: bpf_seccomp
+  display: BPF/Seccomp
+  aliases: [bpf, ebpf, seccomp, "berkeley packet filter"]
+  category: systems
+- id: container_runtimes
+  display: Container Runtimes
+  aliases: ["container runtime", "container runtimes", "oci runtime", runc, pivot_root, "pivot root"]
+  category: systems
+
+- id: merkle_trees
+  display: Merkle Trees
+  aliases: ["merkle tree", "merkle trees", "merkle root"]
+  category: security
+- id: cryptography
+  display: Cryptography
+  aliases: [cryptography, cryptographic, ecc, "elliptic curve", secp256k1, "digital signature", "digital signatures"]
+  category: security
+- id: blockchain
+  display: Blockchain
+  aliases: [blockchain, hyperledger, besu, "distributed ledger", web3]
+  category: security
+- id: zero_trust
+  display: Zero-Trust Architecture
+  aliases: ["zero trust", "zero-trust"]
+  category: security
+
+- id: timescaledb
+  display: TimescaleDB
+  aliases: [timescaledb, timescale]
+  category: data
+- id: mqtt
+  display: MQTT
+  aliases: [mqtt]
+  category: data
+
+- id: prometheus
+  display: Prometheus
+  aliases: [prometheus]
+  category: infrastructure
+- id: grafana
+  display: Grafana
+  aliases: [grafana]
+  category: infrastructure
+- id: argocd
+  display: ArgoCD
+  aliases: [argocd, "argo cd", gitops]
+  category: infrastructure
+- id: chaos_engineering
+  display: Chaos Engineering
+  aliases: ["chaos engineering", "chaos mesh", "fault injection"]
+  category: infrastructure
+- id: supabase
+  display: Supabase
+  aliases: [supabase]
+  category: infrastructure
+
+- id: computer_vision
+  display: Computer Vision
+  aliases: ["computer vision", yolo, opencv, "object detection"]
+  category: ml
+- id: nlp
+  display: NLP
+  aliases: ["nlp", "natural language processing", bert]
+  category: ml
+- id: graph_neural_networks
+  display: Graph Neural Networks
+  aliases: ["graph neural network", "graph neural networks", "gnn", "gnns", "knowledge graph", "knowledge graphs"]
+  category: ml
+- id: llm_inference
+  display: LLM Inference Internals
+  aliases: ["llm inference", "kv cache", "attention mechanism", quantization, "grammar-constrained decoding", "transformer architecture"]
+  category: ml
+- id: genetic_algorithms
+  display: Genetic Algorithms
+  aliases: ["genetic algorithm", "genetic algorithms", neuroevolution]
+  category: ml
+
+- id: webgl
+  display: WebGL
+  aliases: [webgl, "three.js", threejs]
+  category: framework
+- id: tailwind
+  display: Tailwind CSS
+  aliases: ["tailwind css", tailwindcss, tailwind]
+  category: framework

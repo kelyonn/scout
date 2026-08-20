@@ -1,0 +1,204 @@
+# Curated location gazetteer. docs/07-normalization-taxonomy.md section 6
+# calls for GeoNames (cities > 15k population) plus a curated India
+# supplement, ~50MB. This is the P1 scope-down: enough cities to correctly
+# tier every posting the seeded Greenhouse boards actually produce, not the
+# full catalog. Extend this file directly as new cities show up in real
+# postings — the loader (packages/taxonomy/locations.go) does not change.
+#
+# tier is NOT stored here: tier 1 is "Bengaluru, physically" and tier 2 is
+# "anywhere else in India" per docs/07 section 6's table, so tiering is a
+# function of (country, is_bengaluru), computed in
+# apps/collector/internal/normalize/location.go. Tier 3 (remote) and tier 4's
+# ±0.05 visa modifier are not properties of a place at all.
+#
+# canonical: the display form. aliases: what sources actually write,
+# lowercased for matching. region: state/province. country: ISO 3166-1
+# alpha-2.
+
+- canonical: Bengaluru
+  aliases: [bengaluru, bangalore, blr, bengaluru urban]
+  region: Karnataka
+  country: IN
+  is_bengaluru: true
+
+# Bengaluru localities. A posting that says "Whitefield" or "Electronic
+# City" without ever saying "Bengaluru" is still a Tier 1 opportunity —
+# docs/07 section 6 names these explicitly.
+- canonical: Bengaluru
+  aliases:
+    - whitefield
+    - electronic city
+    - koramangala
+    - indiranagar
+    - hsr layout
+    - marathahalli
+    - bellandur
+    - jp nagar
+    - yelahanka
+    - sarjapur
+    - hebbal
+    - btm layout
+    - jayanagar
+    - rajajinagar
+    - malleswaram
+  region: Karnataka
+  country: IN
+  is_bengaluru: true
+
+# Other Indian cities — Tier 2. Not exhaustive; extend as needed.
+- canonical: Mumbai
+  aliases: [mumbai, bombay]
+  region: Maharashtra
+  country: IN
+- canonical: Pune
+  aliases: [pune]
+  region: Maharashtra
+  country: IN
+- canonical: Delhi
+  aliases: [delhi, new delhi]
+  region: Delhi
+  country: IN
+- canonical: Gurugram
+  aliases: [gurugram, gurgaon]
+  region: Haryana
+  country: IN
+- canonical: Noida
+  aliases: [noida]
+  region: Uttar Pradesh
+  country: IN
+- canonical: Delhi NCR
+  aliases: [ncr, delhi ncr, national capital region]
+  region: Delhi
+  country: IN
+- canonical: Hyderabad
+  aliases: [hyderabad]
+  region: Telangana
+  country: IN
+- canonical: Chennai
+  aliases: [chennai, madras]
+  region: Tamil Nadu
+  country: IN
+- canonical: Kolkata
+  aliases: [kolkata, calcutta]
+  region: West Bengal
+  country: IN
+- canonical: Ahmedabad
+  aliases: [ahmedabad]
+  region: Gujarat
+  country: IN
+- canonical: Jaipur
+  aliases: [jaipur]
+  region: Rajasthan
+  country: IN
+- canonical: Kochi
+  aliases: [kochi, cochin]
+  region: Kerala
+  country: IN
+- canonical: Thiruvananthapuram
+  aliases: [thiruvananthapuram, trivandrum]
+  region: Kerala
+  country: IN
+- canonical: Coimbatore
+  aliases: [coimbatore]
+  region: Tamil Nadu
+  country: IN
+- canonical: Chandigarh
+  aliases: [chandigarh]
+  region: Chandigarh
+  country: IN
+- canonical: Indore
+  aliases: [indore]
+  region: Madhya Pradesh
+  country: IN
+- canonical: Nagpur
+  aliases: [nagpur]
+  region: Maharashtra
+  country: IN
+- canonical: Bhopal
+  aliases: [bhopal]
+  region: Madhya Pradesh
+  country: IN
+- canonical: Visakhapatnam
+  aliases: [visakhapatnam, vizag]
+  region: Andhra Pradesh
+  country: IN
+- canonical: Mysuru
+  aliases: [mysuru, mysore]
+  region: Karnataka
+  country: IN
+- canonical: Mangaluru
+  aliases: [mangaluru, mangalore]
+  region: Karnataka
+  country: IN
+- canonical: Vadodara
+  aliases: [vadodara, baroda]
+  region: Gujarat
+  country: IN
+- canonical: Lucknow
+  aliases: [lucknow]
+  region: Uttar Pradesh
+  country: IN
+
+# International tech hubs — always Tier 4 regardless of which city. Kept for
+# location_city/location_country population and readable explanations, not
+# for tiering (that only needs the country != IN check).
+- canonical: San Francisco
+  aliases: [san francisco, sf, bay area, san francisco bay area]
+  region: California
+  country: US
+- canonical: New York
+  aliases: [new york, new york city, nyc]
+  region: New York
+  country: US
+- canonical: Seattle
+  aliases: [seattle]
+  region: Washington
+  country: US
+- canonical: Austin
+  aliases: [austin]
+  region: Texas
+  country: US
+- canonical: Boston
+  aliases: [boston]
+  region: Massachusetts
+  country: US
+- canonical: Toronto
+  aliases: [toronto]
+  region: Ontario
+  country: CA
+- canonical: Vancouver
+  aliases: [vancouver]
+  region: British Columbia
+  country: CA
+- canonical: London
+  aliases: [london]
+  region: England
+  country: GB
+- canonical: Berlin
+  aliases: [berlin]
+  region: Berlin
+  country: DE
+- canonical: Amsterdam
+  aliases: [amsterdam]
+  region: North Holland
+  country: NL
+- canonical: Dublin
+  aliases: [dublin]
+  region: Leinster
+  country: IE
+- canonical: Singapore
+  aliases: [singapore]
+  region: Singapore
+  country: SG
+- canonical: Sydney
+  aliases: [sydney]
+  region: New South Wales
+  country: AU
+- canonical: Melbourne
+  aliases: [melbourne]
+  region: Victoria
+  country: AU
+- canonical: Tokyo
+  aliases: [tokyo]
+  region: Tokyo
+  country: JP
