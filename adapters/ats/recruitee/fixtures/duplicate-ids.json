@@ -1,0 +1,32 @@
+{
+  "offers": [
+    {
+      "id": 12345,
+      "title": "Backend Engineering Intern",
+      "status": "published",
+      "department": "Engineering",
+      "remote": false,
+      "employment_type_code": "internship",
+      "careers_url": "https://acmehq.recruitee.com/o/backend-engineering-intern",
+      "careers_apply_url": "https://acmehq.recruitee.com/o/backend-engineering-intern/c/new",
+      "description": "<p>Join our backend team.</p>",
+      "published_at": "2026-08-01T10:00:00.000Z",
+      "city": "Bengaluru",
+      "country": "India"
+    },
+    {
+      "id": 12345,
+      "title": "Backend Engineering Intern (duplicate)",
+      "status": "published",
+      "department": "Engineering",
+      "remote": false,
+      "employment_type_code": "internship",
+      "careers_url": "https://acmehq.recruitee.com/o/backend-engineering-intern",
+      "careers_apply_url": "https://acmehq.recruitee.com/o/backend-engineering-intern/c/new",
+      "description": "<p>Join our backend team.</p>",
+      "published_at": "2026-08-01T10:00:00.000Z",
+      "city": "Bengaluru",
+      "country": "India"
+    }
+  ]
+}

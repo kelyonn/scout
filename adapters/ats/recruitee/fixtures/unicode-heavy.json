@@ -1,0 +1,19 @@
+{
+  "offers": [
+    {
+      "id": 99999,
+      "title": "Ingénieur Logiciel Stagiaire — 软件工程实习生",
+      "status": "published",
+      "department": "Ingénierie",
+      "remote": true,
+      "employment_type_code": "internship",
+      "careers_url": "https://acmehq.recruitee.com/o/stagiaire",
+      "careers_apply_url": "https://acmehq.recruitee.com/o/stagiaire/c/new",
+      "description": "<p>Développez des logiciels robustes. 请加入我们的团队。</p>",
+      "requirements": "",
+      "published_at": "2026-08-01T10:00:00.000Z",
+      "city": "Zürich",
+      "country": "Schweiz"
+    }
+  ]
+}
