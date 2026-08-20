@@ -1,0 +1,15 @@
+{
+  "totalFound": 1,
+  "content": [
+    {
+      "id": "post-001",
+      "job-name": "Backend Engineering Intern",
+      "refNumber": "REQ-001",
+      "releasedDate": "2026-08-01T00:00:00.000Z",
+      "location": { "city": "Bengaluru", "region": "Karnataka", "country": "in", "remote": false },
+      "department": { "label": "Engineering" },
+      "typeOfEmployment": { "label": "Internship" },
+      "postingUrl": "https://jobs.smartrecruiters.com/AcmeHQ/post-001-backend-engineering-intern"
+    }
+  ]
+}
