@@ -1,0 +1,24 @@
+[
+  {
+    "id": "dup-1",
+    "text": "Backend Engineer",
+    "categories": {
+      "commitment": "Full Time Employee",
+      "location": "Bangalore, Karnataka"
+    },
+    "createdAt": 1757916149833,
+    "hostedUrl": "https://jobs.lever.co/acme/dup-1",
+    "applyUrl": "https://jobs.lever.co/acme/dup-1/apply"
+  },
+  {
+    "id": "dup-1",
+    "text": "Backend Engineer (duplicate)",
+    "categories": {
+      "commitment": "Full Time Employee",
+      "location": "Bangalore, Karnataka"
+    },
+    "createdAt": 1757916149833,
+    "hostedUrl": "https://jobs.lever.co/acme/dup-1",
+    "applyUrl": "https://jobs.lever.co/acme/dup-1/apply"
+  }
+]
