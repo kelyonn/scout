@@ -1,0 +1,14 @@
+{
+  "jobs": [
+    {
+      "id": "abc123",
+      "title_renamed": "Backend Engineer",
+      "employmentType": "FullTime",
+      "location": "New York, NY",
+      "publishedAt": "2026-04-07T17:12:35.753+00:00",
+      "jobUrl": "https://jobs.ashbyhq.com/acme/abc123",
+      "applyUrl": "https://jobs.ashbyhq.com/acme/abc123/application"
+    }
+  ],
+  "apiVersion": "1"
+}

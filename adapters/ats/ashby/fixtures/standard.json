@@ -1,0 +1,60 @@
+{
+  "jobs": [
+    {
+      "id": "34413f8d-26bf-4bbc-8ade-eb309a0e2245",
+      "title": "Security Engineer, Cloud",
+      "department": "Engineering",
+      "team": "Backend",
+      "employmentType": "FullTime",
+      "location": "New York, NY (HQ)",
+      "shouldDisplayCompensationOnJobPostings": true,
+      "publishedAt": "2026-04-07T17:12:35.753+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Hybrid",
+      "jobUrl": "https://jobs.ashbyhq.com/ramp/34413f8d-26bf-4bbc-8ade-eb309a0e2245",
+      "applyUrl": "https://jobs.ashbyhq.com/ramp/34413f8d-26bf-4bbc-8ade-eb309a0e2245/application",
+      "descriptionHtml": "<p>Design and build cloud security infrastructure.</p>",
+      "descriptionPlain": "Design and build cloud security infrastructure.",
+      "compensation": {
+        "compensationTierSummary": "$211.4K – $290.6K • Offers Equity",
+        "scrapeableCompensationSalarySummary": "$211.4K - $290.6K"
+      }
+    },
+    {
+      "id": "f564dcf9-9390-4a3f-896f-8047a5086040",
+      "title": "Mobile Engineer, Android",
+      "department": "Engineering",
+      "team": "Mobile",
+      "employmentType": "FullTime",
+      "location": "New York, NY (HQ)",
+      "publishedAt": "2025-07-31T21:58:34.674+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Hybrid",
+      "jobUrl": "https://jobs.ashbyhq.com/ramp/f564dcf9-9390-4a3f-896f-8047a5086040",
+      "applyUrl": "https://jobs.ashbyhq.com/ramp/f564dcf9-9390-4a3f-896f-8047a5086040/application",
+      "descriptionHtml": "<p>Build and maintain the Ramp Android app.</p>",
+      "descriptionPlain": "Build and maintain the Ramp Android app.",
+      "compensation": null
+    },
+    {
+      "id": "7a1b2c3d-4e5f-6789-0abc-def123456789",
+      "title": "Software Engineering Intern, Summer 2027",
+      "department": "Engineering",
+      "team": "Platform",
+      "employmentType": "Intern",
+      "location": "Remote (US)",
+      "publishedAt": "2026-08-01T09:00:00.000+00:00",
+      "isListed": true,
+      "isRemote": true,
+      "workplaceType": "Remote",
+      "jobUrl": "https://jobs.ashbyhq.com/ramp/7a1b2c3d-4e5f-6789-0abc-def123456789",
+      "applyUrl": "https://jobs.ashbyhq.com/ramp/7a1b2c3d-4e5f-6789-0abc-def123456789/application",
+      "descriptionHtml": "<p>Join the platform team for a summer internship.</p>",
+      "descriptionPlain": "Join the platform team for a summer internship.",
+      "compensation": null
+    }
+  ],
+  "apiVersion": "1"
+}
