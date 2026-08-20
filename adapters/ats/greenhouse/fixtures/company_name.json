@@ -1,0 +1,22 @@
+{
+    "jobs": [
+        {
+            "id": 7848742,
+            "title": "Data Engineer",
+            "updated_at": "2026-08-11T17:16:12-04:00",
+            "absolute_url": "https://job-boards.greenhouse.io/204951305985924/jobs/7848742",
+            "content": "<p>Real job on a board whose token is a bare numeric id.</p>",
+            "location": {
+                "name": "Remote, USA"
+            },
+            "departments": [
+                {
+                    "id": 1,
+                    "name": "Engineering"
+                }
+            ],
+            "requisition_id": "R0000576",
+            "company_name": "Stitch Fix Annex"
+        }
+    ]
+}

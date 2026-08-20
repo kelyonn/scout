@@ -1,0 +1,24 @@
+{
+  "jobs": [
+    {
+      "id": 6700000,
+      "title": "Backend Engineer Intern",
+      "updated_at": "2026-08-06T10:00:00-05:00",
+      "absolute_url": "https://boards.greenhouse.io/dupe-co/jobs/6700000",
+      "content": "<p>First copy.</p>",
+      "location": { "name": "Bengaluru" },
+      "departments": [{ "id": 1, "name": "Engineering" }],
+      "requisition_id": "REQ-7001"
+    },
+    {
+      "id": 6700000,
+      "title": "Backend Engineer Intern",
+      "updated_at": "2026-08-06T10:00:00-05:00",
+      "absolute_url": "https://boards.greenhouse.io/dupe-co/jobs/6700000",
+      "content": "<p>Duplicate of the same job id, e.g. a pagination bug.</p>",
+      "location": { "name": "Bengaluru" },
+      "departments": [{ "id": 1, "name": "Engineering" }],
+      "requisition_id": "REQ-7001"
+    }
+  ]
+}

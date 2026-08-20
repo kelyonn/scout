@@ -1,0 +1,34 @@
+{
+  "jobs": [
+    {
+      "id": 6123456,
+      "title": "Software Engineering Intern, Summer 2027",
+      "updated_at": "2026-08-01T10:15:00-05:00",
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/6123456",
+      "content": "<p>Join our backend team building distributed systems.</p>",
+      "location": { "name": "Bengaluru, India" },
+      "departments": [{ "id": 1, "name": "Engineering" }],
+      "requisition_id": "REQ-1001"
+    },
+    {
+      "id": 6123457,
+      "title": "Frontend Engineer Intern",
+      "updated_at": "2026-07-28T09:00:00-05:00",
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/6123457",
+      "content": "<p>Build our React-based dashboard.</p>",
+      "location": { "name": "Remote - India" },
+      "departments": [{ "id": 1, "name": "Engineering" }],
+      "requisition_id": "REQ-1002"
+    },
+    {
+      "id": 6123458,
+      "title": "Data Engineer Intern",
+      "updated_at": "2026-07-15T14:30:00-05:00",
+      "absolute_url": "https://boards.greenhouse.io/acme/jobs/6123458",
+      "content": "<p>Work on our data pipeline.</p>",
+      "location": { "name": "Mumbai" },
+      "departments": [{ "id": 2, "name": "Data" }],
+      "requisition_id": "REQ-1003"
+    }
+  ]
+}

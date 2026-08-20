@@ -1,0 +1,14 @@
+{
+  "jobs": [
+    {
+      "id": 6600000,
+      "job_title": "Renamed field — this should NOT populate TitleRaw",
+      "updated_at": "2026-08-04T10:00:00-05:00",
+      "absolute_url": "https://boards.greenhouse.io/shifted/jobs/6600000",
+      "content": "<p>Upstream renamed 'title' to 'job_title' without notice.</p>",
+      "location": { "name": "Bengaluru" },
+      "departments": [{ "id": 1, "name": "Engineering" }],
+      "requisition_id": "REQ-6001"
+    }
+  ]
+}
