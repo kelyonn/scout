@@ -1,0 +1,13 @@
+[
+  {
+    "id": "abc123",
+    "title_renamed": "Backend Engineer",
+    "categories": {
+      "commitment": "Full Time Employee",
+      "location": "Bangalore, Karnataka"
+    },
+    "createdAt": 1757916149833,
+    "hostedUrl": "https://jobs.lever.co/acme/abc123",
+    "applyUrl": "https://jobs.lever.co/acme/abc123/apply"
+  }
+]

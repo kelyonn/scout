@@ -1,0 +1,56 @@
+[
+  {
+    "id": "7d9af9b5-c1c7-48ec-bbb5-9b25e49f6596",
+    "text": "AM/ Manager - Risk & Decision Science",
+    "categories": {
+      "commitment": "Full Time Employee",
+      "department": "Financial Services",
+      "team": "Financial Services",
+      "location": "Bangalore, Karnataka",
+      "allLocations": ["Bangalore, Karnataka"]
+    },
+    "createdAt": 1757916149833,
+    "descriptionPlain": "Own an automated decisioning process and its outcome, refine credit policies, and create new products.",
+    "description": "<p>Own an automated decisioning process and its outcome, refine credit policies, and create new products.</p>",
+    "country": "IN",
+    "workplaceType": "onsite",
+    "hostedUrl": "https://jobs.lever.co/meesho/7d9af9b5-c1c7-48ec-bbb5-9b25e49f6596",
+    "applyUrl": "https://jobs.lever.co/meesho/7d9af9b5-c1c7-48ec-bbb5-9b25e49f6596/apply"
+  },
+  {
+    "id": "040a5a75-28d2-4b56-904b-071c41d4ea90",
+    "text": "Architect - Android",
+    "categories": {
+      "commitment": "Full Time Employee",
+      "department": "Engineering",
+      "team": "Engineering",
+      "location": "Bangalore, Karnataka",
+      "allLocations": ["Bangalore, Karnataka"]
+    },
+    "createdAt": 1757829749833,
+    "descriptionPlain": "Own the architecture of Meesho's Android app used by hundreds of millions of sellers and buyers.",
+    "description": "<p>Own the architecture of Meesho's Android app used by hundreds of millions of sellers and buyers.</p>",
+    "country": "IN",
+    "workplaceType": "onsite",
+    "hostedUrl": "https://jobs.lever.co/meesho/040a5a75-28d2-4b56-904b-071c41d4ea90",
+    "applyUrl": "https://jobs.lever.co/meesho/040a5a75-28d2-4b56-904b-071c41d4ea90/apply"
+  },
+  {
+    "id": "9c1e2b3a-4444-5555-6666-777788889999",
+    "text": "Software Engineering Intern",
+    "categories": {
+      "commitment": "Intern",
+      "department": "Engineering",
+      "team": "Platform",
+      "location": "Remote",
+      "allLocations": ["Remote"]
+    },
+    "createdAt": 1757916149833,
+    "descriptionPlain": "Join the platform team for a summer internship building backend services.",
+    "description": "<p>Join the platform team for a summer internship building backend services.</p>",
+    "country": "US",
+    "workplaceType": "remote",
+    "hostedUrl": "https://jobs.lever.co/meesho/9c1e2b3a-4444-5555-6666-777788889999",
+    "applyUrl": "https://jobs.lever.co/meesho/9c1e2b3a-4444-5555-6666-777788889999/apply"
+  }
+]
