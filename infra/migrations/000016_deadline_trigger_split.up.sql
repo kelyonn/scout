@@ -1,0 +1,23 @@
+-- docs/11-notifications.md section 2's deadline_approaching trigger fires
+-- twice per tracked job: T-72h and T-24h before deadline_at. That is
+-- incompatible with notification_dedup_idx as it stands — the unique index
+-- is on (user_id, job_group_id, trigger), so a single 'deadline_approaching'
+-- trigger value allows exactly one notification per job_group, ever. The
+-- first reminder to fire (T-72h) would permanently block the second
+-- (T-24h) via the same ON CONFLICT DO NOTHING every other trigger relies on
+-- for its "already notified" guarantee.
+--
+-- Fix: two distinct trigger values, one per reminder, rather than touching
+-- the index itself (AGENTS.md rule 2 — never weaken the dedup guarantee).
+-- Each is still exactly one notification per (job_group, trigger) forever,
+-- which is the correct guarantee for "this specific reminder has fired" —
+-- the index's own semantics are untouched, just correctly scoped to two
+-- real, distinct events instead of one trigger name standing in for both.
+--
+-- ALTER TYPE ... ADD VALUE runs standalone here and is not used later in
+-- this same migration, so it is safe inside the transaction golang-migrate
+-- wraps each file in (Postgres forbids using a new enum value in the same
+-- transaction that added it, on some versions) — apps/notifier/internal/trigger
+-- only starts inserting these values after this migration has committed.
+ALTER TYPE notification_trigger ADD VALUE 'deadline_t72h';
+ALTER TYPE notification_trigger ADD VALUE 'deadline_t24h';
