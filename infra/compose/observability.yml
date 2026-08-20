@@ -1,0 +1,177 @@
+# The observability stack — ADR-011's decision, docs/16-observability.md.
+# A second file, merged in via `-f`, not folded into local.yml/production.yml
+# directly: those two already vary independently (published ports,
+# fixtures-only, hardening), and every service here is a third-party image
+# this project doesn't build, so keeping it separate means neither base
+# file's own diff has to carry six more services it doesn't otherwise
+# need to reason about.
+#
+#   docker compose -f infra/compose/local.yml -f infra/compose/observability.yml up
+#   docker compose -f infra/compose/production.yml -f infra/compose/observability.yml up
+#
+# NETWORKING. Every service below intentionally has no `networks:` key of
+# its own, so each joins the implicit "default" network Compose gives
+# every service that doesn't specify one — the same network api/collector/
+# etc. are already on. That only resolves to the *same real network* as
+# the base file's own services because both local.yml and production.yml
+# now give their own implicit/explicit network a literal, predictable
+# name (local.yml's `networks: default: name: scout-local`, production.yml's
+# `networks: scout: name: scout`) instead of Compose's default
+# project-prefixed one, and the override below points this file's own
+# "default" at whichever literal name applies — scout-local for local,
+# scout for production (set SCOUT_COMPOSE_NETWORK=scout in the production
+# environment file). Without this, Prometheus could never resolve
+# `api:8080`; it would be sitting on a same-named but entirely separate
+# network from every container it needs to scrape.
+#
+# HARDENING. The `x-hardening` anchor in production.yml (read_only root
+# filesystem, all capabilities dropped) is deliberately NOT applied here.
+# Every image below is a third-party upstream this project doesn't build,
+# and getting a read-only root filesystem right for each (which paths
+# need a tmpfs or named volume, which don't) is per-image research this
+# pass didn't do. `no-new-privileges` and `restart: unless-stopped` are
+# applied everywhere as the cheap, safe subset. Revisiting full hardening
+# for this file is a real, scoped follow-up, not silently skipped.
+#
+# MEMORY. Limits roughly match ADR-011's own sizing table.
+#
+# NO `name:` KEY. Deliberately absent — when Compose merges multiple `-f`
+# files, whichever file's `name:` appears last wins for the *whole*
+# merged project, and every existing volume (postgres_data included) is
+# namespaced under that project name. Giving this file its own name would
+# silently point `-f local.yml -f observability.yml` at a second,
+# disconnected postgres_data volume instead of the one `docker compose -f
+# local.yml up` alone already uses — an empty-looking database, not an
+# error. Leaving this file nameless means the base file's own `name:`
+# (scout-local or scout) always wins, whichever order they're passed in.
+
+x-light-hardening: &light-hardening
+  restart: unless-stopped
+  security_opt:
+    - no-new-privileges:true
+
+services:
+  otel-collector:
+    <<: *light-hardening
+    image: otel/opentelemetry-collector-contrib:0.114.0
+    command: ["--config=/etc/otel-collector/config.yml"]
+    volumes:
+      - ../otel-collector/config.yml:/etc/otel-collector/config.yml:ro
+    mem_limit: 128m
+    depends_on:
+      - tempo
+
+  tempo:
+    <<: *light-hardening
+    image: grafana/tempo:2.6.1
+    command: ["-config.file=/etc/tempo.yml"]
+    volumes:
+      - ../tempo/tempo.yml:/etc/tempo.yml:ro
+      - tempo_data:/var/tempo
+    mem_limit: 128m
+
+  prometheus:
+    <<: *light-hardening
+    image: prom/prometheus:v3.0.1
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=30d # ADR-011's stack table
+      - --web.listen-address=:9091 # 9090 is every Scout service's own /metrics port; avoids a same-network collision
+    volumes:
+      - ../prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    mem_limit: 384m
+
+  loki:
+    <<: *light-hardening
+    image: grafana/loki:3.3.2
+    command: ["-config.file=/etc/loki/loki-config.yml"]
+    volumes:
+      - ../loki/loki-config.yml:/etc/loki/loki-config.yml:ro
+      - loki_data:/loki
+    mem_limit: 256m
+
+  promtail:
+    <<: *light-hardening
+    image: grafana/promtail:3.3.2
+    command: ["-config.file=/etc/promtail/promtail-config.yml"]
+    volumes:
+      - ../promtail/promtail-config.yml:/etc/promtail/promtail-config.yml:ro
+      # Read-only access to the Docker socket is how promtail discovers
+      # and reads every other container's stdout — see that config
+      # file's own comment for why this is used instead of a host log-file
+      # mount.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    mem_limit: 128m
+    depends_on:
+      - loki
+
+  # No published host port, on purpose — production.yml's own "nothing
+  # publishes a host port" rule (infra/scripts/health-gate.sh enforces it)
+  # applies here too, so this composes safely with production.yml with
+  # zero risk of accidentally opening a port to the tailnet. Production
+  # access is infra/caddy/Caddyfile's /grafana/* route. Local-only access
+  # without Caddy running: `docker compose -f infra/compose/local.yml -f
+  # infra/compose/observability.yml port grafana 3000` prints the
+  # container's internal address; an editor's port-forwarding feature or
+  # `docker run --rm --network container:<grafana container id> alpine/socat
+  # tcp-listen:3001,fork tcp:localhost:3000` both work as a manual tunnel.
+  grafana:
+    <<: *light-hardening
+    image: grafana/grafana:11.4.0
+    environment:
+      # No signup flow, no anonymous access, one operator — ADR-015's
+      # single-user posture applied to this stack too. The password is
+      # required, not defaulted, for the same reason SCOUT_PG_PASSWORD is
+      # required in production.yml: a placeholder here is a placeholder
+      # protecting a system-health dashboard, not a toy.
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${SCOUT_GRAFANA_ADMIN_PASSWORD:?SCOUT_GRAFANA_ADMIN_PASSWORD must be set}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      # Grafana is reverse-proxied at /grafana (infra/caddy/Caddyfile) —
+      # this tells it its own base path so generated links and static
+      # asset URLs are correct behind that prefix rather than assuming
+      # it's served from /.
+      GF_SERVER_ROOT_URL: "%(protocol)s://%(domain)s/grafana/"
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      # Read by infra/grafana/provisioning/datasources/datasources.yml's
+      # $SCOUT_PG_* expansion (a native Grafana provisioning feature, not
+      # Compose's own — these three land in the container's actual
+      # environment for Grafana itself to read at provisioning time).
+      # Same variable, same fallback, as every other service that talks
+      # to Postgres (apps/api/cmd/main.go and friends) — this isn't a new
+      # secret-handling pattern, it's reusing the existing one. The
+      # dashboards this datasource feeds (docs/16 section 8, dashboard 2)
+      # only ever issue SELECT statements; the `scout` user has broader
+      # grants than that requires, same as it does for a human running
+      # psql directly, which is the trust level Grafana's one operator
+      # account already sits at (GF_AUTH_ANONYMOUS_ENABLED is false above).
+      SCOUT_PG_USER: ${SCOUT_PG_USER:-scout}
+      SCOUT_PG_PASSWORD: ${SCOUT_PG_PASSWORD:-scout_local_dev_only}
+      SCOUT_PG_DATABASE: ${SCOUT_PG_DATABASE:-scout}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ../grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../grafana/dashboards:/var/lib/grafana/dashboards:ro
+    mem_limit: 128m
+    depends_on:
+      - prometheus
+      - loki
+      - tempo
+
+networks:
+  default:
+    name: ${SCOUT_COMPOSE_NETWORK:-scout-local}
+    external: true
+
+volumes:
+  prometheus_data:
+    driver: local
+  loki_data:
+    driver: local
+  tempo_data:
+    driver: local
+  grafana_data:
+    driver: local

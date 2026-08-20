@@ -288,6 +288,12 @@ services:
 
 networks:
   scout:
+    # A literal name rather than Compose's default project-prefixed
+    # "scout_scout" — infra/compose/observability.yml (P3) is a second
+    # file merged in via `-f`, and it references this network by this
+    # exact literal name so its containers can resolve api/collector/etc.
+    # by service name. See that file's own comment.
+    name: scout
     driver: bridge
     ipam:
       config:

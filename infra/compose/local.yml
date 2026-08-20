@@ -99,12 +99,22 @@ services:
     environment:
       SCOUT_API_ADDR: ":8080"
       SCOUT_ENV: local
+      # Harmless when infra/compose/observability.yml's otel-collector isn't
+      # running too (packages/tracing exports in the background and drops
+      # spans on failure, same as any OTel SDK) — set unconditionally rather
+      # than only when the observability stack happens to be up, so tracing
+      # works the moment both are composed together with no extra step.
+      SCOUT_OTEL_COLLECTOR_ENDPOINT: otel-collector:4318
       # Local-only token. It is in the repository on purpose: it guards a
       # database of fixtures on a laptop, and a placeholder that has to be
       # invented per-developer is a placeholder that ends up as "test". The real
       # one is generated at setup and lives in the SOPS-encrypted environment
       # file — see ADR-015 and docs/13 section 3.
       SCOUT_AUTH_TOKEN: ${SCOUT_AUTH_TOKEN:-local-development-token-not-a-secret-000}
+      # Added once the API grew its first real DB-backed route (resume
+      # upload) — until then it only served /health and /auth, neither of
+      # which touch Postgres.
+      SCOUT_DATABASE_URL: postgres://scout:scout_local_dev_only@postgres:5432/scout?sslmode=disable
     ports:
       - "127.0.0.1:${SCOUT_API_PORT:-8081}:8080"
     healthcheck:
@@ -162,6 +172,37 @@ services:
       postgres:
         condition: service_healthy
 
+  brain:
+    build:
+      context: ../..
+      dockerfile: infra/docker/brain.Dockerfile
+    restart: unless-stopped
+    environment:
+      SCOUT_DATABASE_URL: postgres://scout:scout_local_dev_only@postgres:5432/scout?sslmode=disable
+      # host.docker.internal reaches the Mac's own Ollama install from
+      # inside the container — Ollama is not itself dockerized (P2 Phase G),
+      # since it's already running natively and there's nothing to gain by
+      # containerizing a process that already has no dependencies to
+      # isolate.
+      SCOUT_BRAIN_OLLAMA_HOST: http://host.docker.internal:11434
+      # ADR-016's cascade. All three optional — scout_brain/config.py's
+      # load_llm_config skips any entry whose api_key_env resolves empty,
+      # so an unset var here is a valid "not signed up for this one yet"
+      # state, same as the host having none at all. These were missing
+      # from this block entirely until 2026-08-20: a key in .env had no
+      # path into the container regardless of whether
+      # infra/config/llm_providers.yaml itself was even reachable (see
+      # that fix in infra/docker/brain.Dockerfile).
+      SCOUT_BRAIN_GEMINI_API_KEY: ${SCOUT_BRAIN_GEMINI_API_KEY:-}
+      SCOUT_BRAIN_GROQ_API_KEY: ${SCOUT_BRAIN_GROQ_API_KEY:-}
+      SCOUT_BRAIN_OPENROUTER_API_KEY: ${SCOUT_BRAIN_OPENROUTER_API_KEY:-}
+    volumes:
+      - brain_model_cache:/root/.cache/fastembed
+    mem_limit: 1g
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   # Not started by `up`. `make migrate` runs it explicitly. Same image and same
   # version as production, so a migration cannot pass locally and fail on the
   # only database that matters because of a tool version difference.
@@ -179,6 +220,20 @@ services:
       postgres:
         condition: service_healthy
 
+networks:
+  default:
+    # A literal name rather than Compose's default "scout-local_default"
+    # — infra/compose/observability.yml (P3) is a second file merged in
+    # via `-f`, and it references this network by this exact literal name
+    # so its containers can resolve api/collector/brain by service name.
+    # No service in this file needs its own `networks:` key to pick this
+    # up: every service that doesn't specify one already joins "default"
+    # implicitly, and this block only renames that network, not its
+    # membership. See infra/compose/observability.yml's own comment.
+    name: scout-local
+
 volumes:
   postgres_data:
+    driver: local
+  brain_model_cache:
     driver: local
