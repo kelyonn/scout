@@ -1,0 +1,33 @@
+-- Template for infra/seed/resume.sql, which is gitignored because it holds
+-- real resume text (AGENTS.md rule 9's corollary: the resume never enters
+-- this public repository). Copy this file to resume.sql and replace the
+-- placeholder text below with your own resume content, then run
+-- `make seed-resume`.
+--
+-- See resume.sql's own header (once you've created it) for the full
+-- explanation of the $resume$ ... $resume$ dollar-quoting and the
+-- ON CONFLICT UPDATE behavior.
+
+INSERT INTO resume (user_id, raw_text)
+SELECT
+    id,
+    $resume$Jane Doe
+
+Summary
+Replace this entire block with your own resume's text content. Keep it
+plain text — no PDF formatting artifacts. resume_match's semantic term
+embeds this text; the keyword term checks skill-name presence directly
+against it, so include the substance (experience, projects, skills) that
+you want matched against job postings.
+
+Omit your phone number and any other field with zero matching value —
+it adds nothing to resume_match and is the most sensitive single field on
+most resumes.
+$resume$
+FROM app_user
+WHERE email = :'user_email'
+ON CONFLICT (user_id) DO UPDATE SET
+    raw_text = excluded.raw_text,
+    embedding = NULL,
+    embedding_version = NULL,
+    updated_at = now();
