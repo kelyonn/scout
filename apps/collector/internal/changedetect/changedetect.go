@@ -2,7 +2,7 @@
 // in docs/06-ingestion-pipeline.md section 6.
 //
 // Layer 1 — HTTP validators (ETag / If-Modified-Since) — is not this package.
-// It is a property of the conditional GET apps/collector/internal/fetch
+// It is a property of the conditional GET packages/fetch
 // already performs: a 304 means "done, zero bytes, zero parse" before this
 // package is ever called. Layer 3 — structural diff, one hash per posting via
 // an adapter's Parse — needs an adapter, which does not exist yet; that layer
