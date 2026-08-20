@@ -136,7 +136,7 @@ func TestCheckerFailsClosedOnUnreachableHost(t *testing.T) {
 // test dialer — proving the production Checker, exactly as the collector
 // will construct it, actually refuses to reach an internal address rather
 // than merely that ssrf.DialContext would if called directly (which
-// apps/collector/internal/ssrf's own tests already cover). robots.txt fetches
+// packages/ssrf's own tests already cover). robots.txt fetches
 // carry the same SSRF posture as content fetches — see the comment on New().
 func TestCheckerRefusesLoopbackTarget(t *testing.T) {
 	srv := newTestServer(t, http.StatusOK, "User-agent: *\nAllow: /\n")

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/kelyon/scout/apps/collector/internal/ssrf"
+	"github.com/kelyon/scout/packages/ssrf"
 )
 
 // CacheTTL is how long a fetched result is trusted before being re-fetched.
@@ -62,7 +62,7 @@ type Checker struct {
 // you sends an email instead of a block" (docs/06 section 4).
 //
 // robots.txt fetches carry the same SSRF posture as every other collector
-// request (apps/collector/internal/ssrf) — robots.txt is served by the same
+// request (packages/ssrf) — robots.txt is served by the same
 // host a source's content is, so it is exactly as capable of pointing DNS at
 // an internal address as the content fetch is.
 func New(cache Cache, contactURL, operatorEmail string) *Checker {
