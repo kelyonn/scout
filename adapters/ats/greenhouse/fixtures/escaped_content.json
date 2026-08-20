@@ -1,0 +1,21 @@
+{
+    "jobs": [
+        {
+            "id": 8108771,
+            "title": "DevOps Engineer (Observability)",
+            "updated_at": "2026-08-12T14:25:36-04:00",
+            "absolute_url": "https://job-boards.greenhouse.io/acme/jobs/8108771",
+            "content": "&lt;div class=&quot;content-intro&quot;&gt;&lt;p&gt;&lt;strong&gt;Who we are&amp;nbsp;&lt;/strong&gt;&lt;/p&gt;\n&lt;p&gt;We ship things.&lt;/p&gt;&lt;/div&gt;",
+            "location": {
+                "name": "Remote"
+            },
+            "departments": [
+                {
+                    "id": 1,
+                    "name": "Engineering"
+                }
+            ],
+            "requisition_id": "REQ-2001"
+        }
+    ]
+}

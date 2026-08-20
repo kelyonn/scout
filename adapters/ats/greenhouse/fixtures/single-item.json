@@ -1,0 +1,14 @@
+{
+  "jobs": [
+    {
+      "id": 6200000,
+      "title": "Backend Engineering Intern",
+      "updated_at": "2026-08-05T08:00:00-05:00",
+      "absolute_url": "https://boards.greenhouse.io/soloco/jobs/6200000",
+      "content": "<p>Sole opening on this board right now.</p>",
+      "location": { "name": "Bengaluru" },
+      "departments": [{ "id": 1, "name": "Engineering" }],
+      "requisition_id": "REQ-2001"
+    }
+  ]
+}
