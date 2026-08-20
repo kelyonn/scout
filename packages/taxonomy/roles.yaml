@@ -1,0 +1,355 @@
+# Tier 0 role-family patterns. docs/07-normalization-taxonomy.md section 4
+# calls for ~400 curated patterns across all 20 leaves, handling ~70% of
+# titles outright, with Tier 1 (embeddings) and Tier 2 (LLM) handling the
+# rest. This is the P1 scope-down: enough patterns to classify the roles the
+# seeded Greenhouse boards actually post, not the full catalog. Extend
+# directly; the loader (packages/taxonomy/roles.go) does not change.
+#
+# advocacy.* (P2 Phase H) carries `requires: technical_evidence` — docs/07
+# section 4's gate unique to this family, checked by
+# apps/collector/internal/classify.HasTechnicalEvidence against the
+# description, not the title. A strong/weak title match on a
+# requires:technical_evidence family whose description fails the gate
+# escalates to Tier 2 (apps/brain's classify_tier2 consumer) rather than
+# being admitted or silently dropped — docs/07's own "~25% escalation
+# versus the 8% baseline" for this family specifically.
+#
+# Matched against the normalized title (apps/collector/internal/normalize,
+# lowercased, whitespace-collapsed). strong patterns are substring matches
+# checked first, in file order; the first family with a strong match wins.
+# weak patterns are checked only if no family strong-matched. negative
+# patterns on a family veto an otherwise-matching strong/weak pattern for
+# that family, so "backend team recruiter" does not become swe.backend.
+#
+# `exemplars` (P2 Phase D) is Python-only data — apps/brain embeds these
+# once at startup and Tier 1 nearest-neighbor matches a job's own embedding
+# against them when Tier 0's strong/weak/negative rules above land on a low-
+# or zero-confidence result. Go's yaml.Unmarshal (non-strict) ignores this
+# key entirely, so one file stays the single source of truth for both
+# languages rather than duplicating the family list. Scoped to 5-6 titles
+# per family, not docs/07's full 20-40 — real coverage, hand-picked from
+# realistic internship/new-grad title patterns, not a placeholder list.
+
+swe.backend:
+  exemplars:
+    - Backend Engineering Intern
+    - Software Engineer, Backend
+    - Backend Developer Intern
+    - API Engineer Intern
+    - Distributed Systems Engineer Intern
+  strong:
+    - backend engineer
+    - back-end engineer
+    - back end engineer
+    - server engineer
+    - api engineer
+    - distributed systems engineer
+  weak:
+    - software engineer.*backend
+    - backend.*intern
+  negative:
+    - backend.*designer
+    - backend.*marketing
+    - backend.*recruiter
+
+swe.frontend:
+  exemplars:
+    - Frontend Engineering Intern
+    - Software Engineer, Frontend
+    - UI Engineer Intern
+    - Web Developer Intern
+    - Client Engineer Intern
+  strong:
+    - frontend engineer
+    - front-end engineer
+    - front end engineer
+    - ui engineer
+    - web engineer
+    - client engineer
+  weak:
+    - software engineer.*frontend
+    - frontend.*intern
+  negative:
+    - frontend.*designer only
+    - frontend.*marketing
+
+swe.fullstack:
+  exemplars:
+    - Full Stack Engineering Intern
+    - Product Engineer Intern
+    - Full-Stack Developer Intern
+    - Software Engineer, Full Stack
+  strong:
+    - full stack engineer
+    - fullstack engineer
+    - full-stack engineer
+    - product engineer
+  weak:
+    - full stack.*intern
+    - fullstack.*intern
+
+swe.mobile:
+  exemplars:
+    - iOS Engineering Intern
+    - Android Engineering Intern
+    - Mobile Software Engineer Intern
+    - React Native Developer Intern
+  strong:
+    - ios engineer
+    - android engineer
+    - mobile engineer
+    - react native engineer
+    - flutter engineer
+  weak:
+    - mobile.*intern
+    - app.*engineer
+
+swe.ml.research:
+  exemplars:
+    - AI Research Intern
+    - Machine Learning Research Scientist Intern
+    - Applied Research Intern, ML
+  strong:
+    - research scientist
+    - research engineer.*machine learning
+    - ml research engineer
+  weak:
+    - applied research.*intern
+
+swe.ml:
+  exemplars:
+    - Machine Learning Engineering Intern
+    - AI Engineer Intern
+    - Deep Learning Engineer Intern
+    - Applied ML Engineer Intern
+  strong:
+    - machine learning engineer
+    - ml engineer
+    - ai engineer
+    - deep learning engineer
+  weak:
+    - machine learning.*intern
+    - ai.*intern
+  negative:
+    - ai.*marketing
+    - ai.*sales
+
+swe.data:
+  exemplars:
+    - Data Engineering Intern
+    - Analytics Engineer Intern
+    - Data Platform Engineer Intern
+    - Data Infrastructure Engineer Intern
+  strong:
+    - data engineer
+    - analytics engineer
+    - data platform engineer
+    - data infrastructure engineer
+  weak:
+    - data.*intern
+
+swe.infra.sre:
+  exemplars:
+    - Site Reliability Engineering Intern
+    - SRE Intern
+    - Production Engineering Intern
+  strong:
+    - site reliability engineer
+    - sre
+    - production engineer
+  weak:
+    - reliability.*intern
+
+swe.infra.devops:
+  exemplars:
+    - DevOps Engineering Intern
+    - Build & Release Engineer Intern
+    - Developer Productivity Engineer Intern
+  strong:
+    - devops engineer
+    - build engineer
+    - release engineer
+    - developer productivity engineer
+  weak:
+    - devops.*intern
+
+swe.infra.platform:
+  exemplars:
+    - Platform Engineering Intern
+    - Internal Tools Engineer Intern
+    - Developer Platform Engineer Intern
+  strong:
+    - platform engineer
+    - developer platform engineer
+    - internal tools engineer
+  weak:
+    - platform.*intern
+
+swe.infra.cloud:
+  exemplars:
+    - Cloud Engineering Intern
+    - AWS Infrastructure Engineer Intern
+    - Cloud Platform Engineer Intern
+  strong:
+    - cloud engineer
+    - aws engineer
+    - gcp engineer
+    - azure engineer
+  weak:
+    - cloud.*intern
+
+swe.infra:
+  exemplars:
+    - Infrastructure Engineering Intern
+    - Infra Engineer Intern
+  strong:
+    - infrastructure engineer
+  weak:
+    - infra.*intern
+
+swe.systems:
+  exemplars:
+    - Systems Engineering Intern
+    - Kernel Engineer Intern
+    - Distributed Systems Intern
+    - Database Internals Engineer Intern
+  strong:
+    - systems engineer
+    - kernel engineer
+    - compiler engineer
+    - runtime engineer
+    - database internals engineer
+  weak:
+    - systems.*intern
+
+swe.security:
+  exemplars:
+    - Security Engineering Intern
+    - Application Security Engineer Intern
+    - Product Security Intern
+  strong:
+    - security engineer
+    - appsec engineer
+    - application security engineer
+    - infrastructure security engineer
+  weak:
+    - security.*intern
+  negative:
+    - security guard
+    - physical security
+
+swe.embedded:
+  exemplars:
+    - Embedded Software Engineering Intern
+    - Firmware Engineer Intern
+    - Embedded Systems Intern
+  strong:
+    - embedded engineer
+    - firmware engineer
+  weak:
+    - embedded.*intern
+
+swe.qa:
+  exemplars:
+    - QA Engineering Intern
+    - SDET Intern
+    - Test Engineering Intern
+  strong:
+    - qa engineer
+    - sdet
+    - test engineer
+    - quality assurance engineer
+  weak:
+    - qa.*intern
+    - test.*intern
+
+swe.research:
+  exemplars:
+    - Research Engineering Intern
+    - Software Research Intern
+  strong:
+    - research engineer
+  weak:
+    - research.*intern
+
+# docs/07 section 4's own literal YAML for advocacy.devrel, verbatim.
+advocacy.devrel:
+  strong:
+    - developer advocate
+    - developer relations
+    - developer evangelist
+    - devrel
+    - developer educator
+    - community engineer
+  weak:
+    - technical community manager
+    - developer community.*engineer
+  negative:
+    - developer marketing
+    - community manager$
+    - social media
+    - content marketing
+    - growth marketing
+    - technical recruit
+    - partnerships? manager
+    - customer success manager
+  requires: technical_evidence
+
+# Inward-facing tooling for *external* developers (SDKs, docs
+# infrastructure, sample applications, developer portals) — docs/07
+# section 4: "sits closest to swe.infra.platform and is often mislabelled
+# as it." Checked before swe.infra.platform so a title that actually names
+# this family isn't absorbed by the more generic pattern.
+advocacy.devex:
+  strong:
+    - developer experience engineer
+    - developer experience
+    - devex engineer
+    - sdk engineer
+    - developer portal engineer
+  weak:
+    - api documentation.*engineer
+    - sample app.*engineer
+  requires: technical_evidence
+
+# Customer-facing engineering: pre-sales technical work, deployments,
+# integrations — docs/07 section 4, Hazard 2: "'Sales Engineer' with a
+# quota and no technical requirement is a sales job; 'Sales Engineer'
+# building integration prototypes is engineering. The description decides,
+# not the title" — exactly what requires: technical_evidence enforces here.
+advocacy.solutions:
+  strong:
+    - solutions engineer
+    - sales engineer
+    - field engineer
+    - solutions architect
+    - forward deployed engineer
+    - implementation engineer
+    - technical consultant
+  negative:
+    - account executive
+    - business development
+    - customer success manager
+  requires: technical_evidence
+
+# The catch-all leaf: general software-engineering titles that don't name a
+# specialization. Checked last among strong patterns so a title like "Backend
+# Software Engineer Intern" matches swe.backend first.
+swe.general:
+  exemplars:
+    - Software Engineering Intern
+    - Software Engineer Intern, Summer 2027
+    - SWE Intern
+    - Software Development Engineer Intern
+    - Member of Technical Staff, Intern
+  strong:
+    - software engineer
+    - software engineering intern
+    - software development engineer
+    - sde
+    - swe intern
+    - member of technical staff
+    - programmer analyst
+  weak:
+    - engineering intern
+    - software.*intern
