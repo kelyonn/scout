@@ -1,0 +1,15 @@
+{
+  "totalFound": 1,
+  "content": [
+    {
+      "id": "post-999",
+      "name": "Estagiário de Engenharia de Software — エンジニアリングインターン",
+      "refNumber": "REQ-999",
+      "releasedDate": "2026-08-01T00:00:00.000Z",
+      "location": { "city": "São Paulo", "region": "São Paulo", "country": "br", "remote": false },
+      "department": { "label": "Engenharia" },
+      "typeOfEmployment": { "label": "Estágio" },
+      "postingUrl": "https://jobs.smartrecruiters.com/AcmeHQ/post-999-estagiario"
+    }
+  ]
+}
