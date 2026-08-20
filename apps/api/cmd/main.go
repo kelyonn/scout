@@ -14,14 +14,26 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+
 	"github.com/kelyon/scout/apps/api/internal/auth"
+	"github.com/kelyon/scout/apps/api/internal/jobs"
+	"github.com/kelyon/scout/apps/api/internal/resume"
+	"github.com/kelyon/scout/apps/api/internal/search"
+	"github.com/kelyon/scout/apps/api/internal/stream"
+	"github.com/kelyon/scout/packages/logging"
+	"github.com/kelyon/scout/packages/metrics"
+	"github.com/kelyon/scout/packages/queue"
+	"github.com/kelyon/scout/packages/tracing"
 )
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log := slog.New(logging.Scrub(slog.NewJSONHandler(os.Stdout, nil)))
 
 	// `api healthcheck` is what the container healthcheck runs. The image is
 	// distroless: no shell, no curl, nothing else that could probe it. Probing
@@ -84,6 +96,16 @@ func selfCheck(addr string) error {
 func run(log *slog.Logger) error {
 	addr := listenAddr()
 
+	shutdownTracing, err := tracing.Setup(context.Background(), "api", log)
+	if err != nil {
+		return fmt.Errorf("configure tracing: %w", err)
+	}
+	defer func() {
+		if shutdownErr := shutdownTracing(context.Background()); shutdownErr != nil {
+			log.Warn("tracing shutdown failed", "err", shutdownErr)
+		}
+	}()
+
 	// Fail closed. An API that starts without authentication because a variable
 	// was misspelled is worse than one that refuses to start, and on a system
 	// whose entire access-control story is one secret, this is the check that
@@ -98,9 +120,36 @@ func run(log *slog.Logger) error {
 		return fmt.Errorf("configure auth: %w", err)
 	}
 
+	pool, err := buildDatabasePool(context.Background())
+	if err != nil {
+		return fmt.Errorf("configure database: %w", err)
+	}
+	defer pool.Close()
+
+	queueClient, err := queue.New(pool)
+	if err != nil {
+		return fmt.Errorf("configure queue: %w", err)
+	}
+
+	resumeHandler := resume.New(pool, queueClient, log)
+	jobsHandler := jobs.New(pool, queueClient, log)
+	searchHandler := search.New(pool, log)
+
+	broker := stream.NewBroker()
+	streamCtx, stopStream := context.WithCancel(context.Background())
+	defer stopStream()
+	go broker.Run(streamCtx, pool, log)
+	streamHandler := stream.New(broker)
+
 	srv := &http.Server{
-		Addr:              addr,
-		Handler:           routes(log, authenticator),
+		Addr: addr,
+		// otelhttp wraps every request in a span, exported per tracing.Setup
+		// above. Placed outside observeRequests deliberately: otelhttp needs
+		// to see the real net/http ResponseWriter to start the span before
+		// routing happens, and observeRequests already forwards Flush
+		// through its own wrapper, so nesting them this way doesn't lose
+		// SSE's flushing either.
+		Handler:           otelhttp.NewHandler(routes(log, authenticator, resumeHandler, jobsHandler, searchHandler, streamHandler), "api"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -138,8 +187,19 @@ func run(log *slog.Logger) error {
 // goes through the authenticator via the "/" catch-all. An unauthenticated
 // caller therefore cannot distinguish a route that exists from one that does
 // not, and adding a route cannot accidentally add an unauthenticated one.
-func routes(log *slog.Logger, a *auth.Authenticator) http.Handler {
+func routes(
+	log *slog.Logger, a *auth.Authenticator, resumeHandler *resume.Handler,
+	jobsHandler *jobs.Handler, searchHandler *search.Handler, streamHandler *stream.Handler,
+) http.Handler {
 	protected := http.NewServeMux()
+	protected.HandleFunc("POST /v1/resume", resumeHandler.Upload)
+	protected.HandleFunc("GET /v1/resume", resumeHandler.Status)
+	protected.HandleFunc("GET /v1/jobs", jobsHandler.List)
+	protected.HandleFunc("GET /v1/jobs/{group_id}", jobsHandler.Detail)
+	protected.HandleFunc("POST /v1/jobs/{group_id}/state", jobsHandler.State)
+	protected.HandleFunc("GET /v1/applications", jobsHandler.Applications)
+	protected.HandleFunc("GET /v1/search", searchHandler.Search)
+	protected.HandleFunc("GET /v1/stream", streamHandler.Stream)
 
 	root := http.NewServeMux()
 
@@ -158,11 +218,84 @@ func routes(log *slog.Logger, a *auth.Authenticator) http.Handler {
 		_, _ = fmt.Fprintln(w, `{"status":"ok"}`)
 	})
 
+	// Unauthenticated, like /health — Prometheus scrapes this directly and
+	// the whole host has no public ingress (ADR-014); see packages/metrics'
+	// own comment.
+	root.Handle("GET /metrics", metrics.Handler())
+
 	// Typed once per device, ever. See ADR-015.
 	root.Handle("POST /auth/session", a.SessionHandler())
 	root.Handle("POST /auth/logout", a.LogoutHandler())
 
 	root.Handle("/", a.Middleware(log, protected))
 
-	return root
+	return observeRequests(root)
+}
+
+// observeRequests wraps next with scout_api_request_duration_seconds
+// (docs/16-observability.md, the API latency SLO). route is the matched
+// mux pattern (e.g. "GET /v1/jobs/{group_id}"), not the raw path — a raw
+// path would give every job's detail request its own high-cardinality
+// series. http.ServeMux.Handler resolves the pattern without actually
+// invoking the handler, so this costs one extra (cheap) mux lookup per
+// request rather than requiring next to report its own route.
+func observeRequests(next *http.ServeMux) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, route := next.Handler(r)
+		if route == "" {
+			route = "unmatched"
+		}
+		start := time.Now()
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		metrics.APIRequestDuration.WithLabelValues(route, strconv.Itoa(rec.status)).Observe(time.Since(start).Seconds())
+	})
+}
+
+// statusRecorder captures the status code a handler wrote, since
+// net/http gives no way to read it back afterward otherwise.
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
+
+// Flush forwards to the underlying ResponseWriter's own Flush when it has
+// one — GET /v1/stream's SSE handler type-asserts its ResponseWriter to
+// http.Flusher (apps/api/internal/stream/handler.go) and would silently
+// stop flushing, breaking the live feed, if this wrapper didn't pass that
+// capability through.
+func (r *statusRecorder) Flush() {
+	if f, ok := r.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+// buildDatabasePool mirrors apps/collector/cmd's own helper of the same
+// name — same fail-closed posture (a missing SCOUT_DATABASE_URL or an
+// unreachable database stops this process from starting rather than
+// starting and serving errors on the first real request).
+func buildDatabasePool(ctx context.Context) (*pgxpool.Pool, error) {
+	databaseURL := os.Getenv("SCOUT_DATABASE_URL")
+	if databaseURL == "" {
+		return nil, errors.New("SCOUT_DATABASE_URL is not set")
+	}
+
+	pool, err := pgxpool.New(ctx, databaseURL)
+	if err != nil {
+		return nil, fmt.Errorf("create pool: %w", err)
+	}
+
+	pingCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := pool.Ping(pingCtx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+
+	return pool, nil
 }
