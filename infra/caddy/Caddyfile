@@ -56,6 +56,16 @@
 		reverse_proxy api:8080
 	}
 
+	# infra/compose/observability.yml (P3) — not started by
+	# production.yml alone, and this route 404s harmlessly (upstream
+	# unreachable) when it isn't. Grafana itself has no published host
+	# port, by the same "nothing publishes a host port" rule as every
+	# other service in this stack (infra/compose/production.yml's own
+	# comment) — this reverse proxy is the only way to reach it.
+	handle /grafana/* {
+		reverse_proxy grafana:3000
+	}
+
 	# The dashboard lands at P3. Until then, every other path is a 404 from Caddy
 	# rather than a confusing connection error — a placeholder that says which
 	# milestone is missing beats one that looks like an outage.

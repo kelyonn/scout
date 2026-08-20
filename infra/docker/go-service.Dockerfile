@@ -8,7 +8,7 @@
 # so local and production are the same architecture and there is no cross-build
 # to get wrong (ADR-014).
 
-ARG GO_VERSION=1.23
+ARG GO_VERSION=1.25
 
 FROM golang:${GO_VERSION}-alpine AS build
 
