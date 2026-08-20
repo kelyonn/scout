@@ -137,34 +137,54 @@ where the brief and legal reality conflict.
 
 The mechanism that makes prohibited boards accessible legitimately.
 
+An earlier draft of this section specified a webhook
+(`POST /api/v1/hooks/email`, HMAC-verified, fed by Cloudflare Email Routing
+or Postmark inbound). That was never buildable under ADR-014: Scout has no
+public ingress, and a webhook needs one. The actual implementation
+(`apps/collector/internal/emailalert`) polls an IMAP mailbox instead — the
+same "outbound connection this process already makes" shape
+`apps/notifier/internal/telegram`'s `getUpdates` long-poll already uses for
+the identical reason.
+
 ```
-User configures job alerts on LinkedIn/Indeed/etc.
-using alerts@scout.<domain> as the delivery address
+User configures job alerts on LinkedIn/Indeed/Glassdoor/Handshake,
+delivered to a mailbox this account can read over IMAP
                     │
                     ▼
-    Inbound mail provider receives it
-    (Cloudflare Email Routing → Worker, or Postmark inbound)
-                    │
-                    ▼
-    POST /api/v1/hooks/email  (HMAC-verified)
+    Poller logs in, searches for UNSEEN mail
+    (apps/collector/internal/emailalert.Poller, every 15 minutes)
                     │
                     ▼
     Sender identification → board-specific parser
+    (regex-based extraction, not a DOM parser — see that
+    package's own calibration caveat: unverified against a
+    live alert email, same posture as the Teamtailor/Workday
+    ATS adapters before their first live run)
                     │
                     ▼
-    Extract: title, company, location, link, snippet
+    Extract: title, company, location, tracking link
                     │
                     ▼
     Resolve tracking redirect → canonical URL
+    (packages/fetch, same SSRF-guarded fetcher every adapter uses)
                     │
                     ▼
-    Try to match the company to a known ATS source.
-    If found, fetch the full posting from there instead —
-    richer content, and it confirms the posting is live.
+    Find-or-create company + source (legal_posture = 'email_only',
+    which keeps the normal HTTP scheduler from ever polling it)
                     │
                     ▼
-    Standard observation → normalize → dedup → score
+    Standard normalize → classify → dedup → score → write
+    (Scheduler.IngestEmailAlert reuses processPosting directly —
+    the same per-posting pipeline every HTTP adapter goes through)
 ```
+
+There is no ATS cross-reference step: matching the extracted company to a
+known Greenhouse/Lever/etc. source and re-fetching the richer posting from
+there instead of trusting the alert email's own snippet was in the original
+design but is not implemented. The posting is written from what the alert
+email itself contains. Revisiting that is future work, not a correctness
+gap in what shipped — resume-relevant metadata (title, company, location,
+canonical URL) is present either way.
 
 **Recommended alert configuration** (one-time, ~20 minutes, in the setup
 runbook): one alert per role family × location tier. Roughly 12 alerts on
@@ -174,6 +194,12 @@ overlap is what protects against a single alert's criteria being too narrow.
 **Redirect resolution.** Alert emails wrap links in tracking redirectors. We
 follow up to 3 redirects to reach the canonical URL, with an SSRF guard rejecting
 private IP ranges at every hop.
+
+**Checkpointing.** There is no persisted cursor. IMAP's own `\Seen` flag is
+the checkpoint: fetching a message's body (without `PEEK`) marks it seen as
+a side effect of the same command that reads it, so a poll that is
+interrupted mid-batch simply re-reads whatever is still `UNSEEN` on the next
+cycle rather than losing or double-processing anything.
 
 ---
 
@@ -201,7 +227,8 @@ in `competition_estimate` as a genuine bonus rather than a thumb on the scale.
 | **HCLTech, Tech Mahindra, LTIMindtree, Mphasis** | SuccessFactors / Workday | Covered by the enterprise ATS adapters | P5 |
 | **Cognizant, Accenture, Capgemini** | Workday and bespoke | Large Bengaluru and Hyderabad intake | P5 |
 | **Deloitte, EY, KPMG, PwC** | Workday / SuccessFactors | Technology-consulting intern tracks | P5 |
-| **Thoughtworks, EPAM, Globant, Nagarro, Publicis Sapient** | Greenhouse, Lever, Workday | **Already covered by existing adapters** — they simply need to be in the seed list | P2 |
+| **Thoughtworks, Nagarro** | Greenhouse (Thoughtworks), SmartRecruiters (Nagarro) | **Covered and seeded** — see `infra/seed/sources.sql` and `infra/seed/gcc_sources.sql` | P2/P3 |
+| **EPAM, Globant, Publicis Sapient** | Bespoke career portals | Checked against every adapter this project supports (Greenhouse, Lever, Ashby, Workday, SmartRecruiters) and resolved on none — not guessable, not yet a supported platform | P5 |
 | **Persistent, Zensar, Cyient, KPIT, Tata Elxsi** | Mixed; several on Darwinbox or Keka | P5 | P5 |
 
 **Thoughtworks and EPAM are the cheapest win in this whole section.** They are
@@ -241,6 +268,50 @@ The single largest under-served category for a Bengaluru-based candidate.
    fetch with a Bengaluru/India location facet rather than paginating everything.
    This is the difference between 30 requests and 3,000.
 4. **NASSCOM and GCC-association member lists** for discovering new entrants.
+
+**Built (P3), against real tenants:** `infra/seed/gcc_sources.sql` — 21 of the
+~150-entry target, each individually verified live (real, current, non-empty
+postings) rather than guessed from a brand name, since a wrong tenant slug is
+a permanently-broken source row, not a harmless miss. `make seed-gcc-sources`
+loads them, `pending_review` like every other seeded source.
+
+Reaching 21 required point 2 above in practice, not just in theory: several
+brand-guessable tenant slugs turned out wrong or gone (Qualcomm migrated off
+Workday entirely; Walmart's real tenant returned Workday's own maintenance
+page on every check during this pass), some GCCs docs/05 originally assumed
+were Workday/SuccessFactors turned out to be on a platform this project
+already supports instead (Nagarro and Bosch are both SmartRecruiters, found
+this pass — Nagarro was checked and missed during P2 Phase L's own sweep,
+see `infra/seed/sources.sql`'s comment), and several are SuccessFactors or a
+bespoke portal this project has no adapter for at all (TCS, Infosys, Wipro,
+Cognizant, Accenture, Capgemini, Deloitte, EY, KPMG, PwC — correctly P5 per
+section 6's own coverage table). `infra/seed/gcc_sources.sql`'s closing
+comment lists every attempted-and-rejected candidate by name.
+
+Point 3's actual implementation is `search_text`, not a per-tenant facet ID:
+`adapters/ats/workday.Fetch` reads `source.adapter_config["search_text"]` and
+sends it as Workday's own full-text search parameter on every page, narrowing
+a tenant's entire global board down to postings matching that text —
+confirmed against a real tenant to turn Lowe's 11,961-posting board into 56
+Bengaluru-matching results in one request. A true per-tenant location-facet
+ID is more precise (found for two tenants during this pass by driving each
+one's own search UI and reading the resulting `locations=` query parameter)
+but requires that same manual discovery per tenant, which doesn't scale
+across a growing seed list the way full-text search does — the accepted
+trade is missing a posting whose location field spells the city differently
+("Bangalore" vs. "Bengaluru") in exchange for zero per-tenant curation cost.
+
+This also required a real, previously-unnoticed fix, not just seed data:
+`apps/collector/internal/scheduler`'s poll loop performed its own plain GET
+for every source, regardless of adapter, and never called an adapter's own
+`Fetch` in production at all (only `apps/collector/internal/discovery` did,
+for candidate assessment). That happened to be harmless for every adapter
+through P2 — a plain conditional GET to `Source.URL` is exactly what
+Greenhouse/Lever/Ashby/Workable/SmartRecruiters/Recruitee/Teamtailor need —
+but Workday's CXS endpoint returns HTTP 400 to a bare GET, since it requires
+a POST with a JSON search body. Every Workday source would have failed every
+poll, forever, until this was found and fixed via `padapter.OwnFetcher` —
+see docs/06 section 8's "Who actually calls `Fetch`" for the full mechanism.
 
 **Entity resolution matters here.** "Target" and "Target in India" must resolve as
 parent-and-subsidiary rather than merging, or a Minneapolis role and a Bengaluru
