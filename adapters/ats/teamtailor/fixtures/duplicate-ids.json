@@ -1,0 +1,30 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "Acme",
+  "items": [
+    {
+      "id": "555001",
+      "title": "Backend Engineering Intern",
+      "url": "https://acmehq.teamtailor.com/jobs/555001-backend-engineering-intern",
+      "date_published": "2026-08-01T10:00:00+02:00",
+      "content_html": "<p>Join our backend team.</p>",
+      "_jobposting": {
+        "jobLocation": [
+          { "address": { "addressLocality": "Bengaluru", "addressCountry": "India" } }
+        ]
+      }
+    },
+    {
+      "id": "555001",
+      "title": "Backend Engineering Intern (duplicate)",
+      "url": "https://acmehq.teamtailor.com/jobs/555001-backend-engineering-intern",
+      "date_published": "2026-08-01T10:00:00+02:00",
+      "content_html": "<p>Join our backend team.</p>",
+      "_jobposting": {
+        "jobLocation": [
+          { "address": { "addressLocality": "Bengaluru", "addressCountry": "India" } }
+        ]
+      }
+    }
+  ]
+}
