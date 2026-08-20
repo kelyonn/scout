@@ -1,0 +1,92 @@
+# ADR-016's provider-rotation cascade (docs/adr/ADR-016-free-tier-llm-cascade.md).
+# apps/brain/scout_brain/config.py loads this file and walks `providers` in
+# order, skipping any entry whose api_key_env is unset in the environment —
+# a host with zero API keys configured runs local-Ollama-only, exactly as
+# before this cascade existed. At least two independent hosted providers plus
+# the local fallback is the ADR's requirement, so no single provider's
+# withdrawal is an outage; that requirement is structural, not enforced by
+# this file, so a reviewer changing this list is the one who upholds it.
+#
+# api_key_env names an environment variable, never a literal key — this file
+# is committed to a public repository (AGENTS.md rule 10's corollary).
+#
+# kind selects which client class in scout_brain.llm sends the request:
+# "gemini" (Google AI Studio's own request shape) or "openai_compatible"
+# (Groq and OpenRouter both speak the OpenAI chat-completions API).
+#
+# Model names below were corrected 2026-08-20 after discovering, by
+# actually checking rather than trusting this file, that BOTH originally
+# configured models were already dead: gemini-2.0-flash was deprecated
+# 2026-02-18 and shut down 2026-06-01 (every call 404s); Groq deprecated
+# llama-3.1-8b-instant for free/developer tier 2026-06-17. Free-tier model
+# lineups churn faster than this file gets reviewed — re-verify the
+# provider's own current model list before assuming any of these three
+# still resolve, the same way this correction had to.
+#
+# gemini-2.5-flash got corrected to gemini-3.6-flash the same day, by a
+# real API call rather than a second round of web search: a fresh key
+# created 2026-08-20 got a live 404 from Google's own API — "This model
+# models/gemini-2.5-flash is no longer available to new users... use
+# models/gemini-3.6-flash" — a per-account cutover a search engine has no
+# way to know about. gemini-3.6-flash confirmed working with a real 200
+# response from that same key.
+#
+# gemini-3.6-flash was then itself replaced by gemini-3.5-flash-lite,
+# same day, after the account's own AI Studio Rate Limit page (the
+# source Google's docs say is now authoritative — there is no public
+# static table anymore) showed the real numbers: 3.6 Flash gets 5 RPM /
+# 20 RPD on this tier, which a pipeline classifying/deduping more than a
+# handful of postings a day would exhaust in minutes and spend the rest
+# of the day on local-only. The "Lite" variants (3.1 Flash Lite, 3.5
+# Flash Lite — identical limits on this account) get 15 RPM / 500 RPD,
+# 25x the daily budget, for a quality difference that matters far less
+# for a structured classify/adjudicate task than it would for open-ended
+# generation. Confirmed live with a real 200 response — and notably
+# lighter too: 8 total tokens for a trivial prompt versus 103 for
+# gemini-3.6-flash's answer to the identical prompt, most of that
+# "thinking" tokens 3.6 Flash spends by default and Flash Lite doesn't.
+providers:
+  - name: gemini
+    kind: gemini
+    api_key_env: SCOUT_BRAIN_GEMINI_API_KEY
+    model: gemini-3.5-flash-lite
+    # From the account's own AI Studio Rate Limit page, 2026-08-20 — not
+    # guessed. Re-check that page (Google publishes no static table
+    # anymore) before trusting these numbers stay accurate long-term.
+    rpm: 15
+    rpd: 500
+
+  - name: groq
+    kind: openai_compatible
+    api_key_env: SCOUT_BRAIN_GROQ_API_KEY
+    base_url: https://api.groq.com/openai/v1
+    # openai/gpt-oss-20b — Groq's own documented migration target for the
+    # now-dead llama-3.1-8b-instant. Same free-tier limits as before
+    # (30 RPM / 14,400 RPD), plus a 200,000 tokens/day cap Groq applies
+    # per-model that this file doesn't track separately.
+    model: openai/gpt-oss-20b
+    rpm: 30
+    rpd: 14400
+
+  - name: openrouter
+    kind: openai_compatible
+    api_key_env: SCOUT_BRAIN_OPENROUTER_API_KEY
+    base_url: https://openrouter.ai/api/v1
+    # openrouter/free — an auto-rotating alias across OpenRouter's
+    # current $0 model roster, not a single pinned model. Deliberate:
+    # OpenRouter's free catalog is the most volatile of the three (its
+    # entire free Llama and Qwen tiers were delisted within the last few
+    # weeks of this file's correction), so pinning a specific model here
+    # again would just recreate today's bug at the next reshuffle.
+    model: openrouter/free
+    rpm: 20
+    # 50, not 200: OpenRouter's real free-tier cap is 50 requests/day
+    # unless the account has purchased $10+ in credits at some point
+    # (then 1000/day) — this file's original 200 was never accurate for
+    # an account that has spent nothing, which AGENTS.md rule 10 requires.
+    rpd: 50
+
+# Always available, never rate limited, used once every provider above is
+# exhausted or unconfigured — ADR-016's "2-local" tier.
+local:
+  model: qwen2.5:3b-instruct
