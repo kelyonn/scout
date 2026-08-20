@@ -1,14 +1,15 @@
-// Command collector polls sources and writes raw observations.
+// Command collector polls sources, writes raw observations, and runs each
+// posting through normalize/classify/dedup/score.
 //
 // The scheduler (docs/06-ingestion-pipeline.md section 3), the politeness
-// gate (section 4), and the fetcher (section 5) all run here now. What is
-// still missing is an adapter: Layer 3 change detection (a structural diff
-// via an adapter's Parse) and observation writing (sections 8 and 9) need
-// one, and none exists yet — Greenhouse, Lever, and Ashby land with the rest
-// of P1. Until then, a poll cycle updates the source row itself (did it
-// succeed, did the content change, when to try next) and nothing else; see
-// the package comment on apps/collector/internal/scheduler for the exact
-// boundary.
+// gate (section 4), the fetcher (section 5), change detection (section 6),
+// and — via buildPipeline below — Layer 3 and observation writing (sections
+// 8-9) all run here. The adapter registry covers every P1/P2/P3 adapter
+// (Greenhouse, Lever, Ashby, Workable, SmartRecruiters, Recruitee,
+// Teamtailor, Workday); any source_kind without a registered adapter is
+// still change-detected and scheduled correctly, just with nothing written
+// downstream of Layer 2 — see the package comment on
+// apps/collector/internal/scheduler for the exact boundary.
 //
 // Every outbound HTTP request that fetches a source must go through
 // PolitenessGate.Allow(). See docs/14-legal-compliance.md, and the heartbeat
@@ -22,6 +23,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"strconv"
 	"sync"
 	"syscall"
 	"time"
@@ -29,13 +31,27 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/redis/go-redis/v9"
 
-	"github.com/kelyon/scout/apps/collector/internal/fetch"
+	"github.com/kelyon/scout/adapters/ats/ashby"
+	"github.com/kelyon/scout/adapters/ats/greenhouse"
+	"github.com/kelyon/scout/adapters/ats/lever"
+	"github.com/kelyon/scout/adapters/ats/recruitee"
+	"github.com/kelyon/scout/adapters/ats/smartrecruiters"
+	"github.com/kelyon/scout/adapters/ats/teamtailor"
+	"github.com/kelyon/scout/adapters/ats/workable"
+	"github.com/kelyon/scout/adapters/ats/workday"
+	"github.com/kelyon/scout/apps/collector/internal/emailalert"
 	"github.com/kelyon/scout/apps/collector/internal/heartbeat"
 	"github.com/kelyon/scout/apps/collector/internal/politeness"
 	"github.com/kelyon/scout/apps/collector/internal/ratelimit"
 	"github.com/kelyon/scout/apps/collector/internal/robots"
 	"github.com/kelyon/scout/apps/collector/internal/scheduler"
 	"github.com/kelyon/scout/apps/collector/internal/source"
+	padapter "github.com/kelyon/scout/packages/adapter"
+	"github.com/kelyon/scout/packages/fetch"
+	"github.com/kelyon/scout/packages/logging"
+	"github.com/kelyon/scout/packages/metrics"
+	"github.com/kelyon/scout/packages/queue"
+	"github.com/kelyon/scout/packages/taxonomy"
 )
 
 // defaultLivenessPath sits on the container's tmpfs, which is the only writable
@@ -43,7 +59,7 @@ import (
 const defaultLivenessPath = "/tmp/collector-alive"
 
 func main() {
-	log := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	log := slog.New(logging.Scrub(slog.NewJSONHandler(os.Stdout, nil)))
 
 	// `collector healthcheck` is what the container healthcheck runs. The image
 	// is distroless: no shell, no curl, nothing else that could probe it.
@@ -106,8 +122,15 @@ func run(log *slog.Logger) error {
 	}
 	defer pool.Close()
 
+	queueClient, err := queue.New(pool)
+	if err != nil {
+		return fmt.Errorf("configure queue: %w", err)
+	}
+
 	fetcher := fetch.New(contactURL, operatorEmail)
-	sched := scheduler.New(pool, gate, fetcher, log)
+	sched := scheduler.New(pool, gate, fetcher, log).
+		WithPipeline(buildPipeline(fetcher)).
+		WithQueue(queueClient)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -122,12 +145,33 @@ func run(log *slog.Logger) error {
 			Run(ctx, healthcheckInterval(log))
 	}()
 
+	// docs/16-observability.md — Prometheus scrapes this directly; see
+	// packages/metrics' own comment on why it's unauthenticated.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		metrics.Serve(ctx, metricsAddr(), log)
+	}()
+
+	// scout_queue_depth / scout_queue_oldest_job_age_seconds (docs/16
+	// section 4) — read directly from river_job on a short ticker, not
+	// event-driven, since nothing in this process observes a River queue
+	// draining (apps/brain's consumer is the one that dequeues, in a
+	// different process and language).
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		runQueueDepthLoop(ctx, pool, log)
+	}()
+
 	// Local development never fetches live sources — SCOUT_FIXTURES_ONLY is
 	// the default in .env.example, and the collector honors it here rather
-	// than relying on the local source table simply being empty. The
-	// scheduler has no fixture-replay mode yet (that lands with the adapters
-	// that need it), so the only correct behavior today is not to start it at
-	// all, not to start it and trust nothing due happens to be seeded.
+	// than relying on the local source table simply being empty. There is
+	// still no fixture-replay mode for the scheduler itself (adapter-level
+	// fixtures live in each adapter's own package and are exercised by its
+	// tests, not by running the live scheduler against them), so the only
+	// correct behavior today is not to start the scheduler at all, not to
+	// start it and trust nothing due happens to be seeded.
 	if os.Getenv("SCOUT_FIXTURES_ONLY") == "true" {
 		log.Warn("scheduler disabled: SCOUT_FIXTURES_ONLY=true")
 	} else {
@@ -136,12 +180,51 @@ func run(log *slog.Logger) error {
 			defer wg.Done()
 			sched.Run(ctx, scheduler.DefaultTickInterval)
 		}()
+
+		// Same fixtures-only gate as the HTTP scheduler above: this writes
+		// real job rows through the identical pipeline, just from a
+		// different source (docs/06's email-alert ingestion), so local
+		// development skips it for the same reason.
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			handler := func(ctx context.Context, provider string, posting emailalert.ExtractedPosting) error {
+				if _, err := sched.IngestEmailAlert(ctx, provider, posting); err != nil {
+					return fmt.Errorf("ingest email alert: %w", err)
+				}
+				return nil
+			}
+			emailalert.NewPoller(emailIMAPConfig(), handler, log).Run(ctx, emailalert.DefaultInterval)
+		}()
 	}
 
 	wg.Wait()
 
 	log.Info("collector stopped")
 	return nil
+}
+
+// buildPipeline wires normalize/classify/dedup/score's shared dependencies
+// and the adapter registry. Panics on malformed taxonomy data for the same
+// reason packages/taxonomy's loaders do: a broken data file is a build-time
+// bug this binary should refuse to start with, not a runtime condition to
+// degrade around.
+func buildPipeline(fetcher *fetch.Fetcher) *scheduler.Pipeline {
+	return &scheduler.Pipeline{
+		Adapters: map[padapter.SourceKind]padapter.Adapter{
+			padapter.SourceKindGreenhouse:      greenhouse.New(fetcher),
+			padapter.SourceKindLever:           lever.New(fetcher),
+			padapter.SourceKindAshby:           ashby.New(fetcher),
+			padapter.SourceKindWorkable:        workable.New(fetcher),
+			padapter.SourceKindSmartRecruiters: smartrecruiters.New(fetcher),
+			padapter.SourceKindRecruitee:       recruitee.New(fetcher),
+			padapter.SourceKindTeamtailor:      teamtailor.New(fetcher),
+			padapter.SourceKindWorkday:         workday.New(fetcher),
+		},
+		Gazetteer: taxonomy.LoadGazetteer(),
+		Roles:     taxonomy.LoadRolePatterns(),
+		Skills:    taxonomy.LoadSkills(),
+	}
 }
 
 // buildPolitenessGate wires the compliance gate from environment
@@ -220,6 +303,80 @@ func livenessPath() string {
 		return v
 	}
 	return defaultLivenessPath
+}
+
+// metricsAddr is the collector's dedicated /metrics listener — it has no
+// other HTTP surface (unlike apps/api) for Prometheus to scrape.
+func metricsAddr() string {
+	if v := os.Getenv("SCOUT_METRICS_ADDR"); v != "" {
+		return v
+	}
+	return ":9090"
+}
+
+// queueDepthInterval is how often runQueueDepthLoop refreshes
+// scout_queue_depth/scout_queue_oldest_job_age_seconds — frequent enough
+// for the Overview dashboard to track a genuine stall within a couple of
+// minutes, cheap enough (two small aggregate queries) not to matter
+// against the Postgres load the rest of this binary already produces.
+const queueDepthInterval = 30 * time.Second
+
+// runQueueDepthLoop polls river_job for both queues until ctx is
+// cancelled. A read failure is logged and skipped rather than fatal —
+// same coarsening-is-safe posture as every other background loop in this
+// binary: a monitoring gauge going briefly stale must never take down
+// actual pipeline work.
+func runQueueDepthLoop(ctx context.Context, pool *pgxpool.Pool, log *slog.Logger) {
+	queues := []string{queue.QueueEmbed, queue.QueueBrainDeep}
+
+	refresh := func() {
+		for _, q := range queues {
+			d, err := queue.QueueDepth(ctx, pool, q)
+			if err != nil {
+				log.Warn("queue depth check failed", "queue", q, "err", err)
+				continue
+			}
+			metrics.QueueDepth.WithLabelValues(q).Set(float64(d.Count))
+			metrics.QueueOldestJobAge.WithLabelValues(q).Set(d.OldestAgeSeconds)
+		}
+	}
+
+	refresh()
+	ticker := time.NewTicker(queueDepthInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			refresh()
+		}
+	}
+}
+
+// emailIMAPConfig reads the email-alert account from environment
+// variables. All empty is a valid, "not configured" value — Poller.Enabled
+// reports false and Run returns without polling, the same
+// not-configured-is-quiet posture as buildPolitenessGate's peers
+// (heartbeat.New, and this package's own telegram-adjacent config helpers).
+// An unparseable port falls back to 993 (IMAPS) rather than failing
+// startup, since a misconfigured optional integration should degrade, not
+// take the whole collector down — the healthcheckInterval helper below does
+// the same for its own duration env var.
+func emailIMAPConfig() emailalert.Config {
+	port := 993
+	if v := os.Getenv("SCOUT_EMAIL_IMAP_PORT"); v != "" {
+		if parsed, err := strconv.Atoi(v); err == nil {
+			port = parsed
+		}
+	}
+	return emailalert.Config{
+		Host:     os.Getenv("SCOUT_EMAIL_IMAP_HOST"),
+		Port:     port,
+		Username: os.Getenv("SCOUT_EMAIL_IMAP_USER"),
+		Password: os.Getenv("SCOUT_EMAIL_IMAP_PASSWORD"),
+		Mailbox:  os.Getenv("SCOUT_EMAIL_IMAP_MAILBOX"),
+	}
 }
 
 func healthcheckInterval(log *slog.Logger) time.Duration {
