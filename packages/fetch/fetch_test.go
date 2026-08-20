@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -236,6 +237,9 @@ func TestFetchFollowsRedirectsUpToTheLimit(t *testing.T) {
 	if string(result.Body) != "ok" {
 		t.Errorf("Body = %q, want to have reached /final", result.Body)
 	}
+	if result.FinalURL != srv.URL+"/final" {
+		t.Errorf("FinalURL = %q, want %q — apps/collector/internal/emailalert's tracking-redirect resolution depends on this", result.FinalURL, srv.URL+"/final")
+	}
 }
 
 func TestFetchRefusesTooManyRedirects(t *testing.T) {
@@ -347,5 +351,62 @@ func TestFetchReportsErrorStatusesAsResultsNotErrors(t *testing.T) {
 	}
 	if result.StatusCode != http.StatusServiceUnavailable {
 		t.Errorf("StatusCode = %d, want 503", result.StatusCode)
+	}
+}
+
+// TestFetchPostSendsMethodBodyAndContentType covers the capability
+// adapters/ats/workday needs — Workday's CXS search endpoint requires a
+// POST with a JSON body, unlike every other adapter's plain GET.
+func TestFetchPostSendsMethodBodyAndContentType(t *testing.T) {
+	var gotMethod, gotContentType, gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotContentType = r.Header.Get("Content-Type")
+		body, _ := io.ReadAll(r.Body)
+		gotBody = string(body)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"total":0,"jobPostings":[]}`))
+	}))
+	defer srv.Close()
+
+	f := newTestFetcher(plainDialContext)
+	result, err := f.Fetch(context.Background(), Request{
+		URL: srv.URL, Method: http.MethodPost,
+		Body: []byte(`{"limit":20,"offset":0}`), ContentType: "application/json",
+	})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if result.StatusCode != http.StatusOK {
+		t.Errorf("StatusCode = %d, want 200", result.StatusCode)
+	}
+	if gotMethod != http.MethodPost {
+		t.Errorf("method = %q, want POST", gotMethod)
+	}
+	if gotContentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", gotContentType)
+	}
+	if gotBody != `{"limit":20,"offset":0}` {
+		t.Errorf("body = %q, want the request body sent verbatim", gotBody)
+	}
+}
+
+// TestFetchDefaultMethodIsStillGet is the regression guard for every
+// other adapter: Request{} with no Method set must behave exactly as it
+// did before Method/Body/ContentType existed.
+func TestFetchDefaultMethodIsStillGet(t *testing.T) {
+	var gotMethod string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	f := newTestFetcher(plainDialContext)
+	if _, err := f.Fetch(context.Background(), Request{URL: srv.URL}); err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if gotMethod != http.MethodGet {
+		t.Errorf("method = %q, want GET (the zero-value default)", gotMethod)
 	}
 }
