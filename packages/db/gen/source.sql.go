@@ -61,8 +61,36 @@ func (q *Queries) CountActiveSources(ctx context.Context) (int64, error) {
 	return count, err
 }
 
+const flagShadowSource = `-- name: FlagShadowSource :exec
+update source
+set shadow_reviewed_at = now(),
+    notes = coalesce(notes || E'\n', '') || $1::text,
+    updated_at = now()
+where id = $2::uuid
+`
+
+type FlagShadowSourceParams struct {
+	Reason string      `db:"reason" json:"reason"`
+	ID     pgtype.UUID `db:"id" json:"id"`
+}
+
+// The shadow run looked anomalous (zero jobs found, or an implausibly high
+// count — a likely sign of a wrong tenant slug or an adapter matching too
+// broadly). Stays 'pending_review' rather than being quarantined or
+// retired: nothing has actually gone wrong in a way those states describe,
+// a human just needs to look once. shadow_reviewed_at is set regardless, so
+// this source is not re-flagged on every future review pass — see this
+// migration's own comment on why that would otherwise happen. reason is
+// appended to notes for whoever reviews it next; AGENTS.md rule 7 forbids
+// PII here, and there is none to leak — url and counters, nothing a user
+// typed.
+func (q *Queries) FlagShadowSource(ctx context.Context, arg FlagShadowSourceParams) error {
+	_, err := q.db.Exec(ctx, flagShadowSource, arg.Reason, arg.ID)
+	return err
+}
+
 const getSourceByID = `-- name: GetSourceByID :one
-select id, company_id, kind, status, legal_posture, url, url_hash, adapter_config, robots_allowed, robots_checked_at, robots_crawl_delay_s, max_rps, max_concurrency, base_interval_s, current_interval_s, min_interval_s, max_interval_s, next_poll_at, last_polled_at, hiring_pattern, last_etag, last_modified, last_content_hash, last_changed_at, consecutive_failures, circuit_open_until, total_polls, total_successes, total_jobs_found, total_new_jobs, yield_ratio, yield_computed_at, priority_tier, notes, created_at, updated_at
+select id, company_id, kind, status, legal_posture, url, url_hash, adapter_config, robots_allowed, robots_checked_at, robots_crawl_delay_s, max_rps, max_concurrency, base_interval_s, current_interval_s, min_interval_s, max_interval_s, next_poll_at, last_polled_at, hiring_pattern, last_etag, last_modified, last_content_hash, last_changed_at, consecutive_failures, circuit_open_until, total_polls, total_successes, total_jobs_found, total_new_jobs, yield_ratio, yield_computed_at, priority_tier, notes, created_at, updated_at, shadow_reviewed_at
 from source
 where id = $1::uuid
 `
@@ -110,8 +138,62 @@ func (q *Queries) GetSourceByID(ctx context.Context, id pgtype.UUID) (Source, er
 		&i.Notes,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.ShadowReviewedAt,
 	)
 	return i, err
+}
+
+const halveMaxRPS = `-- name: HalveMaxRPS :exec
+update source
+set max_rps = max_rps / 2, updated_at = now()
+where id = $1::uuid
+`
+
+// docs/06 section 10's 429 handling: honor Retry-After (via
+// RescheduleSource's next_poll_at) AND halve max_rps permanently — the
+// source told us its previous rate was too fast, and that fact outlives
+// this one poll.
+func (q *Queries) HalveMaxRPS(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, halveMaxRPS, id)
+	return err
+}
+
+const promoteShadowSource = `-- name: PromoteShadowSource :exec
+update source
+set status = 'active', priority_tier = $1::smallint,
+    shadow_reviewed_at = now(), updated_at = now()
+where id = $2::uuid
+`
+
+type PromoteShadowSourceParams struct {
+	PriorityTier int16       `db:"priority_tier" json:"priority_tier"`
+	ID           pgtype.UUID `db:"id" json:"id"`
+}
+
+// The shadow run looked healthy: real jobs, no red flags. priority_tier
+// comes from decideShadowPromotion's yield-based mapping (docs/05 step 6,
+// "a tier assigned by observed yield") — never tier 1, which stays reserved
+// for manual curation, same reasoning as QuarantineSource reserving
+// 'quarantined' for a human to clear.
+func (q *Queries) PromoteShadowSource(ctx context.Context, arg PromoteShadowSourceParams) error {
+	_, err := q.db.Exec(ctx, promoteShadowSource, arg.PriorityTier, arg.ID)
+	return err
+}
+
+const quarantineSource = `-- name: QuarantineSource :exec
+update source
+set status = 'quarantined', updated_at = now()
+where id = $1::uuid
+`
+
+// docs/06 section 10: 401/403 means access changed, not a transient blip.
+// Setting status here (rather than only backing off next_poll_at) is what
+// actually stops polling — SelectDueSources's own predicate requires
+// status = 'active', so a quarantined source simply stops being selected
+// until a human reviews and reactivates it.
+func (q *Queries) QuarantineSource(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, quarantineSource, id)
+	return err
 }
 
 const rescheduleSource = `-- name: RescheduleSource :exec
@@ -136,12 +218,26 @@ func (q *Queries) RescheduleSource(ctx context.Context, arg RescheduleSourcePara
 	return err
 }
 
+const retireSource = `-- name: RetireSource :exec
+update source
+set status = 'retired', updated_at = now()
+where id = $1::uuid
+`
+
+// docs/06 section 10: three consecutive 404s means the board is gone.
+func (q *Queries) RetireSource(ctx context.Context, id pgtype.UUID) error {
+	_, err := q.db.Exec(ctx, retireSource, id)
+	return err
+}
+
 const selectDueSources = `-- name: SelectDueSources :many
 
 select
     id,
+    company_id,
     kind,
     url,
+    adapter_config,
     max_rps,
     max_concurrency,
     robots_crawl_delay_s,
@@ -158,7 +254,7 @@ select
     last_content_hash,
     consecutive_failures
 from source
-where status = 'active'
+where status in ('active', 'pending_review')
     and legal_posture in ('permitted', 'api_only')
     and next_poll_at <= now()
     and (circuit_open_until is NULL or circuit_open_until <= now())
@@ -169,8 +265,10 @@ for update skip locked
 
 type SelectDueSourcesRow struct {
 	ID                  pgtype.UUID        `db:"id" json:"id"`
+	CompanyID           pgtype.UUID        `db:"company_id" json:"company_id"`
 	Kind                SourceKind         `db:"kind" json:"kind"`
 	Url                 string             `db:"url" json:"url"`
+	AdapterConfig       []byte             `db:"adapter_config" json:"adapter_config"`
 	MaxRps              float32            `db:"max_rps" json:"max_rps"`
 	MaxConcurrency      int16              `db:"max_concurrency" json:"max_concurrency"`
 	RobotsCrawlDelayS   *float32           `db:"robots_crawl_delay_s" json:"robots_crawl_delay_s"`
@@ -193,11 +291,16 @@ type SelectDueSourcesRow struct {
 //
 // Lowercase keywords per AGENTS.md; linted with .sqlfluff-queries rather than
 // the uppercase-migrations config in .sqlfluff.
-// The scheduler's hot query, unchanged from docs/06 section 3.2's literal
-// text. `for update skip locked` is what lets multiple scheduler instances —
-// today there is only one, but the query is written for the day there is more
-// than one — run without coordinating: each grabs a disjoint batch rather
-// than blocking on rows another instance already claimed.
+// The scheduler's hot query, docs/06 section 3.2's literal text plus one
+// deliberate deviation: 'pending_review' is admitted alongside 'active' so a
+// newly registered source's 48h shadow run (docs/05 section 13) actually
+// polls, parses, and dedups like a real source — it is only notifications
+// that stay suppressed during the window, enforced separately at
+// SelectUnnotifiedJobGroups. `for update skip locked` is what lets multiple
+// scheduler instances — today there is only one, but the query is written
+// for the day there is more than one — run without coordinating: each grabs
+// a disjoint batch rather than blocking on rows another instance already
+// claimed.
 //
 // The circuit-breaker predicate admits a source whose breaker is open but
 // past its backoff window (half-open: ready for one probe request) as well as
@@ -217,8 +320,10 @@ func (q *Queries) SelectDueSources(ctx context.Context, batchLimit int32) ([]Sel
 		var i SelectDueSourcesRow
 		if err := rows.Scan(
 			&i.ID,
+			&i.CompanyID,
 			&i.Kind,
 			&i.Url,
+			&i.AdapterConfig,
 			&i.MaxRps,
 			&i.MaxConcurrency,
 			&i.RobotsCrawlDelayS,
@@ -245,7 +350,70 @@ func (q *Queries) SelectDueSources(ctx context.Context, batchLimit int32) ([]Sel
 	return items, nil
 }
 
-const updateSourceAfterPoll = `-- name: UpdateSourceAfterPoll :exec
+const selectShadowSourcesDueForReview = `-- name: SelectShadowSourcesDueForReview :many
+select
+    id,
+    url,
+    total_polls,
+    total_successes,
+    total_jobs_found,
+    total_new_jobs,
+    yield_ratio
+from source
+where status = 'pending_review'
+    and shadow_reviewed_at is NULL
+    and legal_posture in ('permitted', 'api_only')
+    and created_at <= now() - interval '48 hours'
+order by created_at asc
+limit $1::int
+`
+
+type SelectShadowSourcesDueForReviewRow struct {
+	ID             pgtype.UUID `db:"id" json:"id"`
+	Url            string      `db:"url" json:"url"`
+	TotalPolls     int64       `db:"total_polls" json:"total_polls"`
+	TotalSuccesses int64       `db:"total_successes" json:"total_successes"`
+	TotalJobsFound int64       `db:"total_jobs_found" json:"total_jobs_found"`
+	TotalNewJobs   int64       `db:"total_new_jobs" json:"total_new_jobs"`
+	YieldRatio     float32     `db:"yield_ratio" json:"yield_ratio"`
+}
+
+// docs/05 section 13 step 5-6: a source registered as 'pending_review' polls
+// silently for 48 hours, then gets promoted or flagged. This is the "48
+// hours have passed and nobody has decided yet" query — the counters it
+// returns are exactly what apps/collector/internal/scheduler's pure
+// decideShadowPromotion function needs to decide, the same
+// read-the-counters-then-write-the-verdict split source.sql already uses for
+// UpdateSourceAfterPoll's interval math.
+func (q *Queries) SelectShadowSourcesDueForReview(ctx context.Context, batchLimit int32) ([]SelectShadowSourcesDueForReviewRow, error) {
+	rows, err := q.db.Query(ctx, selectShadowSourcesDueForReview, batchLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []SelectShadowSourcesDueForReviewRow{}
+	for rows.Next() {
+		var i SelectShadowSourcesDueForReviewRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Url,
+			&i.TotalPolls,
+			&i.TotalSuccesses,
+			&i.TotalJobsFound,
+			&i.TotalNewJobs,
+			&i.YieldRatio,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const updateSourceAfterPoll = `-- name: UpdateSourceAfterPoll :one
 update source
 set
     next_poll_at = $1::timestamptz,
@@ -266,8 +434,13 @@ set
     circuit_open_until = $8::timestamptz,
     total_polls = total_polls + 1,
     total_successes = total_successes + case when $9::boolean then 1 else 0 end,
+    total_jobs_found = total_jobs_found + $10::bigint,
+    total_new_jobs = total_new_jobs + $11::bigint,
+    yield_ratio = yield_ratio * 0.99 + (case when $11::bigint > 0 then 1 else 0 end) * 0.01,
+    yield_computed_at = now(),
     updated_at = now()
-where id = $10::uuid
+where id = $12::uuid
+returning yield_ratio
 `
 
 type UpdateSourceAfterPollParams struct {
@@ -280,6 +453,8 @@ type UpdateSourceAfterPollParams struct {
 	ConsecutiveFailures int16              `db:"consecutive_failures" json:"consecutive_failures"`
 	CircuitOpenUntil    pgtype.Timestamptz `db:"circuit_open_until" json:"circuit_open_until"`
 	Success             bool               `db:"success" json:"success"`
+	JobsFound           int64              `db:"jobs_found" json:"jobs_found"`
+	NewJobs             int64              `db:"new_jobs" json:"new_jobs"`
 	ID                  pgtype.UUID        `db:"id" json:"id"`
 }
 
@@ -290,16 +465,26 @@ type UpdateSourceAfterPollParams struct {
 // (apps/collector/internal/changedetect) are all pure Go, tested in
 // isolation, and this query's only job is to write their combined result.
 //
-// Scoped to exactly the columns this milestone's slice of the pipeline can
-// legitimately compute. total_jobs_found, total_new_jobs, yield_ratio, and
-// yield_computed_at are deliberately absent: they depend on per-posting
-// extraction, which needs an adapter's Parse — see docs/06 section 8 — and no
-// adapter exists yet. Writing zeros into those columns from here would be
-// indistinguishable from "we checked and found none," which is a false
-// signal; leaving them at the schema's own defaults until the code that can
-// honestly compute them exists is the correct alternative.
-func (q *Queries) UpdateSourceAfterPoll(ctx context.Context, arg UpdateSourceAfterPollParams) error {
-	_, err := q.db.Exec(ctx, updateSourceAfterPoll,
+// total_jobs_found and total_new_jobs are cumulative counters, bumped by
+// however many postings this poll parsed and how many of those turned out to
+// be genuinely new jobs (apps/collector/internal/dedup.Result.IsNewJob) — both
+// 0 on a poll that didn't reach parsing (a 304, an unchanged 200, a fetch
+// failure).
+//
+// yield_ratio (P3, docs/16-observability.md): an exponential moving average
+// over "did this poll find >=1 new job", decay 0.01 — an ~100-poll effective
+// window, approximating the schema's own "new jobs / 100 polls" comment
+// without a per-poll history table a true rolling window would need. Updated
+// on every poll, including a fetch failure or an unchanged 200 (new_jobs=0
+// either way): a source that starts failing every poll should show declining
+// yield exactly like one that starts returning nothing new, since both are
+// the "silent degradation" this metric exists to catch. This is also the
+// first time this column has ever been written — it defaulted to 0 from
+// schema creation through P2, which meant interval.Compute's yield_factor
+// input was pinned at 0 for every source (yield_factor = 0.3 + 3.7*e^0 = 4.0,
+// the maximum-poll-rate end of its range) rather than adapting at all.
+func (q *Queries) UpdateSourceAfterPoll(ctx context.Context, arg UpdateSourceAfterPollParams) (float32, error) {
+	row := q.db.QueryRow(ctx, updateSourceAfterPoll,
 		arg.NextPollAt,
 		arg.CurrentIntervalS,
 		arg.LastEtag,
@@ -309,7 +494,11 @@ func (q *Queries) UpdateSourceAfterPoll(ctx context.Context, arg UpdateSourceAft
 		arg.ConsecutiveFailures,
 		arg.CircuitOpenUntil,
 		arg.Success,
+		arg.JobsFound,
+		arg.NewJobs,
 		arg.ID,
 	)
-	return err
+	var yield_ratio float32
+	err := row.Scan(&yield_ratio)
+	return yield_ratio, err
 }
