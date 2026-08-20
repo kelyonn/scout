@@ -1,0 +1,29 @@
+{
+  "total": 3,
+  "jobPostings": [
+    {
+      "title": "Software Engineering Intern",
+      "externalPath": "/job/Bengaluru/Software-Engineering-Intern_R-12345",
+      "locationsText": "Bengaluru, India",
+      "postedOn": "Posted 3 Days Ago",
+      "bulletFields": ["R-12345"],
+      "timeType": "Full time"
+    },
+    {
+      "title": "Cloud Infrastructure Engineer",
+      "externalPath": "/job/Remote/Cloud-Infrastructure-Engineer_R-99887",
+      "locationsText": "Remote - India",
+      "postedOn": "Posted Today",
+      "bulletFields": ["R-99887", "Full-Time"],
+      "timeType": "Full time"
+    },
+    {
+      "title": "Data Analyst Intern",
+      "externalPath": "/job/Hyderabad/Data-Analyst-Intern_R-55221",
+      "locationsText": "Hyderabad, India",
+      "postedOn": "Posted 30+ Days Ago",
+      "bulletFields": [],
+      "timeType": "Intern"
+    }
+  ]
+}
