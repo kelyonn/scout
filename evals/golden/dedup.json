@@ -1,0 +1,146 @@
+[
+  {
+    "title_a": "Backend Engineering Intern",
+    "location_a": "Bengaluru",
+    "desc_a": "Join our payments infrastructure team building Go services that process millions of transactions daily. Work with senior engineers on distributed systems design.",
+    "title_b": "Software Engineering Intern - Payments",
+    "location_b": "Bengaluru",
+    "desc_b": "Help build the backend systems powering our payments platform. You'll write Go microservices and collaborate with the infra team on scaling transaction processing.",
+    "expected_same_role": true
+  },
+  {
+    "title_a": "Frontend Developer Intern",
+    "location_a": "Remote",
+    "desc_a": "Build features in React and TypeScript for our customer dashboard, working with the design team on accessible, responsive UI.",
+    "title_b": "UI Engineering Intern",
+    "location_b": "Remote",
+    "desc_b": "Implement pixel-perfect React components for our web dashboard, ensuring accessibility and cross-browser compatibility.",
+    "expected_same_role": true
+  },
+  {
+    "title_a": "Machine Learning Intern",
+    "location_a": "Hyderabad",
+    "desc_a": "Train ranking models for our recommendation engine using PyTorch, working on feature engineering and offline evaluation.",
+    "title_b": "ML Engineering Intern - Recommendations",
+    "location_b": "Hyderabad",
+    "desc_b": "Work on the recommendation system's ranking models, building PyTorch pipelines and evaluating model performance offline.",
+    "expected_same_role": true
+  },
+  {
+    "title_a": "Backend Engineering Intern",
+    "location_a": "Bengaluru",
+    "desc_a": "Join our payments infrastructure team building Go services for transaction processing.",
+    "title_b": "Backend Engineering Intern",
+    "location_b": "Pune",
+    "desc_b": "Join our identity and access management team building Java services for authentication and authorization across the platform.",
+    "expected_same_role": false
+  },
+  {
+    "title_a": "Software Engineering Intern",
+    "location_a": "Bengaluru",
+    "desc_a": "Work on our search infrastructure team, improving query latency and relevance for our e-commerce search engine.",
+    "title_b": "Software Engineering Intern",
+    "location_b": "Bengaluru",
+    "desc_b": "Work on our checkout team, building the cart and payment flow for our e-commerce platform.",
+    "expected_same_role": false
+  },
+  {
+    "title_a": "Senior Backend Engineering Intern",
+    "location_a": "Remote",
+    "desc_a": "For students in their final year: lead a small feature end to end, mentoring a junior intern, with production on-call responsibilities.",
+    "title_b": "Backend Engineering Intern",
+    "location_b": "Remote",
+    "desc_b": "For first- and second-year students: work on well-scoped backend tickets under close mentorship, no on-call responsibilities.",
+    "expected_same_role": false
+  },
+  {
+    "title_a": "Data Engineering Intern",
+    "location_a": "Chennai",
+    "desc_a": "Build Airflow pipelines moving events through Kafka into our data warehouse for the analytics team.",
+    "title_b": "Data Pipeline Intern",
+    "location_b": "Chennai",
+    "desc_b": "Maintain and extend our Airflow-based ETL pipelines that feed the analytics warehouse from Kafka event streams.",
+    "expected_same_role": true
+  },
+  {
+    "title_a": "DevOps Engineering Intern",
+    "location_a": "Remote",
+    "desc_a": "Improve our GitHub Actions CI/CD pipelines, reducing build times across a dozen microservices.",
+    "title_b": "Site Reliability Engineering Intern",
+    "location_b": "Remote",
+    "desc_b": "Own on-call rotations and incident response for our production services, writing runbooks and postmortems.",
+    "expected_same_role": false
+  },
+  {
+    "title_a": "Mobile Engineering Intern (Android)",
+    "location_a": "Bengaluru",
+    "desc_a": "Build features in Kotlin for our Android rider app, working on real-time location tracking and offline sync.",
+    "title_b": "Android Developer Intern",
+    "location_b": "Bengaluru",
+    "desc_b": "Develop new features in our Kotlin-based Android app used by riders, including real-time GPS tracking and offline data support.",
+    "expected_same_role": true
+  },
+  {
+    "title_a": "Security Engineering Intern",
+    "location_a": "Remote",
+    "desc_a": "Perform code reviews for vulnerabilities and run penetration tests against our web applications.",
+    "title_b": "Application Security Intern",
+    "location_b": "Remote",
+    "desc_b": "Review application code for security issues and conduct penetration testing on our customer-facing web apps.",
+    "expected_same_role": true
+  },
+  {
+    "title_a": "Software Engineering Intern - Search",
+    "location_a": "Gurugram",
+    "desc_a": "Improve query latency and relevance ranking for our search infrastructure serving millions of daily queries.",
+    "title_b": "Software Engineering Intern - Growth",
+    "location_b": "Gurugram",
+    "desc_b": "Build and A/B test onboarding flow experiments to improve new-user activation rates.",
+    "expected_same_role": false
+  },
+  {
+    "title_a": "Platform Engineering Intern",
+    "location_a": "Bengaluru",
+    "desc_a": "Build internal developer tooling and self-service infrastructure APIs used by other engineering teams to provision databases.",
+    "title_b": "Internal Tools Engineering Intern",
+    "location_b": "Bengaluru",
+    "desc_b": "Build self-service tooling and APIs that let engineering teams provision their own infrastructure without filing tickets.",
+    "expected_same_role": true
+  },
+  {
+    "title_a": "Full Stack Engineering Intern",
+    "location_a": "Remote",
+    "desc_a": "Ship complete features across our Next.js frontend and Node.js backend for the internal admin dashboard.",
+    "title_b": "Full Stack Engineering Intern",
+    "location_b": "Remote",
+    "desc_b": "Ship complete features across our Next.js frontend and Node.js backend for the customer-facing billing portal.",
+    "expected_same_role": false
+  },
+  {
+    "title_a": "QA Automation Intern",
+    "location_a": "Pune",
+    "desc_a": "Build and maintain Playwright end-to-end test suites for the web application, triaging flaky tests.",
+    "title_b": "Test Automation Engineering Intern",
+    "location_b": "Pune",
+    "desc_b": "Maintain our Playwright-based end-to-end test suite for the web app and reduce flaky test failures in CI.",
+    "expected_same_role": true
+  },
+  {
+    "title_a": "Cloud Infrastructure Intern",
+    "location_a": "Remote",
+    "desc_a": "Provision multi-region AWS infrastructure with Terraform for our core product's high-availability setup.",
+    "title_b": "Cloud Infrastructure Intern",
+    "location_b": "Remote",
+    "desc_b": "Provision AWS infrastructure with Terraform for our internal data science team's compute clusters.",
+    "expected_same_role": false
+  },
+  {
+    "title_a": "Embedded Software Intern",
+    "location_a": "Bengaluru",
+    "desc_a": "Write C firmware for IoT sensor devices, optimizing power consumption for battery-powered field deployments.",
+    "title_b": "Firmware Engineering Intern",
+    "location_b": "Bengaluru",
+    "desc_b": "Develop embedded C firmware for our IoT sensors, focused on power efficiency for long-life battery operation.",
+    "expected_same_role": true
+  }
+]

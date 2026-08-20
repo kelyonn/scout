@@ -1,0 +1,134 @@
+[
+  {
+    "title": "Backend Engineering Intern",
+    "description": "Join our payments team building the Go services that process millions of transactions daily. You'll design REST APIs, write database migrations, and work on distributed systems with senior engineers.",
+    "expected_role_family": "swe.backend",
+    "expected_is_software": true
+  },
+  {
+    "title": "Frontend Developer Intern",
+    "description": "Build user-facing features in React and TypeScript for our web dashboard. You'll work closely with designers to implement pixel-perfect, accessible UI components and improve page load performance.",
+    "expected_role_family": "swe.frontend",
+    "expected_is_software": true
+  },
+  {
+    "title": "Full Stack Software Engineering Intern",
+    "description": "Work across our Next.js frontend and Node.js backend, shipping complete features end to end — from database schema to the UI that renders it.",
+    "expected_role_family": "swe.fullstack",
+    "expected_is_software": true
+  },
+  {
+    "title": "Mobile Engineering Intern (iOS)",
+    "description": "Build features in our Swift/SwiftUI iOS app used by millions of riders. You'll work on real-time location tracking, push notifications, and offline-first data sync.",
+    "expected_role_family": "swe.mobile",
+    "expected_is_software": true
+  },
+  {
+    "title": "Machine Learning Engineer Intern",
+    "description": "Train and deploy ranking models for our recommendation system. Experience with PyTorch, feature engineering, and offline evaluation metrics required.",
+    "expected_role_family": "swe.ml",
+    "expected_is_software": true
+  },
+  {
+    "title": "Applied Research Intern, ML",
+    "description": "Work with our research team on novel transformer architectures for long-context retrieval, publishing findings and prototyping in JAX.",
+    "expected_role_family": "swe.ml.research",
+    "expected_is_software": true
+  },
+  {
+    "title": "Data Engineering Intern",
+    "description": "Build and maintain our Airflow pipelines that move billions of events through Kafka into our data warehouse, ensuring data quality and freshness for analytics.",
+    "expected_role_family": "swe.data",
+    "expected_is_software": true
+  },
+  {
+    "title": "Infrastructure Engineering Intern",
+    "description": "Help operate our Kubernetes clusters and Terraform-managed cloud infrastructure across AWS regions, improving deployment reliability and cost efficiency.",
+    "expected_role_family": "swe.infra",
+    "expected_is_software": true
+  },
+  {
+    "title": "Site Reliability Engineering Intern",
+    "description": "Own on-call rotations, write runbooks, and build alerting for our production services. You'll investigate incidents and drive postmortems to improve system reliability.",
+    "expected_role_family": "swe.infra.sre",
+    "expected_is_software": true
+  },
+  {
+    "title": "DevOps Intern",
+    "description": "Build and improve our CI/CD pipelines in GitHub Actions and Jenkins, automating deployments and reducing build times across a dozen microservices.",
+    "expected_role_family": "swe.infra.devops",
+    "expected_is_software": true
+  },
+  {
+    "title": "Platform Engineering Intern",
+    "description": "Build internal developer tooling and self-service infrastructure APIs that other engineering teams use to provision databases and services.",
+    "expected_role_family": "swe.infra.platform",
+    "expected_is_software": true
+  },
+  {
+    "title": "Cloud Infrastructure Intern",
+    "description": "Design and provision multi-region AWS infrastructure using Terraform and CloudFormation, focused on cost optimization and high availability.",
+    "expected_role_family": "swe.infra.cloud",
+    "expected_is_software": true
+  },
+  {
+    "title": "Systems Software Engineering Intern",
+    "description": "Work on our low-level storage engine written in Rust, optimizing disk I/O paths and memory allocation for our distributed database.",
+    "expected_role_family": "swe.systems",
+    "expected_is_software": true
+  },
+  {
+    "title": "Application Security Intern",
+    "description": "Perform code reviews for security vulnerabilities, run penetration tests against our web applications, and help build automated SAST tooling.",
+    "expected_role_family": "swe.security",
+    "expected_is_software": true
+  },
+  {
+    "title": "Embedded Software Intern",
+    "description": "Write firmware in C for our IoT sensor devices, working close to the hardware to optimize power consumption and real-time data collection.",
+    "expected_role_family": "swe.embedded",
+    "expected_is_software": true
+  },
+  {
+    "title": "QA Automation Engineering Intern",
+    "description": "Build and maintain our Selenium/Playwright end-to-end test suites, triage flaky tests, and improve CI test reliability across the web app.",
+    "expected_role_family": "swe.qa",
+    "expected_is_software": true
+  },
+  {
+    "title": "Developer Advocate Intern",
+    "description": "Write technical tutorials and sample code demonstrating our GraphQL API, build demo applications, and speak at developer meetups about integration patterns. You will also contribute directly to our public SDKs.",
+    "expected_role_family": "advocacy.devrel",
+    "expected_is_software": true
+  },
+  {
+    "title": "Developer Experience Intern",
+    "description": "Build and maintain our public SDKs and CLI tooling used by thousands of external developers, and improve our API documentation infrastructure.",
+    "expected_role_family": "advocacy.devex",
+    "expected_is_software": true
+  },
+  {
+    "title": "Solutions Engineering Intern",
+    "description": "Work directly with enterprise customers to design and implement custom integrations with our platform's API, writing production code for each deployment.",
+    "expected_role_family": "advocacy.solutions",
+    "expected_is_software": true
+  },
+  {
+    "title": "Marketing Intern",
+    "description": "Support our social media campaigns, write blog posts about company news, and help organize community events. No coding involved.",
+    "expected_role_family": "swe.other",
+    "expected_is_software": false
+  },
+  {
+    "title": "Sales Development Representative Intern",
+    "description": "Qualify inbound leads, schedule demos for the sales team, and update our CRM with prospect information. Great opportunity to learn B2B sales.",
+    "expected_role_family": "swe.other",
+    "expected_is_software": false
+  },
+  {
+    "title": "Community Manager Intern",
+    "description": "Moderate our Discord and forums, organize community AMAs, and write a weekly newsletter — no technical work, purely community engagement.",
+    "expected_role_family": "swe.other",
+    "expected_is_software": false
+  }
+]
