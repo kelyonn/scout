@@ -1,6 +1,6 @@
 # Roadmap and Milestones — Scout
 
-**Status:** Draft · **Owner:** Product · **Last updated:** 2026-08-08
+**Status:** Draft · **Owner:** Product · **Last updated:** 2026-08-18
 
 ---
 
@@ -88,6 +88,16 @@ project exists to answer, and it does so in three weeks.
 
 **Objective:** a deployable skeleton that does nothing useful, correctly.
 
+**As of 2026-08-19, P0 runs under [ADR-018](adr/ADR-018-laptop-only-hosting.md)
+(laptop-only), not the Oracle+Tailscale design below.** Oracle Cloud requires a
+card for identity verification that isn't available, so there is no remote host
+today. The deliverables and exit criteria in this section are ADR-014's original
+design — kept as-written because it is the documented migration target for the
+day a card or spare always-on hardware is available, not because it is what
+currently runs. See ADR-018 for what P0 means under laptop-only hosting: no
+Oracle instance, no Tailscale, no dead-man's switch, no Oracle billing alert.
+Backups and `SCOUT_AUTH_TOKEN` auth are unchanged and still apply.
+
 **Deliverables**
 
 - Oracle A1 provisioned (expect capacity retries — see
@@ -108,36 +118,42 @@ project exists to answer, and it does so in three weeks.
 **Exit criteria**
 
 - [x] `make dev` starts the stack from a clean clone
-- [ ] `make deploy` reaches production over Tailscale in under 5 minutes
+- [x] The `live` environment runs the full stack locally with real fetching
+  ([ADR-018](adr/ADR-018-laptop-only-hosting.md)) — this is P0's actual exit
+  criterion today; the four below it are deferred until a host exists
+- [ ] ~~`make deploy` reaches production over Tailscale in under 5 minutes~~ —
+  N/A under laptop-only; revisit if ADR-018 is reversed
 - [x] A restore drill completes successfully
-- [ ] Dashboard reachable at `scout.<tailnet>.ts.net` from phone and laptop
-- [ ] Killing the host triggers a Telegram alert within 15 minutes
-- [ ] **Oracle billing page shows ₹0 and the $0.01 alert is armed**
-- [ ] `age` key and keystore exist on offline media
+- [ ] ~~Dashboard reachable at `scout.<tailnet>.ts.net` from phone and laptop~~ —
+  N/A; dashboard is reached at `localhost` while `live` is running
+- [ ] ~~Killing the host triggers a Telegram alert within 15 minutes~~ — N/A;
+  there is no always-on host to watch for
+- [ ] ~~Oracle billing page shows ₹0 and the $0.01 alert is armed~~ — N/A; no
+  Oracle account
+- [ ] `age` key and keystore exist on offline media — still applies, still open
 
-**The repository side of P0 is done; the host side is not, and the split is not
-arbitrary.** Everything that can be written, tested, and reviewed exists:
-Compose stacks for local and production, the migration runner, the hardened
-service images, Caddy, the deploy and health-gate scripts, the tiered backup and
-restore drill, `SCOUT_AUTH_TOKEN` auth, the dead-man's switch, and CI covering
-all of it. The full production stack has been brought up and verified locally,
-and the restore drill has been run end to end against a real dump.
+**The repository side of P0 is done, and under ADR-018 that is now the whole of
+P0.** Everything that can be written, tested, and reviewed exists: Compose
+stacks for local and production, the migration runner, the hardened service
+images, Caddy, the deploy and health-gate scripts, the tiered backup and restore
+drill, `SCOUT_AUTH_TOKEN` auth, the dead-man's switch, and CI covering all of
+it. The full production stack has been brought up and verified locally, and the
+restore drill has been run end to end against a real dump. The `live`
+environment is the same Compose stack with `SCOUT_FIXTURES_ONLY=false` — no
+additional code is needed to run it, only the user choosing to run it.
 
-What remains needs a host, an account, or physical media, and cannot be finished
-by writing code:
+What's left needs the user, not more code:
 
-| Criterion | Blocked on |
+| Item | Status |
 | --- | --- |
-| `make deploy` under 5 minutes | An Oracle A1 instance (or the MacBook in fallback mode) on the tailnet. The script is written and its preflight and health gate are tested; it has never run against a real host. |
-| Dashboard reachable at `scout.<tailnet>.ts.net` | The host, plus one `tailscale serve` on it (`make tailscale-serve` prints the command). There is also no dashboard until P3 — what will answer today is `/health` through Caddy. |
-| Telegram alert within 15 minutes | A healthchecks.io check, its Telegram integration, and `SCOUT_HEALTHCHECK_URL` in the host environment file. The collector pings on a 5-minute interval already. |
-| Oracle billing at ₹0, $0.01 alert armed | An Oracle account. |
-| `age` key and keystore on offline media | Generating both and physically writing them to media held offline. |
+| Run `live` for the first time with real credentials | Open — needs `.env` filled in with a real Telegram bot token at minimum |
+| `age` key on offline media | Open — no recovery path if skipped, so it stays an exit criterion even though nothing uses it until P4 |
+| A hosted LLM provider key (Gemini/Groq/OpenRouter) | Open — not a P0 item strictly, but the next real blocker after this one (see P2) |
 
-The last two are the ones with no recovery path, which is why they are exit
-criteria despite nothing using them until P4. Neither has a code representation
-that could be reviewed, so neither can be quietly half-done — they are either on
-the media or they are not.
+The Oracle-specific rows above (deploy, Tailscale dashboard, dead-man's switch,
+billing alert) are struck through, not deleted, because ADR-018 names its own
+reversal conditions — if a card or spare hardware becomes available later, this
+section's original criteria are exactly what P0 still means at that point.
 
 **Deliberately not in P0:** observability stack (P3), Python (P2), frontend (P3).
 Building the Grafana stack before there is a single metric worth looking at is
@@ -226,6 +242,21 @@ The last criterion is the real one. Everything else is instrumentation. **If it
 fails, stop and reconsider the product before building P2** — that is what
 building P1 first is for.
 
+**All P1 deliverables above are built:** the collector (scheduler,
+politeness, fetcher, change detection), all three adapters with fixtures,
+normalization, Tier-0 classification, Stage-1 dedup, crude scoring, and the
+Telegram notifier with the unique index. ~2,267 sources are seeded, well
+past the 60-board target. The four catastrophe tests from
+[17](17-testing-qa.md) section 8 exist (backfill suppression, rescore
+suppression, concurrency uniqueness in
+`apps/notifier/internal/trigger/trigger_test.go`; the compliance-gate test
+named in this document's own deliverables list).
+
+**None of the exit criteria above can be checked off from the code**, because
+every one of them is a runtime measurement (success rate over 24h, latency to
+Telegram, zero duplicates over a week) that requires the system actually
+polling in production. See [`HANDOFF.md`](../HANDOFF.md) for current status.
+
 **Risks:** ATS endpoints differ from documentation (fixture-record early, budget
 2 days) · Telegram setup friction (test on a real device day one).
 
@@ -272,6 +303,32 @@ building P1 first is for.
 - [ ] Bengaluru property test passing
 - [ ] `advocacy.*` precision ≥95%; zero marketing or sales roles admitted
 - [ ] Company-type fairness test passing (≤10 point variance)
+
+**P2 is built**, as of 2026-08-18: `apps/brain` (Python scaffolding), local
+embeddings (`bge-small-en-v1.5`, 384-dim), Tier-1/Tier-2 classification, the
+`advocacy` role family, company taxonomy, dedup Stages 2 and 3, LLM-generated
+posting summaries, 6 scoring subscores (two of which — `competition_estimate`,
+`ease_of_applying` — were scoped for P5 and got built early), the ADR-016
+provider cascade, personalized match explanations (`TaskExplain`), and an
+eval harness wired into CI.
+
+**Two caveats on "built":**
+- **No hosted LLM provider is actually signed up for anywhere yet.** The
+  cascade (`apps/brain/scout_brain/llm.py`'s `CascadeClient`, rate-limited
+  Gemini/Groq/OpenRouter providers, config in
+  `infra/config/llm_providers.yaml`) is real and unit-tested, but every run
+  today — dev and CI both — falls through to the local Ollama tier because no
+  `SCOUT_BRAIN_*_API_KEY` is configured anywhere. The cascade's rotation logic
+  has never been exercised against a real hosted provider.
+- **The eval harness's own gates are failing at the local-only tier.**
+  `evals/`'s three suites (`classify_role`, `dedup`, `explanation`) call the
+  real production prompts against real Ollama; `classify_role` and `dedup`
+  recall do not clear docs/17's thresholds at `qwen2.5:3b-instruct`'s quality
+  level (`explanation`'s deterministic rubric does pass). See
+  `evals/README.md`'s "Honest current state" — this is a genuine, measured
+  quality gap the harness exists to surface, not a broken harness, and it is
+  exactly the situation a hosted provider (the first caveat) is expected to
+  close, unmeasured so far.
 
 **Risks:** boilerplate stripping insufficient → golden set gates precision at
 0.99 · embedding inference too slow on ARM → batch tuning, INT8 · advocacy titles
@@ -320,6 +377,32 @@ pipeline are not cuttable.**
 - [ ] Scout-first rate ≥80%
 - [ ] **The user manages their entire search in Scout for one full week**
 - [ ] Recall diagnostic run once, bucketed by `company_type`, no bucket at zero
+
+**P3 has just started.** *(This snapshot is stale — [`HANDOFF.md`](../HANDOFF.md)
+is the current, authoritative status; as of 2026-08-18 every item this
+snapshot lists as "not built" below except the observability stack is done,
+including GCC coverage. Left as-is rather than rewritten, per HANDOFF.md's
+own header: its checkboxes are trusted less than that file's prose.)* Built:
+the Next.js app shell, Home, the
+Opportunities feed, job detail (with a working AI-summary pipeline —
+migration, queue task, Ollama prompt, consumer, API, frontend render, all
+wired end to end), a resume page, and the dark-mode design-system tokens.
+
+**Not built, including every item this document calls not-cuttable
+("Feed, detail, and pipeline are not cuttable")** beyond the feed/detail
+already shipped:
+- The save/applied/interviewing state machine — no API endpoints yet
+  (`apps/api/internal/jobs/handler.go` has only `List` and job detail)
+- **The "I found this elsewhere first" control**
+- Saved, Applied, and Search views
+- SSE live feed
+- IMAP email-alert ingestion
+- The remaining ATS adapters — Workable, SmartRecruiters, Recruitee,
+  Teamtailor, **Workday**
+- GCC coverage (depends on Workday)
+- The daily digest — explicitly marked out of scope in a comment in
+  `apps/notifier/internal/trigger/trigger.go`
+- Observability (OTel, Prometheus, Loki, Tempo, Grafana)
 
 **Risks:** email parsing fragile across board formats (fixtures per board, fail
 soft) · frontend scope creep (cut list above) · **Workday takes longer than

@@ -7,6 +7,10 @@ Every document in this set, what it covers, and who it is for.
 [19-roadmap](19-roadmap.md). Then read [22-open-questions](22-open-questions.md),
 which is the only document that asks you for decisions.
 
+**Picking up an existing session?** Read [`../HANDOFF.md`](../HANDOFF.md)
+first — it tracks what's actually built right now, which moves faster than
+this spec set and faster than the roadmap's checkboxes.
+
 ---
 
 ## Product
@@ -22,7 +26,7 @@ which is the only document that asks you for decisions.
 | # | Document | Covers |
 | --- | --- | --- |
 | 02 | [System Architecture](02-architecture.md) | Components, data flow, failure domains, scaling path |
-| — | [Decision Records](adr/) | Seventeen ADRs recording every significant technical choice, including the four (014–017) forced by the ₹0 budget |
+| — | [Decision Records](adr/) | Eighteen ADRs recording every significant technical choice, including the five (014–018) forced by the ₹0 budget |
 | 03 | [Data Model](03-data-model.md) | Entity model, full DDL, indexes, partitioning, migrations |
 | 04 | [API Design](04-api-design.md) | REST surface, conventions, errors, pagination, realtime, auth |
 

@@ -373,6 +373,26 @@ the build rather than production.
 knows that a board returning zero jobs when it returned 40 yesterday is
 suspicious, and can say so.
 
+**Who actually calls `Fetch`.** For every adapter through P2 (Greenhouse,
+Lever, Ashby, Workable, SmartRecruiters, Recruitee, Teamtailor), the
+scheduler never calls it at all: `Fetch` is one conditional GET to
+`Source.URL`, which the scheduler already performs generically for every
+source before it even knows which adapter is registered, so the same
+response is simply handed to `Parse`. That single shared fetch is also
+what makes each adapter's own integration test fakeable — the scheduler's
+fetch is an injectable interface, while `fetch.Fetcher` itself is a
+concrete, SSRF-guarded type no adapter-level test can point at a local
+fixture server.
+
+Workday broke that assumption (P3): its CXS endpoint requires a POST with
+a JSON search body, which no GET can produce, and paginates besides. An
+adapter that genuinely cannot be represented as one conditional GET
+implements `padapter.OwnFetcher` (`RequiresOwnFetch() bool`), and the
+scheduler calls that adapter's own `Fetch` directly instead — see
+`apps/collector/internal/scheduler.fetchResult` and that interface's own
+comment for the full reasoning, including why this is a narrow, opt-in
+exception rather than how every adapter is driven.
+
 ### Adapter build order
 
 | Milestone | Adapters | Cumulative company coverage |

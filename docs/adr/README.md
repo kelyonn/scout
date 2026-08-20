@@ -24,10 +24,11 @@ Use [`ADR-000-template.md`](ADR-000-template.md) for new records.
 | [011](ADR-011-observability-stack.md) | OpenTelemetry into a self-hosted Grafana stack | Accepted |
 | [012](ADR-012-native-app-shell.md) | Native app shell via Capacitor for real OS notifications | Accepted |
 | [013](ADR-013-whatsapp-channel.md) | WhatsApp as a notification channel | **Rejected** |
-| [014](ADR-014-zero-cost-hosting.md) | Free-tier host, Tailscale-only access, portability as the guarantee | Accepted |
+| [014](ADR-014-zero-cost-hosting.md) | Free-tier host, Tailscale-only access, portability as the guarantee | **Partially superseded by 018** |
 | [015](ADR-015-single-user-auth.md) | Network-gated bearer token instead of passkeys | Accepted |
 | [016](ADR-016-free-tier-llm-cascade.md) | Free-tier and local models; budgets in requests, not rupees | Accepted |
 | [017](ADR-017-tiered-backup-without-object-storage.md) | Back up by recoverability class, to storage already owned | Accepted |
+| [018](ADR-018-laptop-only-hosting.md) | Laptop-only hosting — no remote host, no Tailscale | Accepted |
 
 ## The ₹0 group: 014–017
 
@@ -84,3 +85,16 @@ unofficial WhatsApp libraries remains in force.
 **Neither reversal cost anything, and that is the point.** Both were caught in
 review, before code. An ADR that is cheap to reverse on paper and expensive to
 reverse in production is doing its job when it gets reversed on paper.
+
+## The fifth ₹0 record: 018
+
+**[018](ADR-018-laptop-only-hosting.md)** is the same shift as 014–017 taken one
+step further: Oracle's free tier still requires a card, and the user does not
+have one. Rather than block on acquiring one, 018 removes the always-on host
+requirement entirely — Scout runs on the user's laptop, on demand, with no
+remote host and no Tailscale. This trades away the overnight coverage window
+that 014 built the whole design around catching, named plainly as the real cost
+in that record rather than glossed over. Everything else 014 decided —
+portability, ARM64, the Compose topology, `production.yml`, `Caddyfile` — stays
+valid as the migration path back, which is why 014 is only *partially*
+superseded.

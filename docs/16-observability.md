@@ -1,9 +1,94 @@
 # Observability — Scout
 
-**Status:** Draft · **Owner:** Infrastructure · **Last updated:** 2026-08-06
+**Status:** Draft · **Owner:** Infrastructure · **Last updated:** 2026-08-19
 
 Stack selection is in [ADR-011](adr/ADR-011-observability-stack.md). This
 document covers SLOs, what we measure, and how alerts are handled.
+
+**Build status (P3, 2026-08-18).** This document describes the full,
+intended shape. What's actually built, in `packages/metrics` (Go),
+`scout_brain/metrics.py` (Python), and `packages/tracing` (Go):
+
+- **Metrics**: the subset that feeds the Overview dashboard (section 8) —
+  source fetch outcomes/duration, per-source-kind yield ratio, jobs
+  discovered, queue depth/oldest-job-age, notification total/latency, API
+  request duration, and (Python) LLM calls/latency/errors/budget-used.
+  Not the full section 4 catalog — no `source_id`-level cardinality
+  control (top 200 by yield), no dedup-merge or pipeline-stage-duration
+  metrics, no `scout_llm_cost_usd_total` (every provider this project
+  calls is a free tier — see `scout_brain/metrics.py`'s own comment for
+  why a real dollar figure isn't meaningful here).
+- **Logs**: structured JSON via `slog.NewJSONHandler`/Python `logging`
+  (already existed pre-P3) shipped into Loki via Promtail. **PII-scrubbing
+  middleware is now built and wired in** — `packages/logging.Scrub` (Go,
+  wrapping every service's slog.Handler in apps/api, apps/collector,
+  apps/notifier, and the discover CLI) and
+  `scout_brain.logging_scrub.ScrubbingFilter` (Python, on the root
+  logger). Both redact email addresses, phone numbers, and bearer-token/
+  API-key-shaped strings wherever they appear in a message or attribute,
+  with tests seeding exactly those patterns and asserting they never
+  reach the sink (section 6's last paragraph) — including a regression
+  test for the false-positive risk found while building this: a naive
+  phone-number pattern matched UUID/content-hash digit runs, which this
+  codebase logs constantly and which are not PII. This is a backstop, not
+  the primary defense — it cannot catch a call site that logs
+  `job.description_text` or `resume.raw_text` directly, since neither has
+  a regex signature; that discipline is still manual/code-review.
+- **Traces**: OTel is wired for `apps/api`'s HTTP requests only
+  (`otelhttp`, 10% sampling), exported via the otel-collector to Tempo.
+  The full pipeline trace this document's section 5 describes — one trace
+  per job, `trace_id` propagated through the River job payload across
+  `apps/collector` → `apps/brain` → `apps/notifier` — is **not
+  implemented**. `apps/collector`/`apps/notifier` don't create spans at
+  all yet.
+- **Dashboards**: two of the six in section 8. Overview
+  (`infra/grafana/dashboards/overview.json`), covering discovery rate,
+  notification latency, source health, API latency, queue depth, and LLM
+  budget with the metrics actually emitted; and Ingestion
+  (`infra/grafana/dashboards/ingestion.json`), covering everything
+  dashboard 2's own spec asks for that has a real metric or column behind
+  it today: per-source-kind success rate, yield ratio, 304 ratio, fetch
+  duration (all Prometheus), plus two tables — open circuit breakers and
+  the 20 worst-performing sources by yield — against a **new Postgres
+  datasource** (queries the `source` table directly; nothing per-row is
+  in Prometheus, only aggregates). "Bandwidth" from the dashboard's own
+  spec is the one thing genuinely missing — no byte-count metric exists.
+  Pipeline/AI/Notifications/Infrastructure (dashboards 3-6) are not
+  built — their core metrics (pipeline stage durations, dedup-merge
+  counts, LLM cost/cache-hit rate, notification fatigue counters,
+  container/Postgres-internals exporters) don't exist yet, and a
+  dashboard with panels pointed at metrics nobody emits is a worse state
+  than no dashboard — it reads as "no traffic" rather than "not built."
+  **A real, standing bug was found and fixed building the Ingestion
+  dashboard**: the Grafana→Prometheus datasource pointed at port 9090,
+  but `infra/compose/observability.yml`'s prometheus service has always
+  listened on 9091 (9090 is every Scout service's own `/metrics` port on
+  the same network) — meaning the Overview dashboard had never actually
+  worked either, silently, since it was first provisioned. Every panel
+  showed "No data" with a connection-refused error one click away, which
+  reads exactly like "no traffic yet," not "broken." Fixed in
+  `infra/grafana/provisioning/datasources/datasources.yml`.
+- **Alerting**: not implemented. No Alertmanager, no page/notify routing
+  from section 7's tables — Grafana's own alerting engine is present
+  (part of the base image) but unconfigured.
+- **Sentry, Uptime Kuma**: not integrated. Both are external, hosted
+  services this repository can configure but can't provision an account
+  for — see ADR-011's own reasoning for why Uptime Kuma specifically must
+  run on a second host this project doesn't own.
+- **Also landed this pass, not originally scoped here**: `source.yield_ratio`
+  itself was never actually computed before this — it defaulted to 0 from
+  schema creation onward, silently pinning `interval.Compute`'s
+  `yield_factor` input at its maximum for every source. Fixed as part of
+  wiring the yield-ratio gauge; see `packages/db/queries/source.sql`'s
+  `UpdateSourceAfterPoll` for the EMA it now computes.
+
+The stack itself — `infra/compose/observability.yml`, merged into either
+`infra/compose/local.yml` or `production.yml` via `docker compose -f ... -f
+...` (`make observability-up` for local) — is real and running: Prometheus
+scraping every service, Loki receiving real logs, Tempo receiving real
+traces, Grafana provisioned with all three datasources and the Overview
+dashboard. What's listed above as unbuilt is genuinely unbuilt, not
+present-but-untested.
 
 **One amendment to ADR-011 under the ₹0 budget.** The self-hosted stack —
 OpenTelemetry, Prometheus, Loki, Tempo, Grafana — is unchanged; it was sized
@@ -320,6 +405,17 @@ through the logger and asserts they never reach the sink.
 ---
 
 ## 7. Alerting
+
+**Lower priority under [ADR-018](adr/ADR-018-laptop-only-hosting.md)
+(laptop-only hosting).** Much of this section — and section 2.2's
+dead-man's switch — exists to catch an always-on host silently dying
+while nobody's watching. Under laptop-only, nothing runs unattended:
+Scout only ever runs while the user is at the laptop watching it happen,
+so there is no "host died at 3am, nobody noticed" scenario to page for.
+Still relevant regardless of hosting model: dashboards for understanding
+what happened during a run, and any alert that fires *during* a live run
+(a source consistently 4xx-ing, the LLM budget exhausted). Revisit in
+full if ADR-018 is reversed.
 
 Alerts are scarce by design. An alert that does not require action trains the
 operator to ignore alerts, and an ignored alerting system is worse than none.

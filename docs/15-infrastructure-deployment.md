@@ -1,14 +1,26 @@
 # Infrastructure and Deployment — Scout
 
-**Status:** Draft · **Owner:** Infrastructure · **Last updated:** 2026-08-08
+**Status:** Draft · **Owner:** Infrastructure · **Last updated:** 2026-08-19
 
 Topology rationale is in [ADR-014](adr/ADR-014-zero-cost-hosting.md), which
-supersedes [ADR-006](adr/ADR-006-deployment-topology.md). Backup rationale is in
+supersedes [ADR-006](adr/ADR-006-deployment-topology.md), and
+[ADR-018](adr/ADR-018-laptop-only-hosting.md), which partially supersedes 014.
+Backup rationale is in
 [ADR-017](adr/ADR-017-tiered-backup-without-object-storage.md). This is the
 operational specification.
 
 **Budget: ₹0.** Every choice below is constrained by that and by the fact that
 one person operates this in the evenings.
+
+> **Current default: laptop-only ([ADR-018](adr/ADR-018-laptop-only-hosting.md)).**
+> Oracle Cloud requires a card for identity verification that isn't available
+> right now, so there is no remote host and no Tailscale today. Sections 2, 3,
+> 6, 7, and 8 below describe the Oracle+Tailscale design from ADR-014 — it is
+> not dead, it is the documented migration target for the day a host becomes
+> available (a card, or spare always-on hardware), and everything in it
+> (Compose topology, ARM64, hardening, `production.yml`, `Caddyfile`) is
+> unchanged and ready to use as-is. Until then, section 1's **live**
+> environment below is what actually runs.
 
 ---
 
@@ -17,7 +29,8 @@ one person operates this in the evenings.
 | Environment | Where | Data | Purpose |
 | --- | --- | --- | --- |
 | **local** | MacBook, Docker | Seeded fixtures, no live fetching | Development |
-| **production** | Oracle A1 (ARM64), or the MacBook in fallback mode | Live | The real thing |
+| **live** | MacBook, Docker, on demand | Real, live fetching | The real thing, today ([ADR-018](adr/ADR-018-laptop-only-hosting.md)) |
+| **production** | Oracle A1 (ARM64), *not currently provisioned* | Live | The real thing, once a host exists ([ADR-014](adr/ADR-014-zero-cost-hosting.md)) |
 
 **There is no staging, deliberately.** The earlier design ran staging as a second
 Compose project on the production host. For a single-user personal system that is
@@ -33,15 +46,24 @@ set. Local development is therefore deterministic, offline-capable, and
 incapable of accidentally hammering a real company's careers page during a
 debugging session.
 
+**`live` is the same Compose stack as `local`, with `SCOUT_FIXTURES_ONLY=false`
+in `.env`.** There is no separate compose file for it — it is `local.yml` run
+with real credentials and real egress, started when the user chooses to have
+Scout check for jobs (typically once a day) and stopped or simply left until the
+laptop sleeps. This is the entire "deploy" step under ADR-018: there is nothing
+to push to, because the machine running it is the machine sitting in front of
+the user.
+
 ```bash
-make dev          # full stack, seeded, fixtures
+make dev          # full stack, seeded, fixtures (environment: local)
 make dev-db       # database only, for running one service natively
 make migrate      # apply pending migrations locally
 make test         # all tests, all languages
 make lint         # golangci-lint + sqlfluff
 make evals        # quality eval harness
 make fixtures     # re-record adapter fixtures (requires network + approval)
-make deploy       # push to production over Tailscale SSH (section 3)
+make deploy       # push to production over Tailscale SSH (section 3) — only
+                   # meaningful once a host exists per ADR-014; not used today
 make backup-now   # force an immediate irreplaceable-data backup
 make restore-drill # restore latest nightly into a throwaway local container
 ```
@@ -418,6 +440,12 @@ the plan.
 ---
 
 ## 7. Monitoring the host from outside it
+
+**Not applicable under `live` ([ADR-018](adr/ADR-018-laptop-only-hosting.md)).**
+A dead-man's switch exists to notice a host that was supposed to be always-on and
+silently isn't. `live` was never supposed to be always-on — it runs when the
+user chooses to run it — so there is no "unexpectedly down" state to detect.
+This section describes the ADR-014 design, relevant again once a host exists.
 
 **Self-hosted monitoring cannot detect its own host being down.** At ₹0 there is
 no second host to watch the first, and this is the one genuine monitoring problem
