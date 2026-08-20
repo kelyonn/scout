@@ -1,0 +1,254 @@
+@import "tailwindcss";
+
+/*
+ * Design tokens — docs/12-frontend-ux.md section 2. Dark mode is the
+ * default (the user works evenings); light mode is the explicit
+ * opt-out via [data-theme="light"] on <html>.
+ *
+ * "The interface should be boring and the data should be interesting."
+ * One accent color, a restrained neutral ramp, no gradients or
+ * glassmorphism — the job content is the product.
+ */
+
+:root {
+  --bg-base: #0a0b0d;
+  --bg-surface: #121316;
+  --bg-elevated: #1a1c20;
+  --border-subtle: #24262b;
+  --border-strong: #34373d;
+  --text-muted: #6e7178;
+  --text-secondary: #9ca0a8;
+  --text-primary: #e8eaed;
+
+  --accent-primary: #4f7cff;
+  --accent-hover: #6b90ff;
+  --accent-subtle: rgba(79, 124, 255, 0.08);
+
+  --success: #2fa96b;
+  --warning: #d99a2b;
+  --danger: #e5484d;
+  --info: #4f7cff;
+
+  /* Score band colors — docs/12's one deliberate exception to the
+     single-accent rule: score is the primary scanning dimension. */
+  --score-exceptional: #2fa96b; /* 90-100 */
+  --score-strong: #4f7cff; /* 80-89 */
+  --score-good: #7a8390; /* 70-79 */
+  --score-moderate: #6e7178; /* 60-69 */
+  --score-weak: #4a4d53; /* <60 */
+
+  /* Spacing — 4px base scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-12: 48px;
+  --space-16: 64px;
+  --space-24: 96px;
+  --space-32: 128px;
+
+  --radius-input: 4px;
+  --radius-card: 6px;
+  --radius-modal: 8px;
+  --radius-pill: 999px;
+
+  --ease-instant: cubic-bezier(0.2, 0, 0, 1);
+  --ease-quick: cubic-bezier(0.2, 0, 0, 1);
+  --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+:root[data-theme="light"] {
+  --bg-base: #ffffff;
+  --bg-surface: #f7f8f9;
+  --bg-elevated: #ffffff;
+  --border-subtle: #e8eaed;
+  --border-strong: #d2d5da;
+  --text-muted: #6e7178;
+  --text-secondary: #4a4d53;
+  --text-primary: #16181c;
+}
+
+@theme inline {
+  --color-bg-base: var(--bg-base);
+  --color-bg-surface: var(--bg-surface);
+  --color-bg-elevated: var(--bg-elevated);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-strong: var(--border-strong);
+  --color-text-muted: var(--text-muted);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-primary: var(--text-primary);
+
+  --color-accent-primary: var(--accent-primary);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-subtle: var(--accent-subtle);
+
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+
+  --color-score-exceptional: var(--score-exceptional);
+  --color-score-strong: var(--score-strong);
+  --color-score-good: var(--score-good);
+  --color-score-moderate: var(--score-moderate);
+  --color-score-weak: var(--score-weak);
+
+  --font-sans: var(--font-inter);
+  --font-mono: var(--font-jetbrains-mono);
+
+  --radius-input: var(--radius-input);
+  --radius-card: var(--radius-card);
+  --radius-modal: var(--radius-modal);
+  --radius-pill: var(--radius-pill);
+}
+
+* {
+  border-color: var(--border-subtle);
+}
+
+html {
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+body {
+  background: var(--bg-base);
+  color: var(--text-primary);
+  font-family: var(--font-sans), -apple-system, "Segoe UI", sans-serif;
+  font-size: 14px;
+  line-height: 20px;
+  -webkit-font-smoothing: antialiased;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Type scale — docs/12 section 2, 1.2 ratio / 14px body base */
+.text-display {
+  font-size: 28px;
+  line-height: 34px;
+  letter-spacing: -0.02em;
+  font-weight: 600;
+}
+.text-title {
+  font-size: 20px;
+  line-height: 26px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+.text-heading {
+  font-size: 16px;
+  line-height: 22px;
+  letter-spacing: -0.01em;
+  font-weight: 600;
+}
+.text-body {
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 400;
+}
+.text-label {
+  font-size: 13px;
+  line-height: 18px;
+  font-weight: 500;
+}
+.text-caption {
+  font-size: 12px;
+  line-height: 16px;
+  letter-spacing: 0.01em;
+  font-weight: 400;
+}
+.text-micro {
+  font-size: 11px;
+  line-height: 14px;
+  letter-spacing: 0.02em;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Styling for components/DescriptionHtml.tsx's sanitized output — only
+   the tags docs/07 section 11's allowlist permits need rules here
+   (p, br, ul, ol, li, strong, em, b, i, h1-h6, a, code, pre, blockquote,
+   table*). Spacing follows the design system's own rhythm rather than a
+   generic "prose" plugin, so a job description reads like part of the
+   product, not an embedded foreign document. */
+.prose-description :where(p, ul, ol, blockquote, table, pre) {
+  margin-top: 0.75em;
+}
+.prose-description :where(p, ul, ol, blockquote, table, pre):first-child {
+  margin-top: 0;
+}
+.prose-description :where(ul, ol) {
+  padding-left: 1.25em;
+}
+.prose-description ul {
+  list-style-type: disc;
+}
+.prose-description ol {
+  list-style-type: decimal;
+}
+.prose-description li {
+  margin-top: 0.25em;
+}
+.prose-description :where(h1, h2, h3, h4, h5, h6) {
+  color: var(--text-primary);
+  font-weight: 600;
+  margin-top: 1em;
+  margin-bottom: 0.35em;
+}
+.prose-description a {
+  color: var(--accent-primary);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.prose-description a:hover {
+  color: var(--accent-hover);
+}
+.prose-description code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-input);
+  padding: 0.1em 0.35em;
+}
+.prose-description pre {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-elevated);
+  border-radius: var(--radius-card);
+  padding: 0.75em 1em;
+  overflow-x: auto;
+}
+.prose-description blockquote {
+  border-left: 2px solid var(--border-strong);
+  padding-left: 0.85em;
+  color: var(--text-muted);
+}
+.prose-description table {
+  border-collapse: collapse;
+  width: 100%;
+}
+.prose-description :where(th, td) {
+  border: 1px solid var(--border-subtle);
+  padding: 0.35em 0.6em;
+  text-align: left;
+}
+.prose-description strong {
+  color: var(--text-primary);
+  font-weight: 600;
+}
