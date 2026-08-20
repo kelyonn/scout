@@ -11,6 +11,19 @@ import (
 )
 
 type Querier interface {
+	// Dedup Stage 2 (structural) and the union-find group-merge machinery both
+	// stages share. See docs/08-dedup-identity.md sections 3.2 and 4.
+	//
+	// Lowercase keywords per AGENTS.md. apps/collector/internal/dedup owns the
+	// Go-side orchestration (Stage 2's synchronous merge); apps/brain's Stage 3
+	// consumer (P2 Phase F) runs the equivalent merge sequence itself in
+	// Python — ADR-001's "some duplicated utility code across languages,
+	// accepted deliberately over building a shared FFI layer" applies here
+	// too, since Go and Python never call each other synchronously.
+	// docs/08 section 4's concurrency control: transaction-scoped, released
+	// automatically on commit or rollback, serializing per company rather than
+	// globally so dedup still parallelizes across companies.
+	AdvisoryLockCompanyDedup(ctx context.Context, companyID string) error
 	// Called in the same transaction as SelectDueSources, immediately after it,
 	// before commit — this is what turns "selected with a row lock" into
 	// "reserved" once that lock is released. Postgres's row lock from `for update
@@ -33,10 +46,245 @@ type Querier interface {
 	// latency metrics docs/16-observability.md specifies, which arrive with the
 	// observability stack at P3.
 	CountActiveSources(ctx context.Context) (int64, error)
+	CountDeliveriesForTriggerSince(ctx context.Context, arg CountDeliveriesForTriggerSinceParams) (int64, error)
+	// The hourly/daily budget check (docs/11 section 4) — counts successful
+	// sends only ('sent' or 'delivered'), not attempts, since a failed send
+	// never reached the user and must not count against their budget.
+	CountDeliveriesSince(ctx context.Context, arg CountDeliveriesSinceParams) (int64, error)
+	CountDigestEligibleJobsSince(ctx context.Context, since pgtype.Timestamptz) (int64, error)
+	DeleteJobGroup(ctx context.Context, id pgtype.UUID) error
+	// The daily digest — docs/11-notifications.md section 6.5, docs/19-roadmap.md's
+	// P3 "Daily digest at 08:00 IST to Telegram." Every query here is scoped to
+	// the sole user (ADR-015) and takes an explicit `since`/window boundary
+	// computed in Go (apps/notifier/internal/digest), not "the last N days"
+	// inline in SQL, so the 08:00 IST boundary logic lives in exactly one place.
+	// Idempotency check: has today's digest already gone out. Read-then-write
+	// rather than a unique index (notification_dedup_idx doesn't apply — it's
+	// scoped to job_group_id, and a digest has none) — safe here because the
+	// notifier is a single sequential loop, never concurrent with itself.
+	DigestAlreadySentSince(ctx context.Context, arg DigestAlreadySentSinceParams) (bool, error)
+	FindJobByATSID(ctx context.Context, arg FindJobByATSIDParams) (FindJobByATSIDRow, error)
+	// Job and job_group queries. See docs/08-dedup-identity.md section 3.1
+	// (Stage 1, exact-match dedup) and infra/migrations/000006_job.up.sql.
+	//
+	// Dedup Stage 1 is three independent exact-match checks, tried in this
+	// order by the caller (apps/collector/internal/dedup): canonical_url_hash,
+	// then (ats_platform, ats_job_id), then content_hash. Only the first two
+	// are backed by a unique index (job_canonical_url_idx, job_ats_idx) —
+	// content_hash alone is not, since the same posting text can legitimately
+	// recur across unrelated jobs at different companies, so it is a lookup
+	// key here but never an insert-time constraint.
+	//
+	// None of these queries use `select *` / `returning *` on job: it is a
+	// generated tsvector column (search_vector) pgx has no scan type for (OID
+	// 3614), so returning it breaks every caller regardless of whether they
+	// read it. The column list below is job's full column set minus that one.
+	FindJobByCanonicalURLHash(ctx context.Context, canonicalUrlHash []byte) (FindJobByCanonicalURLHashRow, error)
+	// limit 1: content_hash is not unique by design (see header comment), so
+	// this returns the most recently active match rather than an arbitrary one.
+	FindJobByContentHash(ctx context.Context, contentHash []byte) (FindJobByContentHashRow, error)
+	// Email-alert ingestion — docs/05-source-catalog.md's "Email alert
+	// ingestion, in detail" and docs/14-legal-compliance.md section 5's legal
+	// basis. See apps/collector/internal/scheduler/email.go and
+	// apps/collector/internal/emailalert.
+	//
+	// A company and a source row must exist before a posting extracted from
+	// an alert email can flow through the same dedup/score/write path every
+	// other adapter uses (apps/collector/internal/scheduler.processPosting
+	// needs a company_id and a source_id) — these two queries are that
+	// find-or-create step, company by slug and source by
+	// (company, provider)-scoped url.
+	// discovered_via = 'email_alert' distinguishes a company that has only
+	// ever been seen through an alert email from one with a real ATS source
+	// (discovered_via = 'seed'/'discovery') — useful for auditing how much of
+	// the catalog email ingestion is actually contributing.
+	FindOrCreateEmailAlertCompany(ctx context.Context, arg FindOrCreateEmailAlertCompanyParams) (pgtype.UUID, error)
+	// legal_posture = 'email_only' is what keeps this row out of
+	// SelectDueSources (packages/db/queries/source.sql filters
+	// `legal_posture in ('permitted', 'api_only')`) — this source is never
+	// polled by the normal HTTP scheduler; apps/collector/internal/emailalert's
+	// IMAP poller is what drives writes against it.
+	FindOrCreateEmailAlertSource(ctx context.Context, arg FindOrCreateEmailAlertSourceParams) (pgtype.UUID, error)
+	// The shadow run looked anomalous (zero jobs found, or an implausibly high
+	// count — a likely sign of a wrong tenant slug or an adapter matching too
+	// broadly). Stays 'pending_review' rather than being quarantined or
+	// retired: nothing has actually gone wrong in a way those states describe,
+	// a human just needs to look once. shadow_reviewed_at is set regardless, so
+	// this source is not re-flagged on every future review pass — see this
+	// migration's own comment on why that would otherwise happen. reason is
+	// appended to notes for whoever reviews it next; AGENTS.md rule 7 forbids
+	// PII here, and there is none to leak — url and counters, nothing a user
+	// typed.
+	FlagShadowSource(ctx context.Context, arg FlagShadowSourceParams) error
+	// Scoring queries. See docs/09-ranking-scoring.md and
+	// infra/migrations/000008_score.up.sql.
+	GetActiveWeightVersion(ctx context.Context) (WeightVersion, error)
+	// Resolves company_id -> slug so the scoring step can look up
+	// packages/taxonomy/companies.yaml's well_known flag (competition_estimate's
+	// brand-recognition proxy) — that registry is keyed by slug, not UUID.
+	GetCompanySlug(ctx context.Context, id pgtype.UUID) (string, error)
+	GetJobByID(ctx context.Context, id pgtype.UUID) (GetJobByIDRow, error)
+	// job_score.explanation's upgrade path — apps/brain's explain consumer
+	// (TaskExplain) replacing InsertJobScore's synchronous template with a
+	// real, personalized one — is a Python-side raw UPDATE, same as every
+	// other apps/brain write (see summarize.py's _write_summary), not a sqlc
+	// query: ADR-001's "Go and Python never call each other synchronously"
+	// means Go never calls this path, so there is no Go caller for it to
+	// serve.
+	GetJobScore(ctx context.Context, arg GetJobScoreParams) (JobScore, error)
+	// Explicit ::boolean cast: sqlc can't infer a scalar type for an
+	// expression over `embedding` (pgvector's custom vector type, opaque to
+	// sqlc's analyzer) without one, and falls back to `interface{}` — the same
+	// reason source.sql's own boolean expressions over non-builtin-typed
+	// columns get an explicit cast elsewhere in this project.
+	GetResume(ctx context.Context, userID pgtype.UUID) (GetResumeRow, error)
+	GetResumeRawText(ctx context.Context, userID pgtype.UUID) (string, error)
+	// User queries. Single-user system (ADR-015) — GetSoleUser is the only
+	// lookup the collector and notifier need; there is no multi-user query set
+	// because there is no multi-user feature yet.
+	GetSoleUser(ctx context.Context) (AppUser, error)
 	// Used by the restore drill and by tests that need to assert on a source's
 	// post-poll state without re-deriving it from SelectDueSources's own
 	// predicate (which would exclude a row this exact query is checking).
 	GetSourceByID(ctx context.Context, id pgtype.UUID) (Source, error)
+	GetTelegramChannel(ctx context.Context, userID pgtype.UUID) (NotificationChannel, error)
+	// A notification with no notification_delivery row yet is, by
+	// construction, still queued — see this file's header comment.
+	// scheduled_for <= now() is what actually holds a BATCHED notification
+	// back until its hour boundary — INSTANT rows have scheduled_for = their
+	// own created_at (via InsertNotification's coalesce-to-now default), so
+	// this clause is a no-op for them.
+	//
+	// user_id filter added here rather than left to the caller's own
+	// `if n.UserID != userID { continue }` (which apps/notifier/internal/deliver
+	// used to do entirely in Go): ADR-015 means this never mattered for a
+	// production result (there is exactly one user), but it was a real gap
+	// for test isolation — this query previously returned every user's
+	// undelivered notifications regardless of the userID argument, so two
+	// packages' tests running concurrently against the shared local Postgres
+	// (go test ./... parallelizes across packages) and reusing the same real
+	// sole app_user row could see each other's fixtures, corrupting budget
+	// counts. Same root-cause fix as the flaky scheduler cross-package test
+	// pollution mentioned in HANDOFF.md, applied here.
+	GetUndeliveredNotifications(ctx context.Context, arg GetUndeliveredNotificationsParams) ([]GetUndeliveredNotificationsRow, error)
+	// The application-tracking pipeline — docs/04-api-design.md section 4.1's
+	// POST /v1/jobs/{group_id}/state and section 4.6's GET /v1/applications.
+	// See infra/migrations/000014_user_job_state.up.sql.
+	// No row means the caller's own default applies: 'new', never seen.
+	// apps/api/internal/jobs's state handler uses this to validate a
+	// transition against the explicit state machine before writing anything.
+	GetUserJobState(ctx context.Context, arg GetUserJobStateParams) (UserJobState, error)
+	// target_roles/target_seniority are cast to text[] rather than left as
+	// their native role_family[]/seniority[] array types: pgx has no default
+	// codec for an ARRAY of a custom enum (it handles the scalar enum fine —
+	// every generated *Enum.Scan method proves that — but not the array OID
+	// sqlc emits alongside it), so `select *` here fails at scan time with
+	// "cannot scan unknown type" for every row, not just an edge case. The
+	// caller re-parses each string into a typed enum value itself.
+	GetUserProfile(ctx context.Context, userID pgtype.UUID) (GetUserProfileRow, error)
+	// docs/06 section 10's 429 handling: honor Retry-After (via
+	// RescheduleSource's next_poll_at) AND halve max_rps permanently — the
+	// source told us its previous rate was too fast, and that fact outlives
+	// this one poll.
+	HalveMaxRPS(ctx context.Context, id pgtype.UUID) error
+	// job_group_id is NULL — a digest summarizes many jobs, not one — which is
+	// exactly why this is a separate query from InsertNotification rather
+	// than that query's job_group_id made nullable: every other caller of
+	// InsertNotification relies on it being required.
+	InsertDigestNotification(ctx context.Context, arg InsertDigestNotificationParams) (pgtype.UUID, error)
+	InsertJob(ctx context.Context, arg InsertJobParams) (InsertJobRow, error)
+	InsertJobGroup(ctx context.Context, companyID pgtype.UUID) (JobGroup, error)
+	InsertJobMergeEvent(ctx context.Context, arg InsertJobMergeEventParams) error
+	// One row per (job, user, weight_version) — infra/migrations/000008's
+	// primary key. A recompute under the same weight_version replaces the row
+	// (on conflict do update) rather than erroring; a genuinely new
+	// weight_version is a new row entirely, per docs/09 section 1: "a change
+	// triggers a rescore with notifications suppressed."
+	//
+	// explanation/explanation_model carry docs/09 section 6's deterministic
+	// template fallback (scoring.Explain), written synchronously so a
+	// notification is never sent unexplained — packages/queue's TaskExplain
+	// upgrades it to an LLM-generated one asynchronously, via a Python-side
+	// raw UPDATE (see the note after this query, not a sqlc query of its
+	// own), exactly as docs/09 section 7 describes: "a notification can be
+	// sent with the deterministic explanation and
+	// upgraded when the LLM one arrives." A recompute under an unchanged
+	// weight_version resets explanation back to the template on conflict too
+	// — the same "notifications suppressed" comment above applies to a
+	// stale LLM explanation surviving a rescore just as much as to a stale
+	// score.
+	InsertJobScore(ctx context.Context, arg InsertJobScoreParams) (JobScore, error)
+	// ON CONFLICT DO NOTHING rather than catching a unique-violation error:
+	// both satisfy "already notified, skip" (AGENTS.md rule 2,
+	// notification_dedup_idx), but a real constraint-violation error inside a
+	// transaction poisons it until rollback, which matters here since a batch
+	// of trigger evaluations runs inside one transaction. Returns zero rows on
+	// conflict, which the caller (apps/notifier/internal/trigger) reads via
+	// pgx.ErrNoRows — that is the "already notified" signal, not an error.
+	//
+	// scheduled_for defaults to now() (coalesce over sqlc.narg) for every
+	// existing caller that doesn't set it — INSTANT urgency delivers as soon as
+	// GetUndeliveredNotifications sees it, same as before this column was
+	// threaded through. docs/11 section 3's BATCHED class ("accumulated and
+	// delivered hourly on the hour") is what actually sets it, to the next
+	// hour boundary — see apps/notifier/internal/trigger's nextHourBoundary.
+	InsertNotification(ctx context.Context, arg InsertNotificationParams) (pgtype.UUID, error)
+	InsertNotificationDelivery(ctx context.Context, arg InsertNotificationDeliveryParams) (NotificationDelivery, error)
+	// raw_observation queries. See docs/06-ingestion-pipeline.md section 9 and
+	// infra/migrations/000005_raw_observation.up.sql.
+	//
+	// docs/06 section 9's pseudocode enqueues a River job in the same
+	// transaction as the observation insert; this pass has no queue (the P1
+	// scope decision in the implementation plan — normalize/classify/dedup/score
+	// run synchronously in Go instead), so job_id is set directly here, from
+	// apps/collector/internal/dedup.Result, rather than left null for an async
+	// consumer to fill in later.
+	// No ON CONFLICT here: the partition's own (source_id, content_hash)
+	// unique index (docs/03 section 10) is created directly on each partition,
+	// not as a partitioned index on the parent — deliberately, per that
+	// migration's own comment, because a unique constraint at the parent level
+	// would be forced to include the partition key (observed_at), which
+	// guarantees nothing. The consequence: Postgres has no arbiter index it can
+	// validate an ON CONFLICT clause against when the INSERT targets the
+	// parent table, and adding one anyway fails every insert, not just
+	// duplicates ("no unique or exclusion constraint matching the ON CONFLICT
+	// specification") — caught in P1 live verification before it shipped.
+	// A genuine duplicate (source_id, content_hash) — observed live against a
+	// real Greenhouse board — is instead handled by the caller
+	// (apps/collector/internal/scheduler.runIngestion) running each posting in
+	// its own savepoint, so a real constraint-violation error here rolls back
+	// only that one posting rather than poisoning the whole poll's
+	// transaction.
+	InsertObservation(ctx context.Context, arg InsertObservationParams) (InsertObservationRow, error)
+	// docs/06 section 10's "parse error: store raw, alert, do not retry" —
+	// there is no adapter-parsed posting to key this on, so it carries no
+	// external_id/canonical_url/content_hash the way a normal observation does;
+	// url is the source's own url so the row is still traceable to what failed.
+	InsertParseErrorObservation(ctx context.Context, arg InsertParseErrorObservationParams) error
+	InsertUserJobStateEvent(ctx context.Context, arg InsertUserJobStateEventParams) error
+	// Set once a trigger decision (fire or no-fire) has been made for this
+	// group, so it is not re-evaluated every tick. Rescoring an already-decided
+	// group is a P2+ feature (weight-version changes trigger a rescore, which
+	// would need to clear this) — not built here; see AGENTS.md rule 3's
+	// suppress_notifications guard, which apps/notifier/internal/trigger
+	// threads through independent of this column.
+	MarkJobGroupNotified(ctx context.Context, id pgtype.UUID) error
+	// The shadow run looked healthy: real jobs, no red flags. priority_tier
+	// comes from decideShadowPromotion's yield-based mapping (docs/05 step 6,
+	// "a tier assigned by observed yield") — never tier 1, which stays reserved
+	// for manual curation, same reasoning as QuarantineSource reserving
+	// 'quarantined' for a human to clear.
+	PromoteShadowSource(ctx context.Context, arg PromoteShadowSourceParams) error
+	// docs/06 section 10: 401/403 means access changed, not a transient blip.
+	// Setting status here (rather than only backing off next_poll_at) is what
+	// actually stops polling — SelectDueSources's own predicate requires
+	// status = 'active', so a quarantined source simply stops being selected
+	// until a human reviews and reactivates it.
+	QuarantineSource(ctx context.Context, id pgtype.UUID) error
+	// The union-find "absorb" step: every job in the losing group moves to the
+	// surviving group. member_count/first_seen_at on job_group are updated by
+	// UpdateJobGroupAfterMerge separately, in the same caller transaction.
+	ReassignJobsToGroup(ctx context.Context, arg ReassignJobsToGroupParams) error
 	// For a politeness-gate DEFER or SKIP (docs/06 section 4): the source itself
 	// did nothing wrong, its turn has not come up yet — a rate budget, a
 	// concurrency cap, or a still-open circuit breaker. This only moves
@@ -44,16 +292,83 @@ type Querier interface {
 	// consecutive_failures, or the circuit breaker: no request was ever attempted,
 	// so nothing about it succeeded or failed.
 	RescheduleSource(ctx context.Context, arg RescheduleSourceParams) error
+	// docs/06 section 10: three consecutive 404s means the board is gone.
+	RetireSource(ctx context.Context, id pgtype.UUID) error
+	// GET /v1/search — docs/04-api-design.md section 4.2. Keyword mode only:
+	// `mode=semantic`/`hybrid` need a query embedding, which means an
+	// embedding-service round trip apps/brain (Python) currently owns, and
+	// ADR-001 forbids Go calling Python synchronously. The Go API degrades
+	// semantic/hybrid requests to keyword rather than erroring — see
+	// apps/api/internal/search's own comment for the exact fallback — so this
+	// query only ever needs to serve keyword mode.
+	//
+	// job.search_vector (infra/migrations/000006_job.up.sql) is a generated,
+	// GIN-indexed tsvector already weighted title > location > description;
+	// company name isn't in it (search_vector is job-scoped), so a company
+	// match is a second, explicitly OR'd condition rather than folded into
+	// the same tsquery.
+	SearchJobs(ctx context.Context, arg SearchJobsParams) ([]SearchJobsRow, error)
+	// The Pipeline/Saved/Applied views (docs/12-frontend-ux.md sections 4.5
+	// and 3's IA). Driven from user_job_state, not job_group — unlike
+	// SelectJobFeed (packages/db/queries/feed.sql), a job the user already
+	// applied to must stay visible here even after job.status leaves 'open'
+	// (a closed listing doesn't erase an in-flight application), so there is
+	// deliberately no `j.status = 'open'` filter.
+	SelectApplications(ctx context.Context, arg SelectApplicationsParams) ([]SelectApplicationsRow, error)
+	// docs/09 section 3.4's fallback: "below that we fall back to a
+	// country-and-seniority prior" — the same query without the role_family
+	// filter, used only when the exact comparable set has fewer than 20 rows.
+	SelectCompensationPercentileBroad(ctx context.Context, arg SelectCompensationPercentileBroadParams) (SelectCompensationPercentileBroadRow, error)
+	// docs/09 section 3.4's literal comparable definition. thisComp is the
+	// job's own comp_normalized_inr_month; percentile is the fraction of
+	// comparables at or below it. Returns raw counts rather than a computed
+	// ratio — sqlc's type inference on a division/nullif expression here
+	// doesn't resolve to float8 reliably, and the percentile arithmetic is
+	// trivial enough that computing it in Go (computeCompensation's caller)
+	// is simpler than fighting that in SQL.
+	SelectCompensationPercentileExact(ctx context.Context, arg SelectCompensationPercentileExactParams) (SelectCompensationPercentileExactRow, error)
+	// docs/11 section 2's deadline_approaching trigger, split at the schema
+	// level into deadline_t72h/deadline_t24h (infra/migrations/000016 — see
+	// its own comment for why two trigger values rather than one). "Tracked"
+	// reuses digest.sql's SelectDigestClosingSoon filter verbatim (any
+	// non-terminal user_job_state) rather than duplicating a different
+	// definition of "saved."
+	//
+	// Returns every candidate inside the 72h window on every sweep — no
+	// "already reminded" column here, unlike MarkJobGroupNotified's job_group
+	// gate. That gate exists because SelectUnnotifiedJobGroups scans the whole
+	// unnotified backlog and needs to shrink it permanently; this query is
+	// already scoped to a small tracked set (saved/applied jobs with a
+	// deadline), so re-checking it every tick costs nothing, and
+	// notification_dedup_idx via InsertNotification's ON CONFLICT DO NOTHING is
+	// what actually decides whether either reminder is new
+	// (apps/notifier/internal/trigger's DeadlineSweeper attempts both every
+	// sweep and lets the insert's row count answer that).
+	SelectDeadlineReminderCandidates(ctx context.Context, userID pgtype.UUID) ([]SelectDeadlineReminderCandidatesRow, error)
+	// Tracked jobs (user_job_state, any non-terminal state) with a deadline in
+	// the near future — docs/11 section 6.5's "Closing soon" section.
+	SelectDigestClosingSoon(ctx context.Context, arg SelectDigestClosingSoonParams) ([]SelectDigestClosingSoonRow, error)
+	// Same eligibility filter as SelectJobFeed (packages/db/queries/feed.sql):
+	// is_software, open, paid-or-high-confidence-unknown. `since` is the
+	// previous digest's 08:00 IST boundary, computed in Go.
+	SelectDigestOvernightJobs(ctx context.Context, arg SelectDigestOvernightJobsParams) ([]SelectDigestOvernightJobsRow, error)
+	SelectDigestPipelineCounts(ctx context.Context, userID pgtype.UUID) (SelectDigestPipelineCountsRow, error)
+	SelectDigestWeeklyAppliedCount(ctx context.Context, arg SelectDigestWeeklyAppliedCountParams) (int64, error)
 	// Scheduler queries against the `source` table. See docs/06-ingestion-pipeline.md
 	// section 3, and infra/migrations/000004_source.up.sql for the schema.
 	//
 	// Lowercase keywords per AGENTS.md; linted with .sqlfluff-queries rather than
 	// the uppercase-migrations config in .sqlfluff.
-	// The scheduler's hot query, unchanged from docs/06 section 3.2's literal
-	// text. `for update skip locked` is what lets multiple scheduler instances —
-	// today there is only one, but the query is written for the day there is more
-	// than one — run without coordinating: each grabs a disjoint batch rather
-	// than blocking on rows another instance already claimed.
+	// The scheduler's hot query, docs/06 section 3.2's literal text plus one
+	// deliberate deviation: 'pending_review' is admitted alongside 'active' so a
+	// newly registered source's 48h shadow run (docs/05 section 13) actually
+	// polls, parses, and dedups like a real source — it is only notifications
+	// that stay suppressed during the window, enforced separately at
+	// SelectUnnotifiedJobGroups. `for update skip locked` is what lets multiple
+	// scheduler instances — today there is only one, but the query is written
+	// for the day there is more than one — run without coordinating: each grabs
+	// a disjoint batch rather than blocking on rows another instance already
+	// claimed.
 	//
 	// The circuit-breaker predicate admits a source whose breaker is open but
 	// past its backoff window (half-open: ready for one probe request) as well as
@@ -63,6 +378,130 @@ type Querier interface {
 	// caught there — this predicate is an optimization that keeps obviously-not-
 	// due rows out of the batch, not the sole enforcement point.
 	SelectDueSources(ctx context.Context, batchLimit int32) ([]SelectDueSourcesRow, error)
+	// Job detail — docs/04-api-design.md section 4.1's GET /v1/jobs/{group_id}.
+	// Unlike SelectJobFeed (packages/db/queries/feed.sql), this returns every
+	// job_score subscore, not a trimmed feed-card subset — docs/12-frontend-
+	// ux.md section 4.3's own rule: "All thirteen scores are shown, always. A
+	// composite number without its components is unfalsifiable."
+	SelectJobDetail(ctx context.Context, arg SelectJobDetailParams) (SelectJobDetailRow, error)
+	// The ranked job feed — docs/04-api-design.md section 3/4.1's
+	// GET /v1/jobs. Keyset (cursor) pagination on (priority DESC, job_id ASC
+	// as tiebreaker), never offset — the doc's own stated reason: offset
+	// pagination on a feed that receives new rows continuously causes items
+	// to shift between pages, which for a job feed means genuinely missing
+	// postings while scrolling, the exact failure this project exists to
+	// prevent.
+	//
+	// Filters follow the same hard-eligibility pattern
+	// packages/db/queries/notification.sql's SelectUnnotifiedJobGroups
+	// established: is_software and status='open' are not optional (this
+	// product is software internships/new-grad roles, full stop), the rest
+	// are optional narg()s that pass through when NULL.
+	//
+	// role_family/seniority/work_mode filters are cast through ::text[] then
+	// ::role_family[]/::seniority[]/::work_mode[] rather than bound directly
+	// as native enum arrays — the same pgx-has-no-codec-for-a-custom-enum-
+	// array workaround GetUserProfile's own comment documents; this is a
+	// WHERE-clause bind, not a scanned result, so the two-step cast is enough
+	// to sidestep it without needing the caller to re-parse anything.
+	SelectJobFeed(ctx context.Context, arg SelectJobFeedParams) ([]SelectJobFeedRow, error)
+	SelectJobGroupForMerge(ctx context.Context, id pgtype.UUID) (SelectJobGroupForMergeRow, error)
+	// docs/08 section 4's representative-selection inputs, for every job
+	// currently in the (post-merge) group.
+	SelectJobsForRepresentativeScoring(ctx context.Context, jobGroupID pgtype.UUID) ([]SelectJobsForRepresentativeScoringRow, error)
+	// docs/08 section 3.3's per-company boilerplate learning input — recent
+	// postings' raw description text (pre-stripping; stripping is what this
+	// data trains). 50 is comfortably above the >=5-posting cold-start floor
+	// and bounds the cost of relearning per Stage 2 call.
+	SelectRecentDescriptionsForCompany(ctx context.Context, companyID pgtype.UUID) ([]*string, error)
+	// docs/09 section 3.2's semantic term. Zero rows (pgx.ErrNoRows) means at
+	// least one side has no embedding yet, or the two were computed under
+	// different embedding_versions ("never compare across versions" — the
+	// same rule apps/brain's Stage 3 consumer enforces) — the caller treats
+	// that exactly like "job has no compensation data": a real, common,
+	// honestly-represented unknown, not an error.
+	SelectResumeJobCosine(ctx context.Context, arg SelectResumeJobCosineParams) (float64, error)
+	// docs/05 section 13 step 5-6: a source registered as 'pending_review' polls
+	// silently for 48 hours, then gets promoted or flagged. This is the "48
+	// hours have passed and nobody has decided yet" query — the counters it
+	// returns are exactly what apps/collector/internal/scheduler's pure
+	// decideShadowPromotion function needs to decide, the same
+	// read-the-counters-then-write-the-verdict split source.sql already uses for
+	// UpdateSourceAfterPoll's interval math.
+	SelectShadowSourcesDueForReview(ctx context.Context, batchLimit int32) ([]SelectShadowSourcesDueForReviewRow, error)
+	// docs/08 section 3.2's own literal query, plus description_stripped
+	// (Gate 3 needs it when a candidate's simhash is NULL — a job inserted
+	// before this phase existed), the fields Gate 2/representative-scoring
+	// need, and a seniority filter docs/08 section 5's over-merge protection
+	// table requires ("Distinct seniority: Never merged") even though the
+	// section 3.2 query this is otherwise copied from doesn't show one.
+	// Excludes the job just inserted by this same call (excluding_job_id).
+	SelectStage2Candidates(ctx context.Context, arg SelectStage2CandidatesParams) ([]SelectStage2CandidatesRow, error)
+	// Notification trigger evaluation and delivery queries. See
+	// docs/11-notifications.md and infra/migrations/000009_notification.up.sql.
+	//
+	// Split matches apps/notifier's own package split: trigger.go selects
+	// unnotified job_group rows and evaluates bengaluru_match/high_score,
+	// inserting into `notification`; deliver.go separately picks up
+	// `notification` rows with no `notification_delivery` row yet — that
+	// absence of a delivery row IS the "queued" state (quiet hours, budget),
+	// rather than a separate status column tracking it.
+	// Eligibility (docs/11 section 8 step 2), minus excluded_keywords —
+	// P1 checks excluded_companies (a plain array-containment test) but not
+	// keyword matching against the title/description, which needs a pattern
+	// language this pass doesn't build; user_profile.excluded_keywords defaults
+	// empty, so nothing is lost until a user actually populates it.
+	//
+	// The paid clause is docs/07 section 7's actual rule, not a bare
+	// `paid = 'paid'`: most ATS platforms (Greenhouse among them) expose no
+	// compensation field at all, so nearly every real posting lands
+	// `paid = 'unknown'` — a bare equality check filtered out the entire
+	// market before a single trigger was ever evaluated, found live against
+	// Stripe's board where 0 of 561 postings had paid = 'paid'. docs/07's own
+	// "company history" and "size/stage bucket" clauses for admitting
+	// `unknown` need a company registry this pass doesn't have; the priority
+	// clause is the one input P1 actually has, so it is the one implemented.
+	// Explicit `unpaid` is excluded either way.
+	//
+	// seniority_filter_enabled (000012) makes target_seniority a hard gate
+	// here, not just overall_match's soft seniority_fit term — a senior/staff
+	// role can still clear the priority threshold on company_quality/
+	// deadline_urgency/freshness alone, so the soft signal isn't enough on its
+	// own for a user who genuinely never wants to see those roles surfaced.
+	// Same excluded_companies pattern: array-containment against user_profile,
+	// toggle defaults on, flip it off once target_seniority itself widens.
+	//
+	// 'unknown' seniority (classification found no signal) is admitted either
+	// way, matching the paid clause's own admit-unknown-rather-than-hide
+	// reasoning a few lines up — a role's seniority going undetected must not
+	// read as "detected and excluded."
+	//
+	// The source.status <> 'pending_review' clause is docs/05 section 13 step
+	// 5's "shadow run for 48 hours — collect but do not notify," enforced here
+	// rather than by touching apps/notifier/internal/trigger's
+	// suppressNotifications parameter (AGENTS.md rule 3's existing guard, and
+	// deliberately left reserved for backfills/rescores — see that package's own
+	// comment). Filtering it out of this SELECT instead of marking it notified
+	// means an un-promoted group is simply reconsidered on a later tick, the
+	// correct behavior for "not yet" rather than backfill's "never" — and it
+	// reuses job.primary_source_id, which every job already has, rather than
+	// adding new plumbing. A job_group can in principle merge jobs from more
+	// than one source, but only representative_job_id's source is checked here:
+	// if a shadow source's posting merges into a group an active source already
+	// surfaced, that group was already evaluated (and marked notified) the
+	// moment the active source's job arrived, so there is nothing left to
+	// suppress for it.
+	SelectUnnotifiedJobGroups(ctx context.Context, arg SelectUnnotifiedJobGroupsParams) ([]SelectUnnotifiedJobGroupsRow, error)
+	SetJobGroupRepresentative(ctx context.Context, arg SetJobGroupRepresentativeParams) error
+	// A re-observation of an existing job: bump last_seen_at and
+	// observation_count. Nothing else changes — Stage 1 dedup only recognizes
+	// exact repeats, so there is no new content to merge in.
+	TouchJob(ctx context.Context, id pgtype.UUID) error
+	// Called when a re-observed posting attaches to an existing group instead
+	// of creating a new one — bumps last_seen_at without touching member_count,
+	// since it's the same job, not an additional one merged in.
+	TouchJobGroup(ctx context.Context, id pgtype.UUID) error
+	UpdateJobGroupAfterMerge(ctx context.Context, arg UpdateJobGroupAfterMergeParams) error
 	// Persists the outcome of one poll cycle. Every value here is computed by the
 	// caller (apps/collector/internal/scheduler) BEFORE this query runs — the
 	// interval math (apps/collector/internal/interval), the circuit-breaker state
@@ -70,15 +509,55 @@ type Querier interface {
 	// (apps/collector/internal/changedetect) are all pure Go, tested in
 	// isolation, and this query's only job is to write their combined result.
 	//
-	// Scoped to exactly the columns this milestone's slice of the pipeline can
-	// legitimately compute. total_jobs_found, total_new_jobs, yield_ratio, and
-	// yield_computed_at are deliberately absent: they depend on per-posting
-	// extraction, which needs an adapter's Parse — see docs/06 section 8 — and no
-	// adapter exists yet. Writing zeros into those columns from here would be
-	// indistinguishable from "we checked and found none," which is a false
-	// signal; leaving them at the schema's own defaults until the code that can
-	// honestly compute them exists is the correct alternative.
-	UpdateSourceAfterPoll(ctx context.Context, arg UpdateSourceAfterPollParams) error
+	// total_jobs_found and total_new_jobs are cumulative counters, bumped by
+	// however many postings this poll parsed and how many of those turned out to
+	// be genuinely new jobs (apps/collector/internal/dedup.Result.IsNewJob) — both
+	// 0 on a poll that didn't reach parsing (a 304, an unchanged 200, a fetch
+	// failure).
+	//
+	// yield_ratio (P3, docs/16-observability.md): an exponential moving average
+	// over "did this poll find >=1 new job", decay 0.01 — an ~100-poll effective
+	// window, approximating the schema's own "new jobs / 100 polls" comment
+	// without a per-poll history table a true rolling window would need. Updated
+	// on every poll, including a fetch failure or an unchanged 200 (new_jobs=0
+	// either way): a source that starts failing every poll should show declining
+	// yield exactly like one that starts returning nothing new, since both are
+	// the "silent degradation" this metric exists to catch. This is also the
+	// first time this column has ever been written — it defaulted to 0 from
+	// schema creation through P2, which meant interval.Compute's yield_factor
+	// input was pinned at 0 for every source (yield_factor = 0.3 + 3.7*e^0 = 4.0,
+	// the maximum-poll-rate end of its range) rather than adapting at all.
+	UpdateSourceAfterPoll(ctx context.Context, arg UpdateSourceAfterPollParams) (float32, error)
+	// Replaces the whole skills/skill_levels pair rather than merging —
+	// resume_match's keyword term reads user_profile.skills directly, so a
+	// stale skill from a previous, different resume left behind after a swap
+	// would silently keep contributing to that score forever. A full
+	// replacement on every resume upload is what actually satisfies "remove
+	// the old one, put a new one there."
+	UpdateUserProfileSkills(ctx context.Context, arg UpdateUserProfileSkillsParams) error
+	// Resume queries — docs/09-ranking-scoring.md section 3.2's resume_match.
+	// Single-user system (ADR-015): one resume row, upserted on
+	// user_id, never inserted a second time.
+	// embedding/embedding_version reset to NULL on every update — this is what
+	// apps/brain/scout_brain/resume_embed.py's staleness check
+	// (`embedding IS NULL OR embedding_version IS DISTINCT FROM ...`) looks
+	// for, whether that recompute happens at brain startup or via an
+	// embed_resume queue job (apps/api's resume upload handler enqueues one in
+	// the same transaction as this write).
+	UpsertResume(ctx context.Context, arg UpsertResumeParams) (UpsertResumeRow, error)
+	// Re-running the onboarding flow updates the existing row in place rather
+	// than accumulating duplicates — notification_channel_single_idx (docs/03
+	// section 7) allows only one telegram channel per user, so this is the
+	// write side of that constraint.
+	UpsertTelegramChannel(ctx context.Context, arg UpsertTelegramChannelParams) (NotificationChannel, error)
+	// First transition for a (user, job) pair inserts; every later one updates
+	// in place — user_job_state is current-state-only, docs/03's
+	// user_job_state_event table (InsertUserJobStateEvent below) is the
+	// append-only history. applied_at is set once, on the first transition
+	// into 'applied', and never overwritten by a later re-save of the same
+	// state — coalesce(applied_at, ...) on conflict preserves whichever value
+	// is already there.
+	UpsertUserJobState(ctx context.Context, arg UpsertUserJobStateParams) (UserJobState, error)
 }
 
 var _ Querier = (*Queries)(nil)

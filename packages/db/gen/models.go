@@ -9,6 +9,7 @@ import (
 	"fmt"
 
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 type ApplicationState string
@@ -251,6 +252,8 @@ const (
 	NotificationTriggerPrestigeOpening     NotificationTrigger = "prestige_opening"
 	NotificationTriggerNewgradMatch        NotificationTrigger = "newgrad_match"
 	NotificationTriggerDigest              NotificationTrigger = "digest"
+	NotificationTriggerDeadlineT72h        NotificationTrigger = "deadline_t72h"
+	NotificationTriggerDeadlineT24h        NotificationTrigger = "deadline_t24h"
 )
 
 func (e *NotificationTrigger) Scan(src interface{}) error {
@@ -329,6 +332,54 @@ func (ns NullPaidSignal) Value() (driver.Value, error) {
 		return nil, nil
 	}
 	return string(ns.PaidSignal), nil
+}
+
+type RiverJobState string
+
+const (
+	RiverJobStateAvailable RiverJobState = "available"
+	RiverJobStateCancelled RiverJobState = "cancelled"
+	RiverJobStateCompleted RiverJobState = "completed"
+	RiverJobStateDiscarded RiverJobState = "discarded"
+	RiverJobStatePending   RiverJobState = "pending"
+	RiverJobStateRetryable RiverJobState = "retryable"
+	RiverJobStateRunning   RiverJobState = "running"
+	RiverJobStateScheduled RiverJobState = "scheduled"
+)
+
+func (e *RiverJobState) Scan(src interface{}) error {
+	switch s := src.(type) {
+	case []byte:
+		*e = RiverJobState(s)
+	case string:
+		*e = RiverJobState(s)
+	default:
+		return fmt.Errorf("unsupported scan type for RiverJobState: %T", src)
+	}
+	return nil
+}
+
+type NullRiverJobState struct {
+	RiverJobState RiverJobState `json:"river_job_state"`
+	Valid         bool          `json:"valid"` // Valid is true if RiverJobState is not NULL
+}
+
+// Scan implements the Scanner interface.
+func (ns *NullRiverJobState) Scan(value interface{}) error {
+	if value == nil {
+		ns.RiverJobState, ns.Valid = "", false
+		return nil
+	}
+	ns.Valid = true
+	return ns.RiverJobState.Scan(value)
+}
+
+// Value implements the driver Valuer interface.
+func (ns NullRiverJobState) Value() (driver.Value, error) {
+	if !ns.Valid {
+		return nil, nil
+	}
+	return string(ns.RiverJobState), nil
 }
 
 type RoleFamily string
@@ -601,6 +652,18 @@ func (ns NullWorkMode) Value() (driver.Value, error) {
 	return string(ns.WorkMode), nil
 }
 
+type AppUser struct {
+	ID            pgtype.UUID        `db:"id" json:"id"`
+	Email         string             `db:"email" json:"email"`
+	EmailVerified bool               `db:"email_verified" json:"email_verified"`
+	DisplayName   *string            `db:"display_name" json:"display_name"`
+	Timezone      string             `db:"timezone" json:"timezone"`
+	Locale        string             `db:"locale" json:"locale"`
+	CreatedAt     pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	LastActiveAt  pgtype.Timestamptz `db:"last_active_at" json:"last_active_at"`
+	DeletedAt     pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+}
+
 type Company struct {
 	ID                pgtype.UUID        `db:"id" json:"id"`
 	Slug              string             `db:"slug" json:"slug"`
@@ -645,6 +708,162 @@ type CompanyAlias struct {
 	CreatedAt  pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
+type Job struct {
+	ID                     pgtype.UUID        `db:"id" json:"id"`
+	JobGroupID             pgtype.UUID        `db:"job_group_id" json:"job_group_id"`
+	CompanyID              pgtype.UUID        `db:"company_id" json:"company_id"`
+	PrimarySourceID        pgtype.UUID        `db:"primary_source_id" json:"primary_source_id"`
+	CanonicalUrl           string             `db:"canonical_url" json:"canonical_url"`
+	CanonicalUrlHash       []byte             `db:"canonical_url_hash" json:"canonical_url_hash"`
+	AtsPlatform            *string            `db:"ats_platform" json:"ats_platform"`
+	AtsJobID               *string            `db:"ats_job_id" json:"ats_job_id"`
+	ContentHash            []byte             `db:"content_hash" json:"content_hash"`
+	Title                  string             `db:"title" json:"title"`
+	NormalizedTitle        string             `db:"normalized_title" json:"normalized_title"`
+	DescriptionHtml        *string            `db:"description_html" json:"description_html"`
+	DescriptionText        *string            `db:"description_text" json:"description_text"`
+	DescriptionStripped    *string            `db:"description_stripped" json:"description_stripped"`
+	RequirementsText       *string            `db:"requirements_text" json:"requirements_text"`
+	ApplyUrl               string             `db:"apply_url" json:"apply_url"`
+	RoleFamily             RoleFamily         `db:"role_family" json:"role_family"`
+	RoleConfidence         float32            `db:"role_confidence" json:"role_confidence"`
+	Seniority              Seniority          `db:"seniority" json:"seniority"`
+	IsSoftware             bool               `db:"is_software" json:"is_software"`
+	Skills                 []string           `db:"skills" json:"skills"`
+	TechStack              []string           `db:"tech_stack" json:"tech_stack"`
+	LocationRaw            *string            `db:"location_raw" json:"location_raw"`
+	LocationCity           *string            `db:"location_city" json:"location_city"`
+	LocationRegion         *string            `db:"location_region" json:"location_region"`
+	LocationCountry        *string            `db:"location_country" json:"location_country"`
+	LocationTier           *int16             `db:"location_tier" json:"location_tier"`
+	WorkMode               WorkMode           `db:"work_mode" json:"work_mode"`
+	VisaSponsorship        *bool              `db:"visa_sponsorship" json:"visa_sponsorship"`
+	Paid                   PaidSignal         `db:"paid" json:"paid"`
+	CompMin                pgtype.Numeric     `db:"comp_min" json:"comp_min"`
+	CompMax                pgtype.Numeric     `db:"comp_max" json:"comp_max"`
+	CompCurrency           *string            `db:"comp_currency" json:"comp_currency"`
+	CompPeriod             *string            `db:"comp_period" json:"comp_period"`
+	CompNormalizedInrMonth pgtype.Numeric     `db:"comp_normalized_inr_month" json:"comp_normalized_inr_month"`
+	CompConfidence         *float32           `db:"comp_confidence" json:"comp_confidence"`
+	PrestigeException      bool               `db:"prestige_exception" json:"prestige_exception"`
+	Status                 JobStatus          `db:"status" json:"status"`
+	PostedAt               pgtype.Timestamptz `db:"posted_at" json:"posted_at"`
+	PostedAtEstimated      bool               `db:"posted_at_estimated" json:"posted_at_estimated"`
+	DeadlineAt             pgtype.Timestamptz `db:"deadline_at" json:"deadline_at"`
+	FirstSeenAt            pgtype.Timestamptz `db:"first_seen_at" json:"first_seen_at"`
+	LastSeenAt             pgtype.Timestamptz `db:"last_seen_at" json:"last_seen_at"`
+	ClosedAt               pgtype.Timestamptz `db:"closed_at" json:"closed_at"`
+	IsGhost                bool               `db:"is_ghost" json:"is_ghost"`
+	GhostReason            *string            `db:"ghost_reason" json:"ghost_reason"`
+	ObservationCount       int32              `db:"observation_count" json:"observation_count"`
+	Embedding              *pgvector.Vector   `db:"embedding" json:"embedding"`
+	EmbeddingVersion       *string            `db:"embedding_version" json:"embedding_version"`
+	Simhash                *int64             `db:"simhash" json:"simhash"`
+	SearchVector           interface{}        `db:"search_vector" json:"search_vector"`
+	RawPayload             []byte             `db:"raw_payload" json:"raw_payload"`
+	CreatedAt              pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	DeletedAt              pgtype.Timestamptz `db:"deleted_at" json:"deleted_at"`
+	PossibleDuplicate      bool               `db:"possible_duplicate" json:"possible_duplicate"`
+	AiSummary              *string            `db:"ai_summary" json:"ai_summary"`
+	AiSummaryModel         *string            `db:"ai_summary_model" json:"ai_summary_model"`
+	AiSummaryGeneratedAt   pgtype.Timestamptz `db:"ai_summary_generated_at" json:"ai_summary_generated_at"`
+}
+
+type JobGroup struct {
+	ID                  pgtype.UUID        `db:"id" json:"id"`
+	CompanyID           pgtype.UUID        `db:"company_id" json:"company_id"`
+	RepresentativeJobID pgtype.UUID        `db:"representative_job_id" json:"representative_job_id"`
+	MemberCount         int32              `db:"member_count" json:"member_count"`
+	FirstSeenAt         pgtype.Timestamptz `db:"first_seen_at" json:"first_seen_at"`
+	LastSeenAt          pgtype.Timestamptz `db:"last_seen_at" json:"last_seen_at"`
+	NotifiedAt          pgtype.Timestamptz `db:"notified_at" json:"notified_at"`
+	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+type JobMergeEvent struct {
+	ID           pgtype.UUID        `db:"id" json:"id"`
+	JobID        pgtype.UUID        `db:"job_id" json:"job_id"`
+	MatchedJobID pgtype.UUID        `db:"matched_job_id" json:"matched_job_id"`
+	FromGroupID  pgtype.UUID        `db:"from_group_id" json:"from_group_id"`
+	IntoGroupID  pgtype.UUID        `db:"into_group_id" json:"into_group_id"`
+	Stage        string             `db:"stage" json:"stage"`
+	Certainty    float32            `db:"certainty" json:"certainty"`
+	Signal       []byte             `db:"signal" json:"signal"`
+	RevertedAt   pgtype.Timestamptz `db:"reverted_at" json:"reverted_at"`
+	RevertedBy   *string            `db:"reverted_by" json:"reverted_by"`
+	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+type JobScore struct {
+	JobID                pgtype.UUID        `db:"job_id" json:"job_id"`
+	UserID               pgtype.UUID        `db:"user_id" json:"user_id"`
+	WeightVersion        string             `db:"weight_version" json:"weight_version"`
+	OverallMatch         int16              `db:"overall_match" json:"overall_match"`
+	SkillMatch           int16              `db:"skill_match" json:"skill_match"`
+	ResumeMatch          int16              `db:"resume_match" json:"resume_match"`
+	CompanyQuality       int16              `db:"company_quality" json:"company_quality"`
+	Compensation         int16              `db:"compensation" json:"compensation"`
+	LearningOpportunity  int16              `db:"learning_opportunity" json:"learning_opportunity"`
+	EngineeringCulture   int16              `db:"engineering_culture" json:"engineering_culture"`
+	GrowthPotential      int16              `db:"growth_potential" json:"growth_potential"`
+	InterviewProbability int16              `db:"interview_probability" json:"interview_probability"`
+	CompetitionEstimate  int16              `db:"competition_estimate" json:"competition_estimate"`
+	EaseOfApplying       int16              `db:"ease_of_applying" json:"ease_of_applying"`
+	DeadlineUrgency      int16              `db:"deadline_urgency" json:"deadline_urgency"`
+	Priority             int16              `db:"priority" json:"priority"`
+	LocationMultiplier   float32            `db:"location_multiplier" json:"location_multiplier"`
+	FreshnessMultiplier  float32            `db:"freshness_multiplier" json:"freshness_multiplier"`
+	Explanation          *string            `db:"explanation" json:"explanation"`
+	ExplanationModel     *string            `db:"explanation_model" json:"explanation_model"`
+	ScoreInputs          []byte             `db:"score_inputs" json:"score_inputs"`
+	ComputedAt           pgtype.Timestamptz `db:"computed_at" json:"computed_at"`
+}
+
+type Notification struct {
+	ID               pgtype.UUID         `db:"id" json:"id"`
+	UserID           pgtype.UUID         `db:"user_id" json:"user_id"`
+	JobGroupID       pgtype.UUID         `db:"job_group_id" json:"job_group_id"`
+	Trigger          NotificationTrigger `db:"trigger" json:"trigger"`
+	Urgency          string              `db:"urgency" json:"urgency"`
+	Payload          []byte              `db:"payload" json:"payload"`
+	PriorityAtSend   *int16              `db:"priority_at_send" json:"priority_at_send"`
+	CreatedAt        pgtype.Timestamptz  `db:"created_at" json:"created_at"`
+	ScheduledFor     pgtype.Timestamptz  `db:"scheduled_for" json:"scheduled_for"`
+	SuppressedReason *string             `db:"suppressed_reason" json:"suppressed_reason"`
+}
+
+type NotificationChannel struct {
+	ID               pgtype.UUID             `db:"id" json:"id"`
+	UserID           pgtype.UUID             `db:"user_id" json:"user_id"`
+	Kind             NotificationChannelKind `db:"kind" json:"kind"`
+	Config           []byte                  `db:"config" json:"config"`
+	Enabled          bool                    `db:"enabled" json:"enabled"`
+	VerifiedAt       pgtype.Timestamptz      `db:"verified_at" json:"verified_at"`
+	LastSuccessAt    pgtype.Timestamptz      `db:"last_success_at" json:"last_success_at"`
+	LastFailureAt    pgtype.Timestamptz      `db:"last_failure_at" json:"last_failure_at"`
+	FailureCount     int16                   `db:"failure_count" json:"failure_count"`
+	Platform         *DevicePlatform         `db:"platform" json:"platform"`
+	DeviceToken      *string                 `db:"device_token" json:"device_token"`
+	DeviceLabel      *string                 `db:"device_label" json:"device_label"`
+	AppVersion       *string                 `db:"app_version" json:"app_version"`
+	TokenRefreshedAt pgtype.Timestamptz      `db:"token_refreshed_at" json:"token_refreshed_at"`
+	CreatedAt        pgtype.Timestamptz      `db:"created_at" json:"created_at"`
+}
+
+type NotificationDelivery struct {
+	ID             pgtype.UUID        `db:"id" json:"id"`
+	NotificationID pgtype.UUID        `db:"notification_id" json:"notification_id"`
+	ChannelID      pgtype.UUID        `db:"channel_id" json:"channel_id"`
+	Status         string             `db:"status" json:"status"`
+	Attempts       int16              `db:"attempts" json:"attempts"`
+	Error          *string            `db:"error" json:"error"`
+	SentAt         pgtype.Timestamptz `db:"sent_at" json:"sent_at"`
+	OpenedAt       pgtype.Timestamptz `db:"opened_at" json:"opened_at"`
+	LatencyMs      *int32             `db:"latency_ms" json:"latency_ms"`
+	ProviderMsgID  *string            `db:"provider_msg_id" json:"provider_msg_id"`
+}
+
 type RawObservation struct {
 	ID               pgtype.UUID        `db:"id" json:"id"`
 	SourceID         pgtype.UUID        `db:"source_id" json:"source_id"`
@@ -679,6 +898,64 @@ type RawObservationDefault struct {
 	ProcessedAt      pgtype.Timestamptz `db:"processed_at" json:"processed_at"`
 	ProcessError     *string            `db:"process_error" json:"process_error"`
 	JobID            pgtype.UUID        `db:"job_id" json:"job_id"`
+}
+
+type Resume struct {
+	ID               pgtype.UUID        `db:"id" json:"id"`
+	UserID           pgtype.UUID        `db:"user_id" json:"user_id"`
+	RawText          string             `db:"raw_text" json:"raw_text"`
+	Embedding        *pgvector.Vector   `db:"embedding" json:"embedding"`
+	EmbeddingVersion *string            `db:"embedding_version" json:"embedding_version"`
+	UpdatedAt        pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type RiverJob struct {
+	ID           int64              `db:"id" json:"id"`
+	State        RiverJobState      `db:"state" json:"state"`
+	Attempt      int16              `db:"attempt" json:"attempt"`
+	MaxAttempts  int16              `db:"max_attempts" json:"max_attempts"`
+	AttemptedAt  pgtype.Timestamptz `db:"attempted_at" json:"attempted_at"`
+	CreatedAt    pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	FinalizedAt  pgtype.Timestamptz `db:"finalized_at" json:"finalized_at"`
+	ScheduledAt  pgtype.Timestamptz `db:"scheduled_at" json:"scheduled_at"`
+	Priority     int16              `db:"priority" json:"priority"`
+	Args         []byte             `db:"args" json:"args"`
+	AttemptedBy  []string           `db:"attempted_by" json:"attempted_by"`
+	Errors       [][]byte           `db:"errors" json:"errors"`
+	Kind         string             `db:"kind" json:"kind"`
+	Metadata     []byte             `db:"metadata" json:"metadata"`
+	Queue        string             `db:"queue" json:"queue"`
+	Tags         []string           `db:"tags" json:"tags"`
+	UniqueKey    []byte             `db:"unique_key" json:"unique_key"`
+	UniqueStates pgtype.Bits        `db:"unique_states" json:"unique_states"`
+}
+
+type RiverLeader struct {
+	ElectedAt pgtype.Timestamptz `db:"elected_at" json:"elected_at"`
+	ExpiresAt pgtype.Timestamptz `db:"expires_at" json:"expires_at"`
+	LeaderID  string             `db:"leader_id" json:"leader_id"`
+	Name      string             `db:"name" json:"name"`
+}
+
+type RiverMigration struct {
+	Line      string             `db:"line" json:"line"`
+	Version   int64              `db:"version" json:"version"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+}
+
+type RiverNotification struct {
+	ID        int64              `db:"id" json:"id"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	Payload   string             `db:"payload" json:"payload"`
+	Topic     string             `db:"topic" json:"topic"`
+}
+
+type RiverQueue struct {
+	Name      string             `db:"name" json:"name"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	Metadata  []byte             `db:"metadata" json:"metadata"`
+	PausedAt  pgtype.Timestamptz `db:"paused_at" json:"paused_at"`
+	UpdatedAt pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 }
 
 type Source struct {
@@ -718,4 +995,62 @@ type Source struct {
 	Notes               *string            `db:"notes" json:"notes"`
 	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	ShadowReviewedAt    pgtype.Timestamptz `db:"shadow_reviewed_at" json:"shadow_reviewed_at"`
+}
+
+type UserJobState struct {
+	UserID              pgtype.UUID        `db:"user_id" json:"user_id"`
+	JobGroupID          pgtype.UUID        `db:"job_group_id" json:"job_group_id"`
+	State               ApplicationState   `db:"state" json:"state"`
+	StateChangedAt      pgtype.Timestamptz `db:"state_changed_at" json:"state_changed_at"`
+	FoundElsewhereFirst bool               `db:"found_elsewhere_first" json:"found_elsewhere_first"`
+	Notes               *string            `db:"notes" json:"notes"`
+	Rating              *int16             `db:"rating" json:"rating"`
+	AppliedAt           pgtype.Timestamptz `db:"applied_at" json:"applied_at"`
+	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type UserJobStateEvent struct {
+	ID         int64              `db:"id" json:"id"`
+	UserID     pgtype.UUID        `db:"user_id" json:"user_id"`
+	JobGroupID pgtype.UUID        `db:"job_group_id" json:"job_group_id"`
+	FromState  *ApplicationState  `db:"from_state" json:"from_state"`
+	ToState    ApplicationState   `db:"to_state" json:"to_state"`
+	OccurredAt pgtype.Timestamptz `db:"occurred_at" json:"occurred_at"`
+}
+
+type UserProfile struct {
+	UserID                 pgtype.UUID        `db:"user_id" json:"user_id"`
+	GraduationYear         *int16             `db:"graduation_year" json:"graduation_year"`
+	Degree                 *string            `db:"degree" json:"degree"`
+	University             *string            `db:"university" json:"university"`
+	TargetRoles            []RoleFamily       `db:"target_roles" json:"target_roles"`
+	TargetSeniority        []Seniority        `db:"target_seniority" json:"target_seniority"`
+	Skills                 []string           `db:"skills" json:"skills"`
+	SkillLevels            []byte             `db:"skill_levels" json:"skill_levels"`
+	LocationTiers          []byte             `db:"location_tiers" json:"location_tiers"`
+	RequirePaid            bool               `db:"require_paid" json:"require_paid"`
+	AllowPrestigeUnpaid    bool               `db:"allow_prestige_unpaid" json:"allow_prestige_unpaid"`
+	MinCompInrMonth        pgtype.Numeric     `db:"min_comp_inr_month" json:"min_comp_inr_month"`
+	ExcludedCompanies      []pgtype.UUID      `db:"excluded_companies" json:"excluded_companies"`
+	ExcludedKeywords       []string           `db:"excluded_keywords" json:"excluded_keywords"`
+	QuietHoursStart        pgtype.Time        `db:"quiet_hours_start" json:"quiet_hours_start"`
+	QuietHoursEnd          pgtype.Time        `db:"quiet_hours_end" json:"quiet_hours_end"`
+	DigestTime             pgtype.Time        `db:"digest_time" json:"digest_time"`
+	NotifyThreshold        int16              `db:"notify_threshold" json:"notify_threshold"`
+	MaxNotificationsHour   int16              `db:"max_notifications_hour" json:"max_notifications_hour"`
+	MaxNotificationsDay    int16              `db:"max_notifications_day" json:"max_notifications_day"`
+	UpdatedAt              pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+	SeniorityFilterEnabled bool               `db:"seniority_filter_enabled" json:"seniority_filter_enabled"`
+}
+
+type WeightVersion struct {
+	Version   string             `db:"version" json:"version"`
+	Weights   []byte             `db:"weights" json:"weights"`
+	Source    string             `db:"source" json:"source"`
+	TrainedOn *int32             `db:"trained_on" json:"trained_on"`
+	Metrics   []byte             `db:"metrics" json:"metrics"`
+	Active    bool               `db:"active" json:"active"`
+	CreatedAt pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }

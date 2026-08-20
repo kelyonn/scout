@@ -5,11 +5,16 @@
 -- the uppercase-migrations config in .sqlfluff.
 
 -- name: SelectDueSources :many
--- The scheduler's hot query, unchanged from docs/06 section 3.2's literal
--- text. `for update skip locked` is what lets multiple scheduler instances —
--- today there is only one, but the query is written for the day there is more
--- than one — run without coordinating: each grabs a disjoint batch rather
--- than blocking on rows another instance already claimed.
+-- The scheduler's hot query, docs/06 section 3.2's literal text plus one
+-- deliberate deviation: 'pending_review' is admitted alongside 'active' so a
+-- newly registered source's 48h shadow run (docs/05 section 13) actually
+-- polls, parses, and dedups like a real source — it is only notifications
+-- that stay suppressed during the window, enforced separately at
+-- SelectUnnotifiedJobGroups. `for update skip locked` is what lets multiple
+-- scheduler instances — today there is only one, but the query is written
+-- for the day there is more than one — run without coordinating: each grabs
+-- a disjoint batch rather than blocking on rows another instance already
+-- claimed.
 --
 -- The circuit-breaker predicate admits a source whose breaker is open but
 -- past its backoff window (half-open: ready for one probe request) as well as
@@ -20,8 +25,10 @@
 -- due rows out of the batch, not the sole enforcement point.
 select
     id,
+    company_id,
     kind,
     url,
+    adapter_config,
     max_rps,
     max_concurrency,
     robots_crawl_delay_s,
@@ -38,7 +45,7 @@ select
     last_content_hash,
     consecutive_failures
 from source
-where status = 'active'
+where status in ('active', 'pending_review')
     and legal_posture in ('permitted', 'api_only')
     and next_poll_at <= now()
     and (circuit_open_until is NULL or circuit_open_until <= now())
@@ -67,7 +74,7 @@ update source
 set next_poll_at = sqlc.arg(claimed_until)::timestamptz
 where id = any(sqlc.arg(ids)::uuid[]);
 
--- name: UpdateSourceAfterPoll :exec
+-- name: UpdateSourceAfterPoll :one
 -- Persists the outcome of one poll cycle. Every value here is computed by the
 -- caller (apps/collector/internal/scheduler) BEFORE this query runs — the
 -- interval math (apps/collector/internal/interval), the circuit-breaker state
@@ -75,14 +82,24 @@ where id = any(sqlc.arg(ids)::uuid[]);
 -- (apps/collector/internal/changedetect) are all pure Go, tested in
 -- isolation, and this query's only job is to write their combined result.
 --
--- Scoped to exactly the columns this milestone's slice of the pipeline can
--- legitimately compute. total_jobs_found, total_new_jobs, yield_ratio, and
--- yield_computed_at are deliberately absent: they depend on per-posting
--- extraction, which needs an adapter's Parse — see docs/06 section 8 — and no
--- adapter exists yet. Writing zeros into those columns from here would be
--- indistinguishable from "we checked and found none," which is a false
--- signal; leaving them at the schema's own defaults until the code that can
--- honestly compute them exists is the correct alternative.
+-- total_jobs_found and total_new_jobs are cumulative counters, bumped by
+-- however many postings this poll parsed and how many of those turned out to
+-- be genuinely new jobs (apps/collector/internal/dedup.Result.IsNewJob) — both
+-- 0 on a poll that didn't reach parsing (a 304, an unchanged 200, a fetch
+-- failure).
+--
+-- yield_ratio (P3, docs/16-observability.md): an exponential moving average
+-- over "did this poll find >=1 new job", decay 0.01 — an ~100-poll effective
+-- window, approximating the schema's own "new jobs / 100 polls" comment
+-- without a per-poll history table a true rolling window would need. Updated
+-- on every poll, including a fetch failure or an unchanged 200 (new_jobs=0
+-- either way): a source that starts failing every poll should show declining
+-- yield exactly like one that starts returning nothing new, since both are
+-- the "silent degradation" this metric exists to catch. This is also the
+-- first time this column has ever been written — it defaulted to 0 from
+-- schema creation through P2, which meant interval.Compute's yield_factor
+-- input was pinned at 0 for every source (yield_factor = 0.3 + 3.7*e^0 = 4.0,
+-- the maximum-poll-rate end of its range) rather than adapting at all.
 update source
 set
     next_poll_at = sqlc.arg(next_poll_at)::timestamptz,
@@ -103,7 +120,37 @@ set
     circuit_open_until = sqlc.narg(circuit_open_until)::timestamptz,
     total_polls = total_polls + 1,
     total_successes = total_successes + case when sqlc.arg(success)::boolean then 1 else 0 end,
+    total_jobs_found = total_jobs_found + sqlc.arg(jobs_found)::bigint,
+    total_new_jobs = total_new_jobs + sqlc.arg(new_jobs)::bigint,
+    yield_ratio = yield_ratio * 0.99 + (case when sqlc.arg(new_jobs)::bigint > 0 then 1 else 0 end) * 0.01,
+    yield_computed_at = now(),
     updated_at = now()
+where id = sqlc.arg(id)::uuid
+returning yield_ratio;
+
+-- name: QuarantineSource :exec
+-- docs/06 section 10: 401/403 means access changed, not a transient blip.
+-- Setting status here (rather than only backing off next_poll_at) is what
+-- actually stops polling — SelectDueSources's own predicate requires
+-- status = 'active', so a quarantined source simply stops being selected
+-- until a human reviews and reactivates it.
+update source
+set status = 'quarantined', updated_at = now()
+where id = sqlc.arg(id)::uuid;
+
+-- name: RetireSource :exec
+-- docs/06 section 10: three consecutive 404s means the board is gone.
+update source
+set status = 'retired', updated_at = now()
+where id = sqlc.arg(id)::uuid;
+
+-- name: HalveMaxRPS :exec
+-- docs/06 section 10's 429 handling: honor Retry-After (via
+-- RescheduleSource's next_poll_at) AND halve max_rps permanently — the
+-- source told us its previous rate was too fast, and that fact outlives
+-- this one poll.
+update source
+set max_rps = max_rps / 2, updated_at = now()
 where id = sqlc.arg(id)::uuid;
 
 -- name: RescheduleSource :exec
@@ -134,3 +181,55 @@ select count(*)
 from source
 where status = 'active'
     and legal_posture in ('permitted', 'api_only');
+
+-- name: SelectShadowSourcesDueForReview :many
+-- docs/05 section 13 step 5-6: a source registered as 'pending_review' polls
+-- silently for 48 hours, then gets promoted or flagged. This is the "48
+-- hours have passed and nobody has decided yet" query — the counters it
+-- returns are exactly what apps/collector/internal/scheduler's pure
+-- decideShadowPromotion function needs to decide, the same
+-- read-the-counters-then-write-the-verdict split source.sql already uses for
+-- UpdateSourceAfterPoll's interval math.
+select
+    id,
+    url,
+    total_polls,
+    total_successes,
+    total_jobs_found,
+    total_new_jobs,
+    yield_ratio
+from source
+where status = 'pending_review'
+    and shadow_reviewed_at is NULL
+    and legal_posture in ('permitted', 'api_only')
+    and created_at <= now() - interval '48 hours'
+order by created_at asc
+limit sqlc.arg(batch_limit)::int;
+
+-- name: PromoteShadowSource :exec
+-- The shadow run looked healthy: real jobs, no red flags. priority_tier
+-- comes from decideShadowPromotion's yield-based mapping (docs/05 step 6,
+-- "a tier assigned by observed yield") — never tier 1, which stays reserved
+-- for manual curation, same reasoning as QuarantineSource reserving
+-- 'quarantined' for a human to clear.
+update source
+set status = 'active', priority_tier = sqlc.arg(priority_tier)::smallint,
+    shadow_reviewed_at = now(), updated_at = now()
+where id = sqlc.arg(id)::uuid;
+
+-- name: FlagShadowSource :exec
+-- The shadow run looked anomalous (zero jobs found, or an implausibly high
+-- count — a likely sign of a wrong tenant slug or an adapter matching too
+-- broadly). Stays 'pending_review' rather than being quarantined or
+-- retired: nothing has actually gone wrong in a way those states describe,
+-- a human just needs to look once. shadow_reviewed_at is set regardless, so
+-- this source is not re-flagged on every future review pass — see this
+-- migration's own comment on why that would otherwise happen. reason is
+-- appended to notes for whoever reviews it next; AGENTS.md rule 7 forbids
+-- PII here, and there is none to leak — url and counters, nothing a user
+-- typed.
+update source
+set shadow_reviewed_at = now(),
+    notes = coalesce(notes || E'\n', '') || sqlc.arg(reason)::text,
+    updated_at = now()
+where id = sqlc.arg(id)::uuid;
