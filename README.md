@@ -71,8 +71,10 @@ that would revisit the decision.
 
 ## Status
 
-**Foundation and core ingestion pipeline are built. No source adapter exists
-yet, so nothing has been discovered in production.**
+**P1 (first real notification) and P2 (worth reading) are code-complete. P3
+(daily driver) has started.** See [`HANDOFF.md`](HANDOFF.md) for the current
+state in detail and [`docs/19-roadmap.md`](docs/19-roadmap.md) for what each
+milestone means and its annotated exit criteria.
 
 **Infrastructure**
 - Database schema, applied via `golang-migrate`
@@ -94,14 +96,34 @@ yet, so nothing has been discovered in production.**
 - An adaptive scheduler that varies poll frequency by source yield, recency,
   and season, claiming work in short transactions so a large batch never holds
   a lock across a live network fetch
+- Greenhouse, Lever, and Ashby adapters, ~2,267 seeded sources
+
+**Intelligence** (`apps/collector/internal/{normalize,classify,dedup,scoring}`,
+`apps/brain`):
+- Normalization, taxonomy (roles including `advocacy`, locations, skills,
+  companies), three-stage dedup, and most of the scoring model
+- A Python service running local embeddings and, per
+  [ADR-016](docs/adr/ADR-016-free-tier-llm-cascade.md), a provider-rotated
+  LLM cascade (free hosted tiers, local Ollama fallback) for classification,
+  dedup adjudication, posting summaries, and personalized match explanations
+- An eval harness (`evals/`) gating classification, dedup, and explanation
+  quality in CI against golden sets
+
+**Delivery**
+- Telegram notifier with `bengaluru_match`/`high_score` triggers, quiet
+  hours, and exactly-once delivery
+- A Next.js dashboard with a feed, job detail (including an AI-generated
+  summary and a personalized match explanation), and a resume page
 
 This has been verified end-to-end against a real Postgres and Redis instance,
 not only with unit tests.
 
-**Not yet built:** any source adapter (Greenhouse, Lever, Ashby, etc.), and
-everything downstream of one — structural change detection, normalization,
-deduplication, scoring, notifications, and the dashboard.
-[`docs/19-roadmap.md`](docs/19-roadmap.md) lists what ships in each milestone.
+**Not yet built:** the save/applied/interviewing state machine, the "found
+elsewhere first" control, email-alert ingestion, the remaining ATS adapters
+(Workday among them), GCC coverage, and observability.
+[`HANDOFF.md`](HANDOFF.md) has the full list and
+[`docs/19-roadmap.md`](docs/19-roadmap.md) lists what ships in each
+milestone.
 
 ---
 
