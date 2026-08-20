@@ -6,8 +6,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kelyon/scout/apps/collector/internal/fetch"
+	"github.com/jackc/pgx/v5/pgtype"
+
+	db "github.com/kelyon/scout/packages/db/gen"
+
 	"github.com/kelyon/scout/apps/collector/internal/politeness"
+	"github.com/kelyon/scout/packages/fetch"
 )
 
 func TestRunOnceAllowedSuccessUpdatesEverything(t *testing.T) {
@@ -23,7 +27,10 @@ func TestRunOnceAllowedSuccessUpdatesEverything(t *testing.T) {
 		FetchedAt:    time.Now(),
 	}}
 
-	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(10).WithConcurrency(4)
+	// WithBatchLimit(1): keeps this test scoped to its own fixture — see
+	// insertTestSource's comment in scheduler_test.go for why an unbounded
+	// batch against the shared dev database is unsafe.
+	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1).WithConcurrency(4)
 
 	n, err := s.RunOnce(context.Background())
 	if err != nil {
@@ -85,7 +92,10 @@ func TestRunOnceNotModifiedDoesNotAdvanceLastChangedAt(t *testing.T) {
 		FetchedAt:   time.Now(),
 	}}
 
-	s := New(pool, gate, fetcher, testLogger())
+	// WithBatchLimit(1): keeps this test scoped to its own fixture — see
+	// insertTestSource's comment in scheduler_test.go for why an unbounded
+	// batch against the shared dev database is unsafe.
+	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
 	if _, err := s.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -106,7 +116,10 @@ func TestRunOnceFetchErrorIncrementsFailures(t *testing.T) {
 	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultAllow}}
 	fetcher := &fakeFetcher{err: context.DeadlineExceeded}
 
-	s := New(pool, gate, fetcher, testLogger())
+	// WithBatchLimit(1): keeps this test scoped to its own fixture — see
+	// insertTestSource's comment in scheduler_test.go for why an unbounded
+	// batch against the shared dev database is unsafe.
+	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
 	if _, err := s.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -134,7 +147,10 @@ func TestRunOnceServerErrorCountsAsFailure(t *testing.T) {
 	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultAllow}}
 	fetcher := &fakeFetcher{result: &fetch.Result{StatusCode: http.StatusServiceUnavailable, FetchedAt: time.Now()}}
 
-	s := New(pool, gate, fetcher, testLogger())
+	// WithBatchLimit(1): keeps this test scoped to its own fixture — see
+	// insertTestSource's comment in scheduler_test.go for why an unbounded
+	// batch against the shared dev database is unsafe.
+	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
 	if _, err := s.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -152,7 +168,10 @@ func TestRunOnceRefuseIsTreatedAsFailureWithNoFetch(t *testing.T) {
 	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultRefuse, Reason: "robots.txt disallows"}}
 	fetcher := &fakeFetcher{result: &fetch.Result{StatusCode: http.StatusOK}}
 
-	s := New(pool, gate, fetcher, testLogger())
+	// WithBatchLimit(1): keeps this test scoped to its own fixture — see
+	// insertTestSource's comment in scheduler_test.go for why an unbounded
+	// batch against the shared dev database is unsafe.
+	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
 	if _, err := s.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -175,7 +194,10 @@ func TestRunOnceDeferOnlyReschedulesAndTouchesNoCounters(t *testing.T) {
 	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultDefer, Reason: "rate budget exhausted"}}
 	fetcher := &fakeFetcher{result: &fetch.Result{StatusCode: http.StatusOK}}
 
-	s := New(pool, gate, fetcher, testLogger())
+	// WithBatchLimit(1): keeps this test scoped to its own fixture — see
+	// insertTestSource's comment in scheduler_test.go for why an unbounded
+	// batch against the shared dev database is unsafe.
+	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
 	if _, err := s.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
@@ -211,13 +233,23 @@ func TestRunOnceSkipsSourcesNotYetDue(t *testing.T) {
 	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultAllow}}
 	fetcher := &fakeFetcher{result: &fetch.Result{StatusCode: http.StatusOK, FetchedAt: time.Now()}}
 
-	s := New(pool, gate, fetcher, testLogger())
-	n, err := s.RunOnce(context.Background())
-	if err != nil {
+	// WithBatchLimit(1): bounds the batch, but on the shared dev database
+	// (1,500+ real seeded sources, most already due — see insertTestSource's
+	// comment in scheduler_test.go) it does not guarantee n == 0: some other,
+	// real due row legitimately fills that one slot instead of this test's
+	// own future-dated fixture. That is actually fine and expected — this
+	// test's real invariant is narrower than "nothing anywhere is due," it
+	// is "this specific row, pushed into the future, is not the one that got
+	// claimed," which the row's own unchanged state below proves regardless
+	// of what else RunOnce found to do in this call.
+	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
+	if _, err := s.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if n != 0 {
-		t.Errorf("RunOnce claimed %d sources, want 0 (none were due)", n)
+
+	row := getTestSource(t, pool, id)
+	if row.TotalPolls != 0 {
+		t.Errorf("total_polls = %d, want 0 (this source was not due and must not have been polled)", row.TotalPolls)
 	}
 }
 
@@ -228,13 +260,16 @@ func TestClaimPreventsDoubleProcessingWithinTheClaimWindow(t *testing.T) {
 	// eventual UpdateSourceAfterPoll) is what makes the row temporarily
 	// ineligible.
 	pool := testPool(t)
-	insertTestSource(t, pool, defaultTestSourceOpts())
+	id := insertTestSource(t, pool, defaultTestSourceOpts())
 
 	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultAllow}}
 	fetcher := &fakeFetcher{result: &fetch.Result{StatusCode: http.StatusOK, FetchedAt: time.Now()}}
 
-	s1 := New(pool, gate, fetcher, testLogger())
-	s2 := New(pool, gate, fetcher, testLogger())
+	// WithBatchLimit(1) on both: see insertTestSource's comment in
+	// scheduler_test.go for why an unbounded batch against the shared dev
+	// database is unsafe.
+	s1 := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
+	s2 := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
 
 	n1, err := s1.RunOnce(context.Background())
 	if err != nil {
@@ -245,30 +280,43 @@ func TestClaimPreventsDoubleProcessingWithinTheClaimWindow(t *testing.T) {
 	}
 
 	// s1's poll has already completed synchronously (RunOnce waits for the
-	// whole batch), so by the time we get here the row's next_poll_at reflects
-	// the real post-poll reschedule, not the claim window — a second RunOnce
-	// finding nothing here would prove nothing about the claim mechanism
-	// itself. What we actually assert is narrower and still meaningful: a
-	// second call immediately after the first does not double-count the same
-	// source within one outcome.
-	n2, err := s2.RunOnce(context.Background())
-	if err != nil {
+	// whole batch), so by the time we get here this fixture's next_poll_at
+	// reflects the real post-poll reschedule, not the claim window — a
+	// second RunOnce claiming 0 rows globally would prove nothing about the
+	// claim mechanism itself, and on the shared dev database (1,500+ real
+	// seeded sources — see insertTestSource's comment in scheduler_test.go)
+	// it would not even be true: some other real due row legitimately fills
+	// that second batch slot. The actual property under test — this
+	// fixture is not double-counted within the claim window — is what
+	// row.TotalPolls == 1 below proves directly, regardless of what else
+	// either RunOnce call found to do.
+	if _, err := s2.RunOnce(context.Background()); err != nil {
 		t.Fatalf("second RunOnce: %v", err)
 	}
-	if n2 != 0 {
-		t.Errorf("second RunOnce (immediately after the first completed) claimed %d, want 0", n2)
-	}
 
-	if fetcher.calls.Load() != 1 {
-		t.Errorf("fetcher.Fetch was called %d times across both RunOnce calls, want exactly 1", fetcher.calls.Load())
+	row := getTestSource(t, pool, id)
+	if row.TotalPolls != 1 {
+		t.Errorf("total_polls = %d after two immediate RunOnce calls, want 1 (not double-processed)", row.TotalPolls)
 	}
 }
 
 func TestRunOnceWithNothingDueReturnsZero(t *testing.T) {
 	pool := testPool(t)
-	gate := &fakeGate{}
-	fetcher := &fakeFetcher{}
+	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultAllow}}
+	// A real, non-nil result rather than the zero-value fakeFetcher: this
+	// test's fixture is pushed into the future below, but on the shared dev
+	// database (1,500+ real seeded sources — see insertTestSource's comment)
+	// a WithBatchLimit(1) call can still legitimately claim some other real
+	// due row instead of finding literally nothing. A zero-value fakeFetcher
+	// returns (nil, nil) from Fetch, which crashed the whole test binary
+	// (nil pointer dereference in fetchStatusFor) the moment that happened —
+	// found live once real due data existed. This fake must be crash-safe
+	// for whatever real row might land in that one slot.
+	fetcher := &fakeFetcher{result: &fetch.Result{StatusCode: http.StatusOK, FetchedAt: time.Now()}}
 
+	// WithBatchLimit(1): keeps this test scoped to its own fixture — see
+	// insertTestSource's comment in scheduler_test.go for why an unbounded
+	// batch against the shared dev database is unsafe.
 	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
 
 	// Not inserting any source at all is not a reliable "nothing due" test on
@@ -282,15 +330,17 @@ func TestRunOnceWithNothingDueReturnsZero(t *testing.T) {
 		t.Fatalf("push next_poll_at forward: %v", err)
 	}
 
-	n, err := s.RunOnce(context.Background())
-	if err != nil {
+	if _, err := s.RunOnce(context.Background()); err != nil {
 		t.Fatalf("RunOnce: %v", err)
 	}
-	if n != 0 {
-		t.Errorf("RunOnce = %d, want 0", n)
-	}
-	if gate.calls.Load() != 0 || fetcher.calls.Load() != 0 {
-		t.Error("gate or fetcher was called despite nothing being due")
+
+	// The real invariant: this specific future-dated row was not the one
+	// claimed and polled — not "RunOnce found globally nothing to do," which
+	// the shared real seed data makes untestable here (see fetcher's comment
+	// above).
+	row := getTestSource(t, pool, id)
+	if row.TotalPolls != 0 {
+		t.Errorf("total_polls = %d, want 0 (this source was not due and must not have been polled)", row.TotalPolls)
 	}
 }
 
@@ -299,7 +349,10 @@ func TestRunBlocksUntilContextCancelled(t *testing.T) {
 	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultAllow}}
 	fetcher := &fakeFetcher{result: &fetch.Result{StatusCode: http.StatusOK, FetchedAt: time.Now()}}
 
-	s := New(pool, gate, fetcher, testLogger())
+	// WithBatchLimit(1): keeps this test scoped to its own fixture — see
+	// insertTestSource's comment in scheduler_test.go for why an unbounded
+	// batch against the shared dev database is unsafe.
+	s := New(pool, gate, fetcher, testLogger()).WithBatchLimit(1)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
 	defer cancel()
@@ -314,5 +367,62 @@ func TestRunBlocksUntilContextCancelled(t *testing.T) {
 	case <-done:
 	case <-time.After(2 * time.Second):
 		t.Fatal("Run did not return after its context was cancelled")
+	}
+}
+
+// TestUpdateSourceAfterPoll_YieldRatioTracksRecentPolls proves the EMA
+// yield_ratio computation packages/db/queries/source.sql's
+// UpdateSourceAfterPoll now performs — docs/16-observability.md's
+// scout_source_yield_ratio, and the first time this column has ever been
+// written (it defaulted to 0 from schema creation through P2, which
+// silently pinned interval.Compute's yield_factor input at its maximum —
+// see that query's own comment). A poll that finds a new job nudges the
+// ratio up toward 1; a poll that finds nothing nudges it down toward 0;
+// it never leaves [0, 1].
+func TestUpdateSourceAfterPoll_YieldRatioTracksRecentPolls(t *testing.T) {
+	pool := testPool(t)
+	id := insertTestSource(t, pool, defaultTestSourceOpts())
+	q := db.New(pool)
+
+	pollWithYield := func(newJobs int64) float32 {
+		t.Helper()
+		yieldRatio, err := q.UpdateSourceAfterPoll(context.Background(), db.UpdateSourceAfterPollParams{
+			ID: id, NextPollAt: pgtype.Timestamptz{Time: time.Now().Add(time.Hour), Valid: true},
+			CurrentIntervalS: 900, Success: true, JobsFound: newJobs, NewJobs: newJobs,
+		})
+		if err != nil {
+			t.Fatalf("UpdateSourceAfterPoll: %v", err)
+		}
+		return yieldRatio
+	}
+
+	if got := pollWithYield(0); got != 0 {
+		t.Fatalf("yield_ratio after one empty poll from a fresh source = %v, want 0", got)
+	}
+
+	// Ten consecutive yielding polls should pull the ratio up off zero —
+	// each poll's own weight is small (0.01), so this checks direction and
+	// boundedness, not a specific value.
+	var last float32
+	for range 10 {
+		last = pollWithYield(1)
+	}
+	if last <= 0 {
+		t.Errorf("yield_ratio after 10 yielding polls = %v, want > 0", last)
+	}
+	if last > 1 {
+		t.Errorf("yield_ratio = %v, want <= 1", last)
+	}
+
+	// A run of empty polls should pull it back down again.
+	var afterEmpty float32
+	for range 10 {
+		afterEmpty = pollWithYield(0)
+	}
+	if afterEmpty >= last {
+		t.Errorf("yield_ratio after 10 empty polls = %v, want less than %v (the value before them)", afterEmpty, last)
+	}
+	if afterEmpty < 0 {
+		t.Errorf("yield_ratio = %v, want >= 0", afterEmpty)
 	}
 }

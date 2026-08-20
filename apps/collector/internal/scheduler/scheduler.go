@@ -1,28 +1,18 @@
 // Package scheduler implements the collector's scheduling loop: docs/06-ingestion-pipeline.md
 // section 3, wired to the politeness gate (section 4), the fetcher (section
-// 5), and change detection layers 1-2 (section 6).
+// 5), change detection layers 1-2 (section 6), and — once WithPipeline is
+// called — Layer 3 and observation writing (sections 8-9, in ingest.go) and
+// docs/06 section 10's per-status-code handling for 401/403, 404, 429, and
+// TLS errors (errorclass.go). 5xx, timeouts, DNS failures, and connection
+// refusals still go through the single coarse "transient failure" path —
+// see outcomeFromResult's comment for why that coarsening is the safe
+// default for the codes this package doesn't distinguish.
 //
-// # What this package does not do
-//
-// Layer 3 change detection (a structural diff via an adapter's Parse) and
-// observation writing (docs/06 sections 8 and 9) are not here. Both need an
-// adapter, and none exists yet — Greenhouse, Lever, and Ashby land with the
-// rest of P1. Until then, a poll cycle's outcome is entirely about the
-// source row itself: did the fetch succeed, did the content change, when
-// should the next attempt be. Nothing is written anywhere for anything
-// resembling a job posting.
-//
-// The full per-status-code error classification in docs/06 section 10 —
-// quarantine on 401/403, retire after three 404s, honor Retry-After and halve
-// max_rps on 429 — is also not implemented. This package's classification is
-// deliberately coarser: a 2xx or 304 is success, everything else (a network
-// error, a timeout, an SSRF refusal, any other status) counts toward the
-// circuit breaker exactly like a transient failure. That is the safe
-// direction to be coarse in — a source that should have been quarantined
-// instead backs off through the circuit breaker's own 6-hour ceiling, which
-// is worse than the specific handling but never worse than not backing off at
-// all. The specific per-code handling is deferred to when a real adapter
-// makes the distinction actually matter.
+// Without WithPipeline, a poll cycle's outcome is entirely about the source
+// row itself: did the fetch succeed, did the content change, when should
+// the next attempt be — nothing is written for anything resembling a job
+// posting. That's still true for any source_kind with no registered
+// adapter, which today is everything except Greenhouse.
 package scheduler
 
 import (
@@ -38,10 +28,13 @@ import (
 	db "github.com/kelyon/scout/packages/db/gen"
 
 	"github.com/kelyon/scout/apps/collector/internal/changedetect"
-	"github.com/kelyon/scout/apps/collector/internal/fetch"
 	"github.com/kelyon/scout/apps/collector/internal/interval"
 	"github.com/kelyon/scout/apps/collector/internal/politeness"
 	"github.com/kelyon/scout/apps/collector/internal/source"
+	padapter "github.com/kelyon/scout/packages/adapter"
+	"github.com/kelyon/scout/packages/fetch"
+	"github.com/kelyon/scout/packages/metrics"
+	"github.com/kelyon/scout/packages/queue"
 )
 
 // DefaultBatchLimit is docs/06 section 3.2's literal value: "LIMIT 200 ...
@@ -87,7 +80,7 @@ const deferRetryDelay = 60 * time.Second
 // concrete *politeness.Gate and *fetch.Fetcher types, so a test can supply a
 // scripted fake without needing either package's own test-only, deliberately
 // unexported SSRF-bypass dialer (apps/collector/internal/robots and
-// apps/collector/internal/fetch each keep that escape hatch private to their
+// packages/fetch each keep that escape hatch private to their
 // own package on purpose — see the [dialFunc] comment in fetch.go). Production
 // wiring in apps/collector/cmd passes the real *politeness.Gate and
 // *fetch.Fetcher, which satisfy these interfaces with no adapter needed.
@@ -98,6 +91,17 @@ type Scheduler struct {
 	log         *slog.Logger
 	batchLimit  int32
 	concurrency int
+	// pipeline is nil until WithPipeline is called (ingest.go) — see that
+	// file's package comment for what changes once it's set.
+	pipeline *Pipeline
+	// queue is nil until WithQueue is called. Nil means "not configured":
+	// new jobs are still written exactly as before, just with no embed job
+	// enqueued for apps/brain to pick up — the same coarsening-is-safe
+	// posture pipeline itself uses.
+	queue *queue.Client
+	// shadowBatchLimit bounds one ReviewShadowSources pass, same reasoning
+	// as batchLimit for RunOnce.
+	shadowBatchLimit int32
 }
 
 // Gate is the subset of *politeness.Gate the scheduler needs.
@@ -115,14 +119,20 @@ type Fetcher interface {
 // low concurrency for determinism.
 func New(pool *pgxpool.Pool, gate Gate, fetcher Fetcher, log *slog.Logger) *Scheduler {
 	return &Scheduler{
-		pool:        pool,
-		gate:        gate,
-		fetcher:     fetcher,
-		log:         log,
-		batchLimit:  DefaultBatchLimit,
-		concurrency: DefaultConcurrency,
+		pool:             pool,
+		gate:             gate,
+		fetcher:          fetcher,
+		log:              log,
+		batchLimit:       DefaultBatchLimit,
+		concurrency:      DefaultConcurrency,
+		shadowBatchLimit: shadowReviewBatchLimit,
 	}
 }
+
+// WithQueue enables enqueueing embed jobs for apps/brain to consume. Without
+// it, new jobs are written exactly as WithPipeline alone already does, just
+// with no embedding ever computed for them.
+func (s *Scheduler) WithQueue(q *queue.Client) *Scheduler { s.queue = q; return s }
 
 // WithBatchLimit overrides DefaultBatchLimit.
 func (s *Scheduler) WithBatchLimit(n int32) *Scheduler { s.batchLimit = n; return s }
@@ -130,11 +140,16 @@ func (s *Scheduler) WithBatchLimit(n int32) *Scheduler { s.batchLimit = n; retur
 // WithConcurrency overrides DefaultConcurrency.
 func (s *Scheduler) WithConcurrency(n int) *Scheduler { s.concurrency = n; return s }
 
-// Run blocks, calling RunOnce every tickInterval, until ctx is cancelled.
-// A tick that errors is logged and does not stop the loop — the scheduler's
-// entire job is to keep trying on a schedule, and a single bad tick (a
-// transient DB blip) must not be the thing that stops discovery instead of
-// whatever caused the blip.
+// WithShadowBatchLimit overrides shadowReviewBatchLimit — primarily for
+// tests that want ReviewShadowSources to look at only their own fixtures,
+// the same reasoning WithBatchLimit's own comment gives for RunOnce.
+func (s *Scheduler) WithShadowBatchLimit(n int32) *Scheduler { s.shadowBatchLimit = n; return s }
+
+// Run blocks, calling RunOnce every tickInterval and ReviewShadowSources
+// every ShadowReviewInterval, until ctx is cancelled. A tick that errors is
+// logged and does not stop the loop — the scheduler's entire job is to keep
+// trying on a schedule, and a single bad tick (a transient DB blip) must not
+// be the thing that stops discovery instead of whatever caused the blip.
 func (s *Scheduler) Run(ctx context.Context, tickInterval time.Duration) {
 	if tickInterval <= 0 {
 		tickInterval = DefaultTickInterval
@@ -142,6 +157,9 @@ func (s *Scheduler) Run(ctx context.Context, tickInterval time.Duration) {
 
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
+
+	shadowTicker := time.NewTicker(ShadowReviewInterval)
+	defer shadowTicker.Stop()
 
 	for {
 		select {
@@ -155,6 +173,15 @@ func (s *Scheduler) Run(ctx context.Context, tickInterval time.Duration) {
 			}
 			if n > 0 {
 				s.log.Info("scheduler tick", "claimed", n)
+			}
+		case <-shadowTicker.C:
+			n, err := s.ReviewShadowSources(ctx)
+			if err != nil {
+				s.log.Warn("shadow review failed", "err", err)
+				continue
+			}
+			if n > 0 {
+				s.log.Info("shadow review", "reviewed", n)
 			}
 		}
 	}
@@ -255,7 +282,7 @@ func (s *Scheduler) pollOne(ctx context.Context, row db.SelectDueSourcesRow) {
 		// unparseable. Either way: no request was made, and treating it as a
 		// failure for circuit-breaker purposes is the same safe-direction
 		// coarsening described in the package comment.
-		s.recordOutcome(ctx, row, outcome{success: false})
+		s.recordOutcome(ctx, row, outcome{success: false}, 0, 0)
 		return
 	}
 
@@ -264,6 +291,104 @@ func (s *Scheduler) pollOne(ctx context.Context, row db.SelectDueSourcesRow) {
 	// decision reserved (apps/collector/internal/politeness).
 	defer release(ctx)
 
+	fetchStart := time.Now()
+	result, err := s.fetchResult(ctx, row, src)
+	fetchDuration := time.Since(fetchStart)
+	if err != nil {
+		metrics.ObserveSourceFetch(string(row.Kind), metrics.FetchStatusFailure, fetchDuration)
+		if isTLSError(err) {
+			// docs/06 section 10: "TLS error: Persistent. Fail immediately,
+			// alert — usually a real config change." Alerted at Error
+			// (routine fetch failures below log at Warn); still goes
+			// through the normal failure/circuit-breaker path since there
+			// is no dedicated schema state for "TLS is broken" to route it
+			// to instead.
+			s.log.Error("TLS error fetching source", "source_id", src.ID, "err", err)
+		} else {
+			s.log.Warn("fetch failed", "source_id", src.ID, "err", err)
+		}
+		s.recordOutcome(ctx, row, outcome{success: false}, 0, 0)
+		return
+	}
+	metrics.ObserveSourceFetch(string(row.Kind), fetchStatusFor(result), fetchDuration)
+
+	switch classifyStatus(result.StatusCode) {
+	case actionQuarantine:
+		s.quarantine(ctx, row.ID, result.StatusCode)
+		s.recordOutcome(ctx, row, outcome{success: false}, 0, 0)
+		return
+
+	case actionNotFound:
+		s.recordOutcome(ctx, row, outcome{success: false}, 0, 0)
+		// docs/06 section 10: three consecutive 404s means the board is
+		// gone. Approximated against the existing consecutive_failures
+		// counter (see errorclass.go's package comment) rather than a
+		// dedicated 404-streak column.
+		if int(row.ConsecutiveFailures)+1 >= notFoundRetireThreshold {
+			s.retire(ctx, row.ID)
+		}
+		return
+
+	case actionRateLimited:
+		s.handleRateLimited(ctx, row, result)
+		return
+	}
+
+	jobsFound, newJobs := int64(0), int64(0)
+	out := outcomeFromResult(row, result)
+	if out.success && !result.NotModified && out.contentChanged {
+		jobsFound, newJobs = s.runIngestion(ctx, row, result)
+	}
+
+	s.recordOutcome(ctx, row, out, jobsFound, newJobs)
+}
+
+// fetchStatusFor classifies a fetch result for metrics.ObserveSourceFetch's
+// status label. Not the same partition as classifyStatus just above this
+// method's own call site — that one drives circuit-breaker/retry behavior
+// (quarantine, not-found, rate-limited as distinct actions); this one only
+// needs "did this poll come back with something," the docs/16 section 4
+// scout_source_fetch_total shape.
+func fetchStatusFor(result *fetch.Result) metrics.FetchStatus {
+	switch {
+	case result.NotModified:
+		return metrics.FetchStatusNotModified
+	case result.StatusCode >= 200 && result.StatusCode < 300:
+		return metrics.FetchStatusSuccess
+	default:
+		return metrics.FetchStatusFailure
+	}
+}
+
+// fetchResult performs pollOne's one HTTP fetch. The default, and correct
+// choice for every adapter this project had before Workday, is a single
+// conditional GET to src.URL through the scheduler's own injectable
+// Fetcher — that is what makes the rest of this file's fetch outcome
+// entirely fakeable in tests without a real network call. A source whose
+// registered adapter implements padapter.OwnFetcher (Workday: POST, a JSON
+// search body, paginated — see that interface's own comment) is fetched
+// through the adapter's Fetch instead, since no GET-shaped request
+// produces a usable response for it at all.
+func (s *Scheduler) fetchResult(ctx context.Context, row db.SelectDueSourcesRow, src source.Source) (*fetch.Result, error) {
+	if s.pipeline != nil {
+		if ad, ok := s.pipeline.Adapters[padapter.SourceKind(row.Kind)]; ok {
+			if of, ok := ad.(padapter.OwnFetcher); ok && of.RequiresOwnFetch() {
+				adapterSrc, err := toAdapterSource(row)
+				if err != nil {
+					return nil, fmt.Errorf("build adapter source: %w", err)
+				}
+				raw, err := ad.Fetch(ctx, adapterSrc, padapter.FetchHints{
+					IfNoneMatch:     derefStr(row.LastEtag),
+					IfModifiedSince: derefStr(row.LastModified),
+				})
+				if err != nil {
+					return nil, fmt.Errorf("adapter fetch: %w", err)
+				}
+				return resultFromRaw(raw), nil
+			}
+		}
+	}
+
 	result, err := s.fetcher.Fetch(ctx, fetch.Request{
 		URL:             src.URL,
 		Mode:            fetch.ModeStandard,
@@ -271,12 +396,51 @@ func (s *Scheduler) pollOne(ctx context.Context, row db.SelectDueSourcesRow) {
 		IfModifiedSince: derefStr(row.LastModified),
 	})
 	if err != nil {
-		s.log.Warn("fetch failed", "source_id", src.ID, "err", err)
-		s.recordOutcome(ctx, row, outcome{success: false})
-		return
+		return nil, fmt.Errorf("fetch: %w", err)
+	}
+	return result, nil
+}
+
+// notFoundRetireThreshold is docs/06 section 10's literal "three
+// consecutive 404s".
+const notFoundRetireThreshold = 3
+
+// quarantine implements docs/06 section 10's 401/403 handling: access
+// changed, not a transient blip, so polling stops until a human reviews it.
+func (s *Scheduler) quarantine(ctx context.Context, id pgtype.UUID, statusCode int) {
+	s.log.Error("quarantining source: access denied", "source_id", id.String(), "status", statusCode)
+	if err := db.New(s.pool).QuarantineSource(ctx, id); err != nil {
+		s.log.Warn("quarantine failed", "source_id", id.String(), "err", err)
+	}
+}
+
+// retire implements docs/06 section 10's "mark retired after 3 consecutive
+// 404s — board deleted."
+func (s *Scheduler) retire(ctx context.Context, id pgtype.UUID) {
+	s.log.Warn("retiring source: repeated 404", "source_id", id.String())
+	if err := db.New(s.pool).RetireSource(ctx, id); err != nil {
+		s.log.Warn("retire failed", "source_id", id.String(), "err", err)
+	}
+}
+
+// handleRateLimited implements docs/06 section 10's 429 handling: honor
+// Retry-After if the response gave one (falling back to the normal backoff
+// path if it didn't — a 429 with no Retry-After is still a 429), and halve
+// max_rps permanently, since the source just told us its previous rate was
+// too fast.
+func (s *Scheduler) handleRateLimited(ctx context.Context, row db.SelectDueSourcesRow, result *fetch.Result) {
+	s.log.Warn("rate limited (429)", "source_id", row.ID.String(), "retry_after", result.RetryAfter)
+
+	q := db.New(s.pool)
+	if err := q.HalveMaxRPS(ctx, row.ID); err != nil {
+		s.log.Warn("halve max_rps failed", "source_id", row.ID.String(), "err", err)
 	}
 
-	s.recordOutcome(ctx, row, outcomeFromResult(row, result))
+	nextPollAt := time.Now().Add(deferRetryDelay)
+	if t, ok := parseRetryAfter(result.RetryAfter, time.Now()); ok {
+		nextPollAt = t
+	}
+	s.reschedule(ctx, row.ID, nextPollAt)
 }
 
 // reschedule implements a politeness-gate DEFER or SKIP — see
@@ -331,7 +495,7 @@ func outcomeFromResult(row db.SelectDueSourcesRow, result *fetch.Result) outcome
 // recordOutcome computes the circuit breaker transition and the next
 // adaptive interval, then writes both plus the change-detection result in one
 // UpdateSourceAfterPoll call.
-func (s *Scheduler) recordOutcome(ctx context.Context, row db.SelectDueSourcesRow, out outcome) {
+func (s *Scheduler) recordOutcome(ctx context.Context, row db.SelectDueSourcesRow, out outcome, jobsFound, newJobs int64) {
 	now := time.Now()
 
 	failures, circuitOpenUntil := nextCircuitState(int(row.ConsecutiveFailures), out.success, now)
@@ -349,7 +513,7 @@ func (s *Scheduler) recordOutcome(ctx context.Context, row db.SelectDueSourcesRo
 	next = interval.Jitter(next, rngFor(row.ID))
 
 	q := db.New(s.pool)
-	err := q.UpdateSourceAfterPoll(ctx, db.UpdateSourceAfterPollParams{
+	yieldRatio, err := q.UpdateSourceAfterPoll(ctx, db.UpdateSourceAfterPollParams{
 		ID:                  row.ID,
 		NextPollAt:          pgtype.Timestamptz{Time: now.Add(next), Valid: true},
 		CurrentIntervalS:    int32(next / time.Second), //nolint:gosec // interval.Compute clamps to source.max_interval_s, which is itself int32 in the schema
@@ -360,8 +524,19 @@ func (s *Scheduler) recordOutcome(ctx context.Context, row db.SelectDueSourcesRo
 		ConsecutiveFailures: int16(failures), //nolint:gosec // circuitOpenThreshold-based backoff never approaches int16's range
 		CircuitOpenUntil:    toTimestamptz(circuitOpenUntil),
 		Success:             out.success,
+		JobsFound:           jobsFound,
+		NewJobs:             newJobs,
 	})
 	if err != nil {
 		s.log.Warn("record poll outcome failed", "source_id", row.ID.String(), "err", err)
+		return
 	}
+	// docs/16-observability.md section 3.2's per-source-kind yield signal —
+	// last-writer-wins across every source of one kind sharing this gauge
+	// is fine here: yield_ratio is already an EMA smoothed at the source
+	// level, so the dashboard reads it as "yield of whichever source in
+	// this kind polled most recently," a reasonable proxy at this
+	// project's scale (packages/metrics' own comment notes the full
+	// per-source_id cardinality control from the spec isn't implemented).
+	metrics.SourceYieldRatio.WithLabelValues(string(row.Kind)).Set(float64(yieldRatio))
 }
