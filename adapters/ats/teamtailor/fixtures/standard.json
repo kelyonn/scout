@@ -1,0 +1,41 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "Acme",
+  "home_page_url": "https://acmehq.teamtailor.com/jobs",
+  "feed_url": "https://acmehq.teamtailor.com/jobs.json",
+  "items": [
+    {
+      "id": "555001",
+      "title": "Backend Engineering Intern",
+      "url": "https://acmehq.teamtailor.com/jobs/555001-backend-engineering-intern",
+      "date_published": "2026-08-01T10:00:00+02:00",
+      "content_html": "<p>Join our backend team building payments infrastructure.</p>",
+      "_jobposting": {
+        "@context": "http://schema.org/",
+        "@type": "JobPosting",
+        "datePosted": "2026-08-01T10:00:00+02:00",
+        "title": "Backend Engineering Intern",
+        "jobLocation": [
+          { "@type": "Place", "address": { "@type": "PostalAddress", "addressLocality": "Bengaluru", "addressCountry": "India" } }
+        ]
+      }
+    },
+    {
+      "id": "555002",
+      "title": "Senior Platform Engineer",
+      "url": "https://acmehq.teamtailor.com/jobs/555002-senior-platform-engineer",
+      "date_published": "2026-07-18T09:00:00+02:00",
+      "content_html": "<p>Own our internal platform tooling across multiple regional teams.</p>",
+      "_jobposting": {
+        "@context": "http://schema.org/",
+        "@type": "JobPosting",
+        "datePosted": "2026-07-18T09:00:00+02:00",
+        "title": "Senior Platform Engineer",
+        "jobLocation": [
+          { "@type": "Place", "address": { "@type": "PostalAddress", "addressLocality": "Remote", "addressCountry": "" } },
+          { "@type": "Place", "address": { "@type": "PostalAddress", "addressLocality": "Berlin", "addressCountry": "Germany" } }
+        ]
+      }
+    }
+  ]
+}

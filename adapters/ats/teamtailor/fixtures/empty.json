@@ -1,0 +1,7 @@
+{
+  "version": "https://jsonfeed.org/version/1.1",
+  "title": "Acme",
+  "home_page_url": "https://acmehq.teamtailor.com/jobs",
+  "feed_url": "https://acmehq.teamtailor.com/jobs.json",
+  "items": []
+}
