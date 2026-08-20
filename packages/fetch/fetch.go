@@ -7,13 +7,14 @@
 // ratelimit.Limiter do not check compliance themselves either. This package's
 // job is narrower: given permission to fetch, do it safely and cheaply.
 //
-// "Safely" is SSRF protection (apps/collector/internal/ssrf) and a hard cap
+// "Safely" is SSRF protection (packages/ssrf) and a hard cap
 // on response size. "Cheaply" is conditional requests — a 304 costs about 500
 // bytes against a 200's couple hundred kilobytes, and docs/06 section 5
 // targets 85% of polls landing there.
 package fetch
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"fmt"
@@ -23,7 +24,7 @@ import (
 	"net/url"
 	"time"
 
-	"github.com/kelyon/scout/apps/collector/internal/ssrf"
+	"github.com/kelyon/scout/packages/ssrf"
 )
 
 // Mode selects which "Total" timeout tier from docs/06 section 5 applies.
@@ -70,6 +71,19 @@ type Request struct {
 	// for If-Modified-Since to behave as the server intends; reparsing and
 	// reformatting a date risks losing precision a strict server cares about.
 	IfModifiedSince string
+
+	// Method defaults to GET (the zero value) — every P1/P2 adapter's
+	// endpoint is a GET. Set to POST for a source whose API genuinely
+	// requires a request body to search or filter, e.g. Workday's CXS
+	// endpoint (adapters/ats/workday). The SSRF dialer and every timeout
+	// tier apply identically regardless of method; only the request line
+	// and body change.
+	Method string
+	// Body is sent verbatim as the request body when Method is POST.
+	// Ignored for GET.
+	Body []byte
+	// ContentType is sent as the Content-Type header when Body is set.
+	ContentType string
 }
 
 // Result is what a fetch produced.
@@ -91,10 +105,25 @@ type Result struct {
 	ETag         string
 	LastModified string
 
+	// RetryAfter is the raw Retry-After header value, empty if absent. Only
+	// meaningful on a 429 (docs/06 section 10) — the caller is responsible
+	// for parsing it (it may be either delay-seconds or an HTTP-date) and
+	// deciding what to do with it; this package just passes it through.
+	RetryAfter string
+
 	// NotModified is a convenience for StatusCode == http.StatusNotModified.
 	NotModified bool
 
 	FetchedAt time.Time
+
+	// FinalURL is the request URL after following every redirect (identical
+	// to the original URL when there were none) — docs/05-source-catalog.md's
+	// "resolve the tracking redirect to reach the canonical URL" for email
+	// alert links (apps/collector/internal/emailalert), otherwise invisible:
+	// every redirect hop already happens inside net/http's RoundTrip,
+	// SSRF-checked via checkRedirect, but only the final response was ever
+	// surfaced before this field existed.
+	FinalURL string
 }
 
 // Fetcher performs SSRF-safe, conditional, size-capped HTTP fetches.
@@ -181,7 +210,16 @@ func (f *Fetcher) Fetch(ctx context.Context, r Request) (*Result, error) {
 	ctx, cancel := context.WithTimeout(ctx, total)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.URL, http.NoBody)
+	method := r.Method
+	if method == "" {
+		method = http.MethodGet
+	}
+	var bodyReader io.Reader = http.NoBody
+	if method == http.MethodPost && r.Body != nil {
+		bodyReader = bytes.NewReader(r.Body)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, method, r.URL, bodyReader)
 	if err != nil {
 		return nil, fmt.Errorf("fetch: build request: %w", err)
 	}
@@ -199,6 +237,9 @@ func (f *Fetcher) Fetch(ctx context.Context, r Request) (*Result, error) {
 	if r.IfModifiedSince != "" {
 		req.Header.Set("If-Modified-Since", r.IfModifiedSince)
 	}
+	if r.ContentType != "" {
+		req.Header.Set("Content-Type", r.ContentType)
+	}
 
 	resp, err := f.client.Do(req)
 	if err != nil {
@@ -210,8 +251,10 @@ func (f *Fetcher) Fetch(ctx context.Context, r Request) (*Result, error) {
 		StatusCode:   resp.StatusCode,
 		ETag:         resp.Header.Get("ETag"),
 		LastModified: resp.Header.Get("Last-Modified"),
+		RetryAfter:   resp.Header.Get("Retry-After"),
 		NotModified:  resp.StatusCode == http.StatusNotModified,
 		FetchedAt:    time.Now().UTC(),
+		FinalURL:     resp.Request.URL.String(),
 	}
 
 	// A compliant server sends no body on a 304, but reading (and discarding,
