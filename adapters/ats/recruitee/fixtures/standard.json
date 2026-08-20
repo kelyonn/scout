@@ -1,0 +1,58 @@
+{
+  "offers": [
+    {
+      "id": 12345,
+      "title": "Backend Engineering Intern",
+      "slug": "backend-engineering-intern",
+      "status": "published",
+      "department": "Engineering",
+      "remote": false,
+      "employment_type_code": "internship",
+      "careers_url": "https://acmehq.recruitee.com/o/backend-engineering-intern",
+      "careers_apply_url": "https://acmehq.recruitee.com/o/backend-engineering-intern/c/new",
+      "description": "<p>Join our backend team building payments infrastructure.</p>",
+      "requirements": "<p>Currently pursuing a CS degree.</p>",
+      "created_at": "2026-08-01T10:00:00.000Z",
+      "published_at": "2026-08-01T10:00:00.000Z",
+      "city": "Bengaluru",
+      "country": "India",
+      "country_code": "IN"
+    },
+    {
+      "id": 12346,
+      "title": "Remote DevOps Engineer",
+      "slug": "remote-devops-engineer",
+      "status": "published",
+      "department": "Infrastructure",
+      "remote": true,
+      "employment_type_code": "full_time",
+      "careers_url": "https://acmehq.recruitee.com/o/remote-devops-engineer",
+      "careers_apply_url": "https://acmehq.recruitee.com/o/remote-devops-engineer/c/new",
+      "description": "<p>Own our CI/CD pipelines.</p>",
+      "requirements": "",
+      "created_at": "2026-07-20T08:00:00.000Z",
+      "published_at": "2026-07-20T08:00:00.000Z",
+      "city": "",
+      "country": "",
+      "country_code": ""
+    },
+    {
+      "id": 12347,
+      "title": "Draft Role Not Yet Published",
+      "slug": "draft-role",
+      "status": "draft",
+      "department": "Engineering",
+      "remote": false,
+      "employment_type_code": "full_time",
+      "careers_url": "https://acmehq.recruitee.com/o/draft-role",
+      "careers_apply_url": "https://acmehq.recruitee.com/o/draft-role/c/new",
+      "description": "<p>Internal only.</p>",
+      "requirements": "",
+      "created_at": "2026-08-05T00:00:00.000Z",
+      "published_at": "2026-08-05T00:00:00.000Z",
+      "city": "",
+      "country": "",
+      "country_code": ""
+    }
+  ]
+}
