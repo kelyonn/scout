@@ -76,6 +76,18 @@ clean: ## Stop the local stack and delete its data
 logs: ## Follow local stack logs
 	$(COMPOSE_LOCAL) logs -f
 
+.PHONY: live-run
+live-run: $(ENV_FILE) ## ADR-018's on-demand live run, once, right now: collector goes live for one bounded window then stops (DURATION=seconds, default 7200)
+	@SCOUT_DAILY_RUN_DURATION_SECONDS=$(or $(DURATION),7200) ./infra/scripts/daily-live-run.sh
+
+.PHONY: live-schedule-install
+live-schedule-install: ## Install a launchd agent that runs `live-run` daily (HOUR=, MINUTE=, DURATION= seconds; defaults 9 0 7200)
+	./infra/scripts/install-daily-schedule.sh $(or $(HOUR),9) $(or $(MINUTE),0) $(or $(DURATION),7200)
+
+.PHONY: live-schedule-uninstall
+live-schedule-uninstall: ## Remove the launchd daily live-run agent
+	./infra/scripts/uninstall-daily-schedule.sh
+
 # -------------------------------------------------------------- migrations ---
 
 # golang-migrate runs from its own image rather than as a Go dependency
