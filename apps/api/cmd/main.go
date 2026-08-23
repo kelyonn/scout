@@ -22,6 +22,8 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 
 	"github.com/kelyon/scout/apps/api/internal/auth"
+	"github.com/kelyon/scout/apps/api/internal/companies"
+	"github.com/kelyon/scout/apps/api/internal/googlecalendar"
 	"github.com/kelyon/scout/apps/api/internal/jobs"
 	"github.com/kelyon/scout/apps/api/internal/resume"
 	"github.com/kelyon/scout/apps/api/internal/search"
@@ -134,6 +136,12 @@ func run(log *slog.Logger) error {
 	resumeHandler := resume.New(pool, queueClient, log)
 	jobsHandler := jobs.New(pool, queueClient, log)
 	searchHandler := search.New(pool, log)
+	companiesHandler := companies.New(pool, log)
+	googleCalendarHandler := googlecalendar.New(pool, log, googlecalendar.Config{
+		ClientID:     os.Getenv("SCOUT_GOOGLE_CLIENT_ID"),
+		ClientSecret: os.Getenv("SCOUT_GOOGLE_CLIENT_SECRET"),
+		RedirectURL:  os.Getenv("SCOUT_GOOGLE_REDIRECT_URL"),
+	})
 
 	broker := stream.NewBroker()
 	streamCtx, stopStream := context.WithCancel(context.Background())
@@ -149,7 +157,7 @@ func run(log *slog.Logger) error {
 		// routing happens, and observeRequests already forwards Flush
 		// through its own wrapper, so nesting them this way doesn't lose
 		// SSE's flushing either.
-		Handler:           otelhttp.NewHandler(routes(log, authenticator, resumeHandler, jobsHandler, searchHandler, streamHandler), "api"),
+		Handler:           otelhttp.NewHandler(routes(log, authenticator, resumeHandler, jobsHandler, searchHandler, streamHandler, companiesHandler, googleCalendarHandler), "api"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -190,6 +198,7 @@ func run(log *slog.Logger) error {
 func routes(
 	log *slog.Logger, a *auth.Authenticator, resumeHandler *resume.Handler,
 	jobsHandler *jobs.Handler, searchHandler *search.Handler, streamHandler *stream.Handler,
+	companiesHandler *companies.Handler, googleCalendarHandler *googlecalendar.Handler,
 ) http.Handler {
 	protected := http.NewServeMux()
 	protected.HandleFunc("POST /v1/resume", resumeHandler.Upload)
@@ -200,6 +209,17 @@ func routes(
 	protected.HandleFunc("GET /v1/applications", jobsHandler.Applications)
 	protected.HandleFunc("GET /v1/search", searchHandler.Search)
 	protected.HandleFunc("GET /v1/stream", streamHandler.Stream)
+	protected.HandleFunc("GET /v1/companies", companiesHandler.List)
+	protected.HandleFunc("GET /v1/companies/{id}", companiesHandler.Detail)
+	protected.HandleFunc("GET /v1/me/watchlist", companiesHandler.Watchlist)
+	protected.HandleFunc("POST /v1/me/watchlist", companiesHandler.AddToWatchlist)
+	protected.HandleFunc("DELETE /v1/me/watchlist/{company_id}", companiesHandler.RemoveFromWatchlist)
+	protected.HandleFunc("GET /v1/integrations/google/auth-url", googleCalendarHandler.AuthURLHandler)
+	protected.HandleFunc("GET /v1/integrations/google/status", googleCalendarHandler.Status)
+	protected.HandleFunc("POST /v1/integrations/google/callback", googleCalendarHandler.Callback)
+	protected.HandleFunc("POST /v1/integrations/google/disconnect", googleCalendarHandler.Disconnect)
+	protected.HandleFunc("POST /v1/integrations/google/sync", googleCalendarHandler.Sync)
+	protected.HandleFunc("GET /v1/integrations/google/events", googleCalendarHandler.Events)
 
 	root := http.NewServeMux()
 
