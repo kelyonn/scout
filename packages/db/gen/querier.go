@@ -52,6 +52,12 @@ type Querier interface {
 	// never reached the user and must not count against their budget.
 	CountDeliveriesSince(ctx context.Context, arg CountDeliveriesSinceParams) (int64, error)
 	CountDigestEligibleJobsSince(ctx context.Context, since pgtype.Timestamptz) (int64, error)
+	DeleteGoogleCalendarCredential(ctx context.Context, userID pgtype.UUID) error
+	// Run on disconnect — the stored google_event_id values are meaningless
+	// once the credential that could act on them is gone, and keeping them
+	// would make a future reconnect silently "update" events in whatever
+	// Google account gets connected next.
+	DeleteGoogleCalendarEventsForUser(ctx context.Context, userID pgtype.UUID) error
 	DeleteJobGroup(ctx context.Context, id pgtype.UUID) error
 	// The daily digest — docs/11-notifications.md section 6.5, docs/19-roadmap.md's
 	// P3 "Daily digest at 08:00 IST to Telegram." Every query here is scoped to
@@ -119,10 +125,13 @@ type Querier interface {
 	// Scoring queries. See docs/09-ranking-scoring.md and
 	// infra/migrations/000008_score.up.sql.
 	GetActiveWeightVersion(ctx context.Context) (WeightVersion, error)
+	GetCompanyByID(ctx context.Context, id pgtype.UUID) (GetCompanyByIDRow, error)
 	// Resolves company_id -> slug so the scoring step can look up
 	// packages/taxonomy/companies.yaml's well_known flag (competition_estimate's
 	// brand-recognition proxy) — that registry is keyed by slug, not UUID.
 	GetCompanySlug(ctx context.Context, id pgtype.UUID) (string, error)
+	GetGoogleCalendarCredential(ctx context.Context, userID pgtype.UUID) (GoogleCalendarCredential, error)
+	GetGoogleCalendarEvent(ctx context.Context, jobGroupID pgtype.UUID) (GoogleCalendarEvent, error)
 	GetJobByID(ctx context.Context, id pgtype.UUID) (GetJobByIDRow, error)
 	// job_score.explanation's upgrade path — apps/brain's explain consumer
 	// (TaskExplain) replacing InsertJobScore's synchronous template with a
@@ -262,6 +271,7 @@ type Querier interface {
 	// url is the source's own url so the row is still traceable to what failed.
 	InsertParseErrorObservation(ctx context.Context, arg InsertParseErrorObservationParams) error
 	InsertUserJobStateEvent(ctx context.Context, arg InsertUserJobStateEventParams) error
+	ListWatchlist(ctx context.Context, userID pgtype.UUID) ([]ListWatchlistRow, error)
 	// Set once a trigger decision (fire or no-fire) has been made for this
 	// group, so it is not re-evaluated every tick. Rescoring an already-decided
 	// group is a P2+ feature (weight-version changes trigger a rescore, which
@@ -285,6 +295,7 @@ type Querier interface {
 	// surviving group. member_count/first_seen_at on job_group are updated by
 	// UpdateJobGroupAfterMerge separately, in the same caller transaction.
 	ReassignJobsToGroup(ctx context.Context, arg ReassignJobsToGroupParams) error
+	RemoveWatchlistEntry(ctx context.Context, arg RemoveWatchlistEntryParams) (int64, error)
 	// For a politeness-gate DEFER or SKIP (docs/06 section 4): the source itself
 	// did nothing wrong, its turn has not come up yet — a rate budget, a
 	// concurrency cap, or a still-open circuit breaker. This only moves
@@ -315,6 +326,30 @@ type Querier interface {
 	// (a closed listing doesn't erase an in-flight application), so there is
 	// deliberately no `j.status = 'open'` filter.
 	SelectApplications(ctx context.Context, arg SelectApplicationsParams) ([]SelectApplicationsRow, error)
+	// The push direction's source data: every tracked (saved and beyond)
+	// job that has a deadline. Deliberately not the full job feed — only
+	// things the user actually saved are worth putting on their real
+	// calendar, the same "this is a real event, not a suggestion" bar
+	// app/(app)/calendar/page.tsx's own frontend query already applies by
+	// pulling from fetchApplications rather than fetchJobs.
+	SelectApplicationsWithDeadlines(ctx context.Context, userID pgtype.UUID) ([]SelectApplicationsWithDeadlinesRow, error)
+	// Companies list/detail — docs/04-api-design.md section 4.5's
+	// GET /v1/companies and GET /v1/companies/{id}. "Jobs at this company"
+	// (docs/04's GET /v1/companies/{id}/jobs) doesn't need a query of its
+	// own: GET /v1/jobs already accepts company_id (packages/db/queries/
+	// feed.sql's SelectJobFeed, wired at the HTTP layer in
+	// apps/api/internal/jobs/handler.go's List) and that's the same
+	// ranked-feed shape every other job list in this API already returns.
+	//
+	// No cursor pagination here, unlike the job feed. The company table sits
+	// at 1,506 rows today and only 33 have any job at all — this is a slow-
+	// moving registry populated by seeding and enrichment jobs, not a feed
+	// receiving inserts under live traffic, so the specific failure mode
+	// offset pagination has on the job feed (items shifting between pages
+	// while scrolling) doesn't apply here the same way. A single bounded
+	// page is the honest match for the data's actual size; revisit if the
+	// registry ever grows enough that this stops being true.
+	SelectCompanies(ctx context.Context, arg SelectCompaniesParams) ([]SelectCompaniesRow, error)
 	// docs/09 section 3.4's fallback: "below that we fall back to a
 	// country-and-seniority prior" — the same query without the role_family
 	// filter, used only when the exact comparable set has fewer than 20 rows.
@@ -428,6 +463,14 @@ type Querier interface {
 	// decideShadowPromotion function needs to decide, the same
 	// read-the-counters-then-write-the-verdict split source.sql already uses for
 	// UpdateSourceAfterPoll's interval math.
+	//
+	// Anchored on first_polled_at, not created_at (infra/migrations/000019) — a
+	// source that was seeded but never actually polled has had zero real shadow
+	// run regardless of how long its row has existed, which is exactly the
+	// ADR-018 on-demand-hosting case: the collector can sit off for days between
+	// sessions, so "created 48h ago" and "attempted 48h ago" are different
+	// claims. first_polled_at is NULL excludes exactly the sources that have
+	// never been polled at all, rather than judging them sight unseen.
 	SelectShadowSourcesDueForReview(ctx context.Context, batchLimit int32) ([]SelectShadowSourcesDueForReviewRow, error)
 	// docs/08 section 3.2's own literal query, plus description_stripped
 	// (Gate 3 needs it when a candidate's simhash is NULL — a job inserted
@@ -501,6 +544,11 @@ type Querier interface {
 	// of creating a new one — bumps last_seen_at without touching member_count,
 	// since it's the same job, not an additional one merged in.
 	TouchJobGroup(ctx context.Context, id pgtype.UUID) error
+	// Called after a refresh-token round trip, which never returns a new
+	// refresh_token (Google only issues one on initial consent) — only
+	// access_token/token_expiry change here, deliberately narrower than
+	// UpsertGoogleCalendarCredential above.
+	UpdateGoogleCalendarTokens(ctx context.Context, arg UpdateGoogleCalendarTokensParams) error
 	UpdateJobGroupAfterMerge(ctx context.Context, arg UpdateJobGroupAfterMergeParams) error
 	// Persists the outcome of one poll cycle. Every value here is computed by the
 	// caller (apps/collector/internal/scheduler) BEFORE this query runs — the
@@ -535,6 +583,11 @@ type Querier interface {
 	// replacement on every resume upload is what actually satisfies "remove
 	// the old one, put a new one there."
 	UpdateUserProfileSkills(ctx context.Context, arg UpdateUserProfileSkillsParams) error
+	// Google Calendar integration — apps/api/internal/googlecalendar. One
+	// credential row per user, matching every other single-user assumption
+	// in this schema (ADR-015).
+	UpsertGoogleCalendarCredential(ctx context.Context, arg UpsertGoogleCalendarCredentialParams) (GoogleCalendarCredential, error)
+	UpsertGoogleCalendarEvent(ctx context.Context, arg UpsertGoogleCalendarEventParams) error
 	// Resume queries — docs/09-ranking-scoring.md section 3.2's resume_match.
 	// Single-user system (ADR-015): one resume row, upserted on
 	// user_id, never inserted a second time.
@@ -558,6 +611,15 @@ type Querier interface {
 	// state — coalesce(applied_at, ...) on conflict preserves whichever value
 	// is already there.
 	UpsertUserJobState(ctx context.Context, arg UpsertUserJobStateParams) (UserJobState, error)
+	// docs/04-api-design.md section 4.5: GET/POST/DELETE /v1/me/watchlist.
+	// Backs the watchlist_hiring notification trigger (docs/11 section 2) —
+	// packages/db/queries/notification.sql's SelectUnnotifiedJobGroups joins
+	// this table directly rather than querying it separately per row.
+	// ON CONFLICT DO UPDATE rather than DO NOTHING: re-adding an
+	// already-watchlisted company with a different notify_any_role value is a
+	// legitimate edit, not a no-op — there is no separate PATCH route in
+	// docs/04 for it, so POST has to double as both.
+	UpsertWatchlistEntry(ctx context.Context, arg UpsertWatchlistEntryParams) (Watchlist, error)
 }
 
 var _ Querier = (*Queries)(nil)
