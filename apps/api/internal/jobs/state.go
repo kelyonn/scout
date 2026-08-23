@@ -24,12 +24,18 @@ import (
 //	                                                        ▼
 //	                                                    accepted
 //
-// plus two additions the diagram itself doesn't draw but the enum
+// plus three additions the diagram itself doesn't draw but the enum
 // (application_state) and docs/12-frontend-ux.md section 4.2's "dismissed
 // ... with undo" card state both imply: `withdrawn` is reachable from
 // every active, non-terminal state (a user can withdraw at any point, not
 // only from interviewing, where the diagram happens to draw it), and
-// `dismissed` is undoable back to `saved`. `expired` has no entry here on
+// `dismissed` is undoable back to `saved`. `applied` is undoable back to
+// `saved` too, for the same reason: StateControls fires the transition
+// the instant "Apply now" opens the listing in a new tab, which is
+// intent, not confirmation that a form was actually submitted — without
+// a way back, a stray click permanently pollutes the pipeline with no
+// fix except `withdrawn`, which reads (and is styled) as "I gave up on
+// this," not "I didn't mean to click that." `expired` has no entry here on
 // either side — nothing transitions a job to `expired` through this
 // user-facing endpoint; it is a system-driven state for when job.status
 // itself expires, not implemented by this pass (see HANDOFF.md).
@@ -52,6 +58,7 @@ var validTransitions = map[db.ApplicationState]map[db.ApplicationState]bool{
 		db.ApplicationStateSaved: true,
 	},
 	db.ApplicationStateApplied: {
+		db.ApplicationStateSaved:     true,
 		db.ApplicationStateScreening: true,
 		db.ApplicationStateRejected:  true,
 		db.ApplicationStateWithdrawn: true,

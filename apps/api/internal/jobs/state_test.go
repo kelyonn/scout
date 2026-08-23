@@ -100,6 +100,20 @@ func TestState_DismissedCanBeUndoneBackToSaved(t *testing.T) {
 	}
 }
 
+func TestState_AppliedCanBeUndoneBackToSaved(t *testing.T) {
+	pool := testPool(t)
+	h := testHandler(pool)
+	fx := insertJobFixture(t, pool, fixtureOpts{priority: 50})
+
+	doState(t, h, fx.groupID, map[string]any{"state": "viewed"})
+	doState(t, h, fx.groupID, map[string]any{"state": "saved"})
+	doState(t, h, fx.groupID, map[string]any{"state": "applied"})
+	w := doState(t, h, fx.groupID, map[string]any{"state": "saved"})
+	if w.Code != 200 {
+		t.Errorf("applied -> saved (undo): status = %d, want 200, body = %s", w.Code, w.Body.String())
+	}
+}
+
 func TestState_WithdrawnReachableFromAppliedNotJustInterviewing(t *testing.T) {
 	pool := testPool(t)
 	h := testHandler(pool)

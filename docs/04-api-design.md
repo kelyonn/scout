@@ -210,6 +210,12 @@ new ──▶ viewed ──┬──▶ saved ────▶ applied ──▶ 
                                                     accepted
 ```
 
+The diagram omits two undo edges that the implementation and the enum
+both support: `dismissed → saved` and `applied → saved`. Applying is a
+click-through to an external site, not a confirmation that a form was
+actually submitted, so a stray click needs a way back that doesn't read
+as giving up on the role (`withdrawn` does).
+
 ### 4.2 Search
 
 ```http
