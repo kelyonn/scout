@@ -7,10 +7,7 @@
 #      reaching the internet, so a debugging session cannot hammer a real
 #      company's careers page.
 #
-# Postgres, Redis, and the two Go services that do something. The notifier,
-# brain, and web join on the milestone that gives them work — see the note at the
-# top of production.yml for why a container that logs "not implemented" and
-# restarts is worse than an absent one.
+# Postgres, Redis, api, collector, brain, web, and notifier.
 #
 # PORTS ARE NON-DEFAULT ON PURPOSE. Scout uses 5433/6380 rather than 5432/6379
 # so it can coexist with another project's stack on the same machine. A
@@ -115,6 +112,12 @@ services:
       # upload) — until then it only served /health and /auth, neither of
       # which touch Postgres.
       SCOUT_DATABASE_URL: postgres://scout:scout_local_dev_only@postgres:5432/scout?sslmode=disable
+      # apps/api/internal/googlecalendar.Config — all three empty is a
+      # valid disabled state (Config.Enabled() is false), same pattern as
+      # SCOUT_BRAIN_*_API_KEY above. See .env.example for setup steps.
+      SCOUT_GOOGLE_CLIENT_ID: ${SCOUT_GOOGLE_CLIENT_ID:-}
+      SCOUT_GOOGLE_CLIENT_SECRET: ${SCOUT_GOOGLE_CLIENT_SECRET:-}
+      SCOUT_GOOGLE_REDIRECT_URL: ${SCOUT_GOOGLE_REDIRECT_URL:-http://localhost:3000/api/integrations/google/callback}
     ports:
       - "127.0.0.1:${SCOUT_API_PORT:-8081}:8080"
     healthcheck:
@@ -137,9 +140,13 @@ services:
     restart: unless-stopped
     environment:
       SCOUT_ENV: local
-      # No live fetching, ever, from a developer machine. A debugging session
-      # must not be able to hammer a real company's careers page.
-      SCOUT_FIXTURES_ONLY: "true"
+      # Defaults to fixtures-only — a debugging session must not be able to
+      # hammer a real company's careers page by accident. ADR-018's
+      # laptop-only "live" run is this same stack with SCOUT_FIXTURES_ONLY=false
+      # set in .env, not a separate compose file: `${SCOUT_FIXTURES_ONLY:-true}`
+      # (rather than a bare "true") is what makes that override reach the
+      # container instead of being silently pinned regardless of .env.
+      SCOUT_FIXTURES_ONLY: ${SCOUT_FIXTURES_ONLY:-true}
       # No SCOUT_HEALTHCHECK_URL: the dead-man's switch is not wired up locally.
       # A laptop that gets closed at night is not a host outage, and a nightly
       # false alarm is how the one alert that always means something gets muted.
@@ -172,6 +179,33 @@ services:
       postgres:
         condition: service_healthy
 
+  notifier:
+    build:
+      context: ../..
+      dockerfile: infra/docker/go-service.Dockerfile
+      args:
+        SERVICE: notifier
+    restart: unless-stopped
+    environment:
+      SCOUT_DATABASE_URL: postgres://scout:scout_local_dev_only@postgres:5432/scout?sslmode=disable
+      # Real token, no fixtures-only equivalent — a notifier that can't
+      # actually reach Telegram is a notifier that does nothing, so there is
+      # no "safe" local default the way SCOUT_FIXTURES_ONLY is for the
+      # collector. Set it in .env, then run `docker compose ... run --rm
+      # notifier -setup` once to register a real chat id before this service
+      # can deliver anything (docs/11-notifications.md section 11).
+      SCOUT_NOTIFIER_TELEGRAM_BOT_TOKEN: ${SCOUT_NOTIFIER_TELEGRAM_BOT_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "/app/app", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 192m
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   brain:
     build:
       context: ../..
@@ -201,6 +235,30 @@ services:
     mem_limit: 1g
     depends_on:
       postgres:
+        condition: service_healthy
+
+  web:
+    build:
+      context: ../../apps/web
+      dockerfile: ../../infra/docker/web.Dockerfile
+    restart: unless-stopped
+    environment:
+      # api:8080 is the container-network address (this stack's own
+      # service name), not the host-mapped SCOUT_API_PORT from .env — a
+      # container reaching for 127.0.0.1 would be reaching for itself,
+      # same note as collector's SCOUT_REDIS_URL/SCOUT_DATABASE_URL above.
+      SCOUT_API_URL: http://api:8080
+      SCOUT_AUTH_TOKEN: ${SCOUT_AUTH_TOKEN:-local-development-token-not-a-secret-000}
+      # Not "production" — see apps/web/app/api/auth/login/route.ts's own
+      # comment on why this can't be NODE_ENV (next build always sets
+      # that to "production", including here). Secure=false is correct
+      # for local Docker exactly like it is for `next dev`: no TLS.
+      SCOUT_ENV: local
+    ports:
+      - "127.0.0.1:${SCOUT_WEB_PORT:-3000}:3000"
+    mem_limit: 256m
+    depends_on:
+      api:
         condition: service_healthy
 
   # Not started by `up`. `make migrate` runs it explicitly. Same image and same

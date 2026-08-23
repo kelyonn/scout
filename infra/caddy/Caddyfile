@@ -20,7 +20,6 @@
 # Because nothing but tailscaled can reach this listener, TLS here would be
 # encrypting a hop that never leaves the host. See docs/15 section 2 and
 # infra/compose/production.yml.
-
 {
 	# No automatic HTTPS: `tailscale serve` owns the certificate, and Caddy
 	# trying to provision one would attempt an ACME challenge against a name
@@ -41,12 +40,22 @@
 		respond "ok" 200
 	}
 
-	handle /api/* {
-		uri strip_prefix /api
+	# The Go API's own real path prefix (apps/api/cmd/main.go's
+	# protected ServeMux: GET /v1/jobs, /v1/resume, /v1/search, ...) — for
+	# a direct caller that isn't the web app itself (a future mobile app,
+	# curl, a script holding its own SCOUT_AUTH_TOKEN). This used to say
+	# `/api/*` with the prefix stripped, which forwarded to paths like
+	# `/jobs` that the API has never served at any point — dead since
+	# whenever this file was written, and only found now while adding
+	# `web` below. The web app's own /api/* (its BFF route handlers,
+	# app/api/*/route.ts) is a completely different namespace and reaches
+	# api:8080 itself, server-side, with its own copy of the token — see
+	# apps/web/app/api/jobs/route.ts's own comment.
+	handle /v1/* {
 		reverse_proxy api:8080
 	}
 
-	# The API's own health check, reachable without the /api prefix so that the
+	# The API's own health check, reachable without a prefix so that the
 	# deploy health gate and the API's container healthcheck probe the same path.
 	handle /health {
 		reverse_proxy api:8080
@@ -66,11 +75,14 @@
 		reverse_proxy grafana:3000
 	}
 
-	# The dashboard lands at P3. Until then, every other path is a 404 from Caddy
-	# rather than a confusing connection error — a placeholder that says which
-	# milestone is missing beats one that looks like an outage.
+	# Everything else — /, /login, /opportunities, and the web app's own
+	# /api/* BFF routes (app/api/*/route.ts, including /api/auth/login) —
+	# goes to the Next.js app. This was a 404 placeholder ("dashboard not
+	# built yet") from before apps/web existed; P3 shipped it and this
+	# route was never updated to match, so production had no way to reach
+	# it even once it was code-complete.
 	handle {
-		respond "scout: dashboard not built yet (P3)" 404
+		reverse_proxy web:3000
 	}
 
 	log {
