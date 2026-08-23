@@ -54,9 +54,36 @@ laptop sleeps. This is the entire "deploy" step under ADR-018: there is nothing
 to push to, because the machine running it is the machine sitting in front of
 the user.
 
+**`.env`'s own `SCOUT_FIXTURES_ONLY` stays `true` at rest, deliberately.** Every
+service in `local.yml` has `restart: unless-stopped`, so a Docker Desktop
+restart (a reboot, Docker updating itself, the app relaunching at login) brings
+every container back exactly as `.env` says — if `.env` were left at `false`
+from a previous live run, that restart would silently resume live fetching
+without the user choosing to that day. `make live-run` (or the launchd agent
+below) passes `SCOUT_FIXTURES_ONLY=false` as a one-invocation override on the
+`docker compose` command line instead of editing `.env`, so the safe default
+always wins for anything outside that one call.
+
+**Two ways to actually start a live run:**
+
+- **By hand:** `make live-run` (`DURATION=<seconds>`, default 7200) — brings up
+  postgres/redis/collector/brain/notifier live, waits the duration, stops the
+  collector again. `api`/`web` aren't part of the loop this exists for; start
+  those yourself (`make dev`) to watch while it runs.
+- **On a schedule:** `make live-schedule-install` (`HOUR=`/`MINUTE=`/`DURATION=`,
+  default 09:00 local, 2h) installs a `launchd` agent — macOS's own scheduler,
+  no new dependency — that runs the same script daily. If the laptop is asleep
+  or closed at the scheduled time, launchd runs the missed job as soon as it
+  wakes, the same "find out whenever you next open the laptop" trade-off ADR-018
+  already accepts rather than a new one. Requires Docker Desktop to already be
+  running at that time. `make live-schedule-uninstall` removes it.
+
 ```bash
 make dev          # full stack, seeded, fixtures (environment: local)
 make dev-db       # database only, for running one service natively
+make live-run     # one bounded live run, right now (environment: live)
+make live-schedule-install   # daily live-run via launchd
+make live-schedule-uninstall # remove the launchd schedule
 make migrate      # apply pending migrations locally
 make test         # all tests, all languages
 make lint         # golangci-lint + sqlfluff
