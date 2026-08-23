@@ -1,0 +1,40 @@
+# Curated prestige-organization list — docs/05-source-catalog.md section 9's
+# "prestige exception" (a role with paid = unpaid/unknown may still notify
+# if the organization is on this list) and docs/11-notifications.md's
+# prestige_opening trigger both key off the same file, set once at
+# classification time (apps/collector/internal/scheduler.buildNormalizedJob)
+# rather than computed twice.
+#
+# docs/05 section 9 scopes this to "roughly 40 entries — top research labs,
+# major national institutes, recognized programs" and names these ~20
+# explicitly; the rest of the ~40 is a future curation pass, not a gap in
+# this file's design. Reviewable in a pull request, not a database row or an
+# admin UI — see that section's own reasoning for why.
+#
+# Matched case-insensitively as a substring of a posting's raw company name
+# (packages/taxonomy/prestige.go's IsPrestigeOrg) — "DeepMind" matches a
+# posting whose company is "Google DeepMind", "IIT" matches "IIT Bombay".
+
+- Google Research
+- Google DeepMind
+- DeepMind
+- Microsoft Research
+- Meta AI
+- FAIR
+- NVIDIA Research
+- Allen Institute for AI
+- AI2
+- EleutherAI
+- Hugging Face
+- IIT
+- IISc
+- ISRO
+- DRDO
+- C-DAC
+- Max Planck
+- INRIA
+- ETH Zurich
+- Google Summer of Code
+- GSoC
+- MITACS Globalink
+- Outreachy
