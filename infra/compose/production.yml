@@ -1,23 +1,20 @@
 # Production stack. One Compose project, one host. See docs/15-infrastructure-deployment.md
 # section 2 and ADR-014.
 #
-# WHAT IS DELIBERATELY ABSENT
+# WHAT IS STILL ABSENT
 #
 # docs/15 section 2 lists the full topology: web, brain, notifier, ollama, and
-# the observability stack. None of them are here, because none of them do
-# anything yet. A Compose file full of containers that log "not implemented" and
-# restart teaches you to ignore a restarting container, which is the same mistake
-# as a CI workflow full of skipped jobs. Each service joins on the milestone that
-# gives it work:
+# the observability stack (the last of those is infra/compose/observability.yml,
+# a separate file merged in via `-f`, not part of this one). brain, web, and
+# notifier joined once P2/P3 shipped the work that needed them. ollama is
+# deliberately never containerized (P2 Phase G: it already runs natively on
+# the host with nothing to isolate, see infra/compose/local.yml's brain
+# service comment on host.docker.internal).
 #
-#   notifier, brain          P1  first real notification
-#   ollama                   P2  local LLM tier
-#   web, observability       P3  dashboard and the metrics worth looking at
-#
-# The collector is here despite not fetching anything, because the dead-man's
-# switch is a P0 deliverable: "Scout silently stopped and nobody noticed" is a
-# failure mode from the moment there is a host, not from the moment there is
-# something worth watching it do.
+# The collector is here despite not fetching anything in P0, because the
+# dead-man's switch is a P0 deliverable: "Scout silently stopped and nobody
+# noticed" is a failure mode from the moment there is a host, not from the
+# moment there is something worth watching it do.
 #
 # NOTHING PUBLISHES A HOST PORT
 #
@@ -172,6 +169,59 @@ services:
       retries: 3
       start_period: 30s
     mem_limit: 1g
+
+  notifier:
+    <<: *go-service
+    build:
+      context: ../..
+      dockerfile: infra/docker/go-service.Dockerfile
+      args:
+        SERVICE: notifier
+    networks: [scout]
+    environment:
+      SCOUT_ENV: production
+      SCOUT_DATABASE_URL: postgres://${SCOUT_PG_USER:-scout}:${SCOUT_PG_PASSWORD:?SCOUT_PG_PASSWORD must be set}@postgres:5432/${SCOUT_PG_DATABASE:-scout}?sslmode=disable
+      # SCOUT_NOTIFIER_TELEGRAM_BOT_TOKEN comes from the environment file
+      # (env_file, above via the go-service anchor) — a real secret, not
+      # pinned here the way the public collector contact URL is.
+    healthcheck:
+      test: ["CMD", "/app/app", "healthcheck"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 256m
+
+  web:
+    <<: *hardening
+    platform: ${SCOUT_PLATFORM:-linux/arm64}
+    build:
+      context: ../../apps/web
+      dockerfile: ../../infra/docker/web.Dockerfile
+    networks: [scout]
+    env_file:
+      - ${SCOUT_ENV_FILE:-../../.env}
+    environment:
+      # api:8080 is this network's own service name, same as every other
+      # service here — never the Tailscale hostname or a host-mapped port.
+      SCOUT_API_URL: http://api:8080
+      # apps/web/app/api/auth/login/route.ts reads this, not NODE_ENV
+      # (next build/start always set that to "production" regardless of
+      # deployment target) — see that file's own comment. This is what
+      # makes the session cookie Secure in the one place it should be.
+      SCOUT_ENV: production
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    healthcheck:
+      test: ["CMD", "node", "-e", "process.exit(0)"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    mem_limit: 512m
+    depends_on:
+      api:
+        condition: service_healthy
 
   # ------------------------------------------------------------------ stores ---
 
