@@ -708,6 +708,25 @@ type CompanyAlias struct {
 	CreatedAt  pgtype.Timestamptz `db:"created_at" json:"created_at"`
 }
 
+type GoogleCalendarCredential struct {
+	ID           pgtype.UUID        `db:"id" json:"id"`
+	UserID       pgtype.UUID        `db:"user_id" json:"user_id"`
+	AccessToken  string             `db:"access_token" json:"access_token"`
+	RefreshToken string             `db:"refresh_token" json:"refresh_token"`
+	TokenExpiry  pgtype.Timestamptz `db:"token_expiry" json:"token_expiry"`
+	CalendarID   string             `db:"calendar_id" json:"calendar_id"`
+	ConnectedAt  pgtype.Timestamptz `db:"connected_at" json:"connected_at"`
+	UpdatedAt    pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
+type GoogleCalendarEvent struct {
+	JobGroupID    pgtype.UUID        `db:"job_group_id" json:"job_group_id"`
+	UserID        pgtype.UUID        `db:"user_id" json:"user_id"`
+	GoogleEventID string             `db:"google_event_id" json:"google_event_id"`
+	PushedAt      pgtype.Timestamptz `db:"pushed_at" json:"pushed_at"`
+	UpdatedAt     pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
+}
+
 type Job struct {
 	ID                     pgtype.UUID        `db:"id" json:"id"`
 	JobGroupID             pgtype.UUID        `db:"job_group_id" json:"job_group_id"`
@@ -996,6 +1015,7 @@ type Source struct {
 	CreatedAt           pgtype.Timestamptz `db:"created_at" json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	ShadowReviewedAt    pgtype.Timestamptz `db:"shadow_reviewed_at" json:"shadow_reviewed_at"`
+	FirstPolledAt       pgtype.Timestamptz `db:"first_polled_at" json:"first_polled_at"`
 }
 
 type UserJobState struct {
@@ -1043,6 +1063,13 @@ type UserProfile struct {
 	MaxNotificationsDay    int16              `db:"max_notifications_day" json:"max_notifications_day"`
 	UpdatedAt              pgtype.Timestamptz `db:"updated_at" json:"updated_at"`
 	SeniorityFilterEnabled bool               `db:"seniority_filter_enabled" json:"seniority_filter_enabled"`
+}
+
+type Watchlist struct {
+	UserID        pgtype.UUID        `db:"user_id" json:"user_id"`
+	CompanyID     pgtype.UUID        `db:"company_id" json:"company_id"`
+	NotifyAnyRole bool               `db:"notify_any_role" json:"notify_any_role"`
+	AddedAt       pgtype.Timestamptz `db:"added_at" json:"added_at"`
 }
 
 type WeightVersion struct {
