@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -276,6 +277,128 @@ func TestRunOnce_EndToEnd_GreenhouseFixture(t *testing.T) {
 	}
 	if jobCount != 3 {
 		t.Errorf("job rows after unchanged re-poll = %d, want still 3 (no duplicates)", jobCount)
+	}
+}
+
+// TestRunOnce_ParseFailure_StoresRealRawBody reproduces a real bug: a parse
+// failure's raw_observation row was stored with a payload of exactly
+// `{"error": "<message>"}`, discarding the actual response body that caused
+// the failure. docs/06 section 10's contract for this path is "store raw,
+// alert" — a developer diagnosing a broken adapter needs the real bytes, not
+// a restatement of the error already sitting in process_error. This asserts
+// the stored payload actually contains fixture content that only the real
+// body would carry.
+func TestRunOnce_ParseFailure_StoresRealRawBody(t *testing.T) {
+	pool := testPool(t)
+	ensureSeeded(t, pool)
+
+	companyID := insertIngestTestCompany(t, pool)
+	sourceID := insertGreenhouseSource(t, pool, companyID)
+	t.Cleanup(func() { cleanupJobData(t, pool, companyID) })
+
+	body, readErr := os.ReadFile("../../../../adapters/ats/greenhouse/fixtures/malformed.json")
+	if readErr != nil {
+		t.Fatalf("read fixture: %v", readErr)
+	}
+
+	fetcher := &fakeFetcher{result: &fetch.Result{StatusCode: 200, Body: body, FetchedAt: time.Now()}}
+	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultAllow}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	sched := New(pool, gate, fetcher, log).WithPipeline(testPipeline()).WithBatchLimit(1)
+	if _, runErr := sched.RunOnce(context.Background()); runErr != nil {
+		t.Fatalf("RunOnce: %v", runErr)
+	}
+
+	var jobCount int
+	if countErr := pool.QueryRow(context.Background(),
+		`select count(*) from job where primary_source_id = $1::uuid`, sourceID).Scan(&jobCount); countErr != nil {
+		t.Fatalf("count jobs: %v", countErr)
+	}
+	if jobCount != 0 {
+		t.Fatalf("job rows = %d, want 0 (parse failure must write nothing)", jobCount)
+	}
+
+	var processError, payload string
+	err := pool.QueryRow(context.Background(),
+		`select process_error, payload::text from raw_observation where source_id = $1::uuid`, sourceID,
+	).Scan(&processError, &payload)
+	if err != nil {
+		t.Fatalf("query raw_observation: %v", err)
+	}
+	if processError == "" {
+		t.Error("process_error is empty, want the parse error message")
+	}
+	// "Truncated Response Intern" only appears in the fixture's real body —
+	// a payload of just {"error": "..."} could never contain it. This is
+	// the assertion that would have failed before the fix.
+	if !strings.Contains(payload, "Truncated Response Intern") {
+		t.Errorf("payload = %s, want it to contain the real raw response body, not just the error", payload)
+	}
+}
+
+// TestRunOnce_ValidationFailure_StoresRealRawBody is
+// TestRunOnce_ParseFailure_StoresRealRawBody's counterpart for the other
+// docs/06 section 10 silent-failure case: postings that parsed but that
+// Validate rejected (a likely upstream field rename). Before the fix, this
+// path did not call recordProcessingError/InsertParseErrorObservation at
+// all — nothing was stored, contradicting docs/06's "store raw, alert"
+// requirement outright, not just with a truncated payload.
+func TestRunOnce_ValidationFailure_StoresRealRawBody(t *testing.T) {
+	pool := testPool(t)
+	ensureSeeded(t, pool)
+
+	companyID := insertIngestTestCompany(t, pool)
+	sourceID := insertGreenhouseSource(t, pool, companyID)
+	t.Cleanup(func() { cleanupJobData(t, pool, companyID) })
+
+	body, readErr := os.ReadFile("../../../../adapters/ats/greenhouse/fixtures/shape-changed.json")
+	if readErr != nil {
+		t.Fatalf("read fixture: %v", readErr)
+	}
+
+	fetcher := &fakeFetcher{result: &fetch.Result{StatusCode: 200, Body: body, FetchedAt: time.Now()}}
+	gate := &fakeGate{decision: politeness.Decision{Result: politeness.ResultAllow}}
+	log := slog.New(slog.NewTextHandler(io.Discard, nil))
+
+	sched := New(pool, gate, fetcher, log).WithPipeline(testPipeline()).WithBatchLimit(1)
+	if _, runErr := sched.RunOnce(context.Background()); runErr != nil {
+		t.Fatalf("RunOnce: %v", runErr)
+	}
+
+	var jobCount int
+	if countErr := pool.QueryRow(context.Background(),
+		`select count(*) from job where primary_source_id = $1::uuid`, sourceID).Scan(&jobCount); countErr != nil {
+		t.Fatalf("count jobs: %v", countErr)
+	}
+	if jobCount != 0 {
+		t.Fatalf("job rows = %d, want 0 (validation failure must write nothing)", jobCount)
+	}
+
+	var obsCount int
+	if countErr := pool.QueryRow(context.Background(),
+		`select count(*) from raw_observation where source_id = $1::uuid`, sourceID).Scan(&obsCount); countErr != nil {
+		t.Fatalf("count raw_observations: %v", countErr)
+	}
+	if obsCount != 1 {
+		t.Fatalf("raw_observation rows = %d, want 1 (validation failure must still store one)", obsCount)
+	}
+
+	var processError, payload string
+	err := pool.QueryRow(context.Background(),
+		`select process_error, payload::text from raw_observation where source_id = $1::uuid`, sourceID,
+	).Scan(&processError, &payload)
+	if err != nil {
+		t.Fatalf("query raw_observation: %v", err)
+	}
+	if !strings.Contains(processError, "empty title") {
+		t.Errorf("process_error = %q, want it to mention the empty-title validation failure", processError)
+	}
+	// job_title is shape-changed.json's renamed field, present only in the
+	// real raw body — proves the actual response is stored, not just the
+	// error string.
+	if !strings.Contains(payload, "job_title") {
+		t.Errorf("payload = %s, want it to contain the real raw response body, not just the error", payload)
 	}
 }
 

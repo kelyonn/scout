@@ -42,10 +42,11 @@ import (
 // source row, write nothing resembling a job. Same coarsening-is-safe
 // posture as the rest of this package.
 type Pipeline struct {
-	Adapters  map[padapter.SourceKind]padapter.Adapter
-	Gazetteer *taxonomy.Gazetteer
-	Roles     []taxonomy.RoleFamily
-	Skills    []taxonomy.Skill
+	Adapters     map[padapter.SourceKind]padapter.Adapter
+	Gazetteer    *taxonomy.Gazetteer
+	Roles        []taxonomy.RoleFamily
+	Skills       []taxonomy.Skill
+	PrestigeOrgs []string
 }
 
 // WithPipeline enables ingestion. Without it, this package's behavior is
@@ -176,7 +177,7 @@ func (s *Scheduler) runIngestion(ctx context.Context, row db.SelectDueSourcesRow
 		// live means not writing anything this round, not attempting to
 		// salvage individual postings from a response Validate has already
 		// judged implausible.
-		s.log.Error("adapter validation failed; skipping this poll's postings", "source_id", row.ID.String(), "err", validateErr)
+		s.recordValidationError(ctx, row.ID, row.Url, result, validateErr)
 		return 0, 0
 	}
 	if len(postings) == 0 {
@@ -552,9 +553,20 @@ func (s *Scheduler) buildNormalizedJob(p schema.Posting) (nj schema.NormalizedJo
 		CompPeriod:             comp.Period,
 		CompNormalizedINRMonth: comp.NormalizedINRMonth,
 		CompConfidence:         compConfidencePtr(comp.Confidence),
-		PostedAt:               p.PostedAt,
-		PostedAtEstimated:      p.PostedAtEstimated,
-		DeadlineAt:             p.DeadlineAt,
+		// docs/05 section 9's curated list — set here, once, rather than
+		// recomputed by both the scoring/notify path (unpaid-role
+		// admission) and the notifier's prestige_opening trigger.
+		// Matched against p.CompanyNameRaw, which today only Greenhouse's
+		// adapter and the email-alert path actually populate (the other
+		// seven ATS adapters resolve company identity from source.company_id
+		// and never extract a redundant name field from the response body)
+		// — a real coverage gap, not a design choice, and the honest
+		// subset available without adding a company_id -> canonical_name
+		// lookup to this already-hot per-posting path.
+		PrestigeException: taxonomy.IsPrestigeOrg(p.CompanyNameRaw, s.pipeline.PrestigeOrgs),
+		PostedAt:          p.PostedAt,
+		PostedAtEstimated: p.PostedAtEstimated,
+		DeadlineAt:        p.DeadlineAt,
 	}
 	return nj, role.NeedsTier2Escalation, nil
 }
@@ -644,20 +656,76 @@ func nilIfEmptyStr(s string) *string {
 // exact: this writes an observation row and logs at Error rather than Warn.
 func (s *Scheduler) recordParseError(ctx context.Context, sourceID pgtype.UUID, url string, result *fetch.Result, parseErr error) {
 	s.log.Error("adapter parse failed", "source_id", sourceID.String(), "err", parseErr)
+	s.recordProcessingError(ctx, sourceID, url, result, parseErr)
+}
 
+// recordValidationError is recordParseError's counterpart for docs/06
+// section 10's other silent-failure case: postings that parsed fine but
+// that Validate judged implausible (a likely field rename upstream). Same
+// "store raw, alert, write nothing this round" contract, same underlying
+// row shape — Validate has no adapter-specific error type to distinguish
+// on, so there is nothing a separate query would buy here.
+func (s *Scheduler) recordValidationError(ctx context.Context, sourceID pgtype.UUID, url string, result *fetch.Result, validateErr error) {
+	s.log.Error("adapter validation failed; skipping this poll's postings", "source_id", sourceID.String(), "err", validateErr)
+	s.recordProcessingError(ctx, sourceID, url, result, validateErr)
+}
+
+// recordProcessingError persists the observation docs/06 section 10
+// requires for both a parse failure and a validation failure: "store raw,
+// alert, do not retry [this round]." Earlier versions of both call sites
+// stored only the error message as the payload, not the response that
+// actually caused it — which defeats the entire point of storing anything,
+// since the one thing a developer diagnosing a broken adapter needs is the
+// real bytes the adapter choked on, not a restatement of the error already
+// in process_error. rawPayload falls back to wrapping the body as opaque
+// text when it is not itself valid JSON (the common case for a parse
+// failure), since the payload column is jsonb.
+func (s *Scheduler) recordProcessingError(ctx context.Context, sourceID pgtype.UUID, url string, result *fetch.Result, procErr error) {
 	q := db.New(s.pool)
 	statusCode := int16(0)
+	var body []byte
 	if result != nil {
 		statusCode = int16(result.StatusCode) //nolint:gosec // HTTP status codes fit comfortably in int16
+		body = result.Body
 	}
 	err := q.InsertParseErrorObservation(ctx, db.InsertParseErrorObservationParams{
 		SourceID:     sourceID,
 		Url:          url,
-		Payload:      fmt.Sprintf(`{"error": %q}`, parseErr.Error()),
+		Payload:      rawPayload(body, procErr.Error()),
 		HttpStatus:   &statusCode,
-		ProcessError: parseErr.Error(),
+		ProcessError: procErr.Error(),
 	})
 	if err != nil {
-		s.log.Warn("failed to record parse-error observation", "source_id", sourceID.String(), "err", err)
+		s.log.Warn("failed to record processing-error observation", "source_id", sourceID.String(), "err", err)
 	}
+}
+
+// rawPayload builds the jsonb payload recordProcessingError stores: the
+// real response body the adapter failed on, alongside the error that made
+// it fail. body is embedded as-is (via json.RawMessage) when it is already
+// valid JSON — the overwhelmingly common case, since every adapter here
+// speaks JSON — so a developer can query the column directly rather than
+// unescape a string; otherwise it is carried as opaque text, since jsonb
+// cannot hold non-JSON bytes any other way.
+func rawPayload(body []byte, errMsg string) string {
+	type payload struct {
+		Raw     json.RawMessage `json:"raw,omitempty"`
+		RawText string          `json:"raw_text,omitempty"`
+		Error   string          `json:"error"`
+	}
+	p := payload{Error: errMsg}
+	if json.Valid(body) {
+		p.Raw = body
+	} else if len(body) > 0 {
+		p.RawText = string(body)
+	}
+	encoded, err := json.Marshal(p)
+	if err != nil {
+		// json.Marshal on this struct can only fail if body were somehow an
+		// invalid json.RawMessage despite json.Valid just confirming it —
+		// not reachable in practice, but the caller's jsonb column still
+		// needs a valid string, not a Go zero value.
+		return fmt.Sprintf(`{"error": %q}`, errMsg)
+	}
+	return string(encoded)
 }
