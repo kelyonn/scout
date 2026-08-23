@@ -198,8 +198,8 @@ compliance: ## Run the banned-dependency gate (AGENTS.md rule 1a)
 # "not yet" and exits 0 is worse, because a script calling it believes it worked.
 
 .PHONY: evals
-evals: ## Run the quality eval harness (SUITE=name for one suite; all suites otherwise)
-	cd apps/brain && PYTHONPATH="$(CURDIR)" uv run python -m evals.run $(SUITE)
+evals: $(ENV_FILE) ## Run the quality eval harness (SUITE=name for one suite; all suites otherwise)
+	@set -a; . $(ENV_FILE); set +a; cd apps/brain && PYTHONPATH="$(CURDIR)" uv run python -m evals.run $(SUITE)
 
 .PHONY: evals-report
 evals-report: ## Per-suite eval diff against the last passing run

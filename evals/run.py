@@ -22,7 +22,8 @@ from pathlib import Path
 from typing import Any
 
 from evals.suites import classify_role, dedup, explanation
-from scout_brain.llm import OllamaClient
+from scout_brain.config import load_llm_config
+from scout_brain.llm import build_cascade_client
 
 SUITES = {
     "classify_role": classify_role,
@@ -40,7 +41,8 @@ def main(argv: list[str]) -> int:
         print(f"unknown suite(s): {', '.join(unknown)} — known: {', '.join(SUITES)}", file=sys.stderr)
         return 2
 
-    llm = OllamaClient(host=os.environ.get("SCOUT_BRAIN_OLLAMA_HOST", "http://localhost:11434"))
+    ollama_host = os.environ.get("SCOUT_BRAIN_OLLAMA_HOST", "http://localhost:11434")
+    llm = build_cascade_client(load_llm_config(), ollama_host)
 
     all_passed = True
     record: dict[str, dict[str, Any]] = {}
