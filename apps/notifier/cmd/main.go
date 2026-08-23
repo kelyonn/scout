@@ -20,6 +20,8 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/http"
 	"os"
 	"os/signal"
 	"sync"
@@ -50,6 +52,20 @@ const DefaultTickInterval = 30 * time.Second
 func main() {
 	log := slog.New(logging.Scrub(slog.NewJSONHandler(os.Stdout, nil)))
 
+	// `notifier healthcheck` is what the container healthcheck runs — the
+	// image is distroless (no shell, no curl), and a real HTTP probe against
+	// the /metrics server beats a process-liveness check, same reasoning as
+	// apps/api/cmd's own selfCheck. Checked before flag.Parse() so it's a
+	// plain positional arg, not a flag, matching apps/collector/cmd's
+	// `collector healthcheck`.
+	if len(os.Args) > 1 && os.Args[1] == "healthcheck" {
+		if err := selfCheck(metricsAddr()); err != nil {
+			log.Error("unhealthy", "err", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	setup := flag.Bool("setup", false, "run the one-time Telegram onboarding flow and exit")
 	flag.Parse()
 
@@ -63,6 +79,39 @@ func main() {
 		log.Error("exited with error", "err", err)
 		os.Exit(1)
 	}
+}
+
+// selfCheck probes /metrics over the loopback interface — mirrors
+// apps/api/cmd's own selfCheck against /health; notifier has no /health
+// route of its own, only the one packages/metrics.Serve exposes.
+func selfCheck(addr string) error {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("parse metrics address: %w", err)
+	}
+	if host == "" || host == "0.0.0.0" || host == "::" {
+		host = "127.0.0.1"
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		"http://"+net.JoinHostPort(host, port)+"/metrics", http.NoBody)
+	if err != nil {
+		return fmt.Errorf("build metrics request: %w", err)
+	}
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("metrics request failed: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("metrics endpoint returned %d", resp.StatusCode)
+	}
+	return nil
 }
 
 func run(log *slog.Logger) error {
