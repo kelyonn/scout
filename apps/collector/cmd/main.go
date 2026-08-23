@@ -221,9 +221,10 @@ func buildPipeline(fetcher *fetch.Fetcher) *scheduler.Pipeline {
 			padapter.SourceKindTeamtailor:      teamtailor.New(fetcher),
 			padapter.SourceKindWorkday:         workday.New(fetcher),
 		},
-		Gazetteer: taxonomy.LoadGazetteer(),
-		Roles:     taxonomy.LoadRolePatterns(),
-		Skills:    taxonomy.LoadSkills(),
+		Gazetteer:    taxonomy.LoadGazetteer(),
+		Roles:        taxonomy.LoadRolePatterns(),
+		Skills:       taxonomy.LoadSkills(),
+		PrestigeOrgs: taxonomy.LoadPrestigeOrgs(),
 	}
 }
 

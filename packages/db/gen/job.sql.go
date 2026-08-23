@@ -767,7 +767,7 @@ insert into job (
     location_raw, location_city, location_region, location_country,
     location_tier, work_mode, visa_sponsorship,
     paid, comp_min, comp_max, comp_currency, comp_period,
-    comp_normalized_inr_month, comp_confidence,
+    comp_normalized_inr_month, comp_confidence, prestige_exception,
     posted_at, posted_at_estimated, deadline_at,
     simhash, raw_payload
 ) values (
@@ -786,9 +786,10 @@ insert into job (
     $28::paid_signal, $29::numeric, $30::numeric,
     $31::bpchar, $32::text,
     $33::numeric, $34::real,
-    $35::timestamptz, $36::boolean,
-    $37::timestamptz,
-    $38::bigint, $39::jsonb
+    $35::boolean,
+    $36::timestamptz, $37::boolean,
+    $38::timestamptz,
+    $39::bigint, $40::jsonb
 )
 returning
     id,
@@ -882,6 +883,7 @@ type InsertJobParams struct {
 	CompPeriod             *string            `db:"comp_period" json:"comp_period"`
 	CompNormalizedInrMonth pgtype.Numeric     `db:"comp_normalized_inr_month" json:"comp_normalized_inr_month"`
 	CompConfidence         *float32           `db:"comp_confidence" json:"comp_confidence"`
+	PrestigeException      bool               `db:"prestige_exception" json:"prestige_exception"`
 	PostedAt               pgtype.Timestamptz `db:"posted_at" json:"posted_at"`
 	PostedAtEstimated      bool               `db:"posted_at_estimated" json:"posted_at_estimated"`
 	DeadlineAt             pgtype.Timestamptz `db:"deadline_at" json:"deadline_at"`
@@ -982,6 +984,7 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (InsertJob
 		arg.CompPeriod,
 		arg.CompNormalizedInrMonth,
 		arg.CompConfidence,
+		arg.PrestigeException,
 		arg.PostedAt,
 		arg.PostedAtEstimated,
 		arg.DeadlineAt,
