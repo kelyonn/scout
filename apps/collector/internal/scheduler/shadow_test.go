@@ -106,9 +106,12 @@ func TestDecideShadowPromotion(t *testing.T) {
 	}
 }
 
+func timePtr(t time.Time) *time.Time { return &t }
+
 // shadowTestSourceOpts configures insertShadowTestSource.
 type shadowTestSourceOpts struct {
 	createdAt                                  time.Time
+	firstPolledAt                              *time.Time
 	shadowReviewedAt                           *time.Time
 	totalPolls, totalSuccesses, totalJobsFound int64
 	yieldRatio                                 float32
@@ -126,11 +129,11 @@ func insertShadowTestSource(t *testing.T, pool *pgxpool.Pool, o shadowTestSource
 
 	var id pgtype.UUID
 	err := pool.QueryRow(context.Background(), `
-		insert into source (kind, status, legal_posture, url, url_hash, created_at,
+		insert into source (kind, status, legal_posture, url, url_hash, created_at, first_polled_at,
 		                     shadow_reviewed_at, total_polls, total_successes, total_jobs_found, yield_ratio)
-		values ('rss', 'pending_review', 'permitted', $1, digest($1, 'sha256'), $2, $3, $4, $5, $6, $7)
+		values ('rss', 'pending_review', 'permitted', $1, digest($1, 'sha256'), $2, $3, $4, $5, $6, $7, $8)
 		returning id
-	`, url, o.createdAt, o.shadowReviewedAt, o.totalPolls, o.totalSuccesses, o.totalJobsFound, o.yieldRatio).
+	`, url, o.createdAt, o.firstPolledAt, o.shadowReviewedAt, o.totalPolls, o.totalSuccesses, o.totalJobsFound, o.yieldRatio).
 		Scan(&id)
 	if err != nil {
 		t.Fatalf("insert shadow test source: %v", err)
@@ -153,14 +156,29 @@ func TestReviewShadowSources(t *testing.T) {
 	// insertTestSource's comment in scheduler_test.go on why the shared-DB
 	// test setup requires this). Without both guards, this test would
 	// promote or flag real seeded sources as a side effect of `go test`.
-	sched := New(pool, &fakeGate{}, &fakeFetcher{}, testLogger()).WithShadowBatchLimit(2)
+	sched := New(pool, &fakeGate{}, &fakeFetcher{}, testLogger()).WithShadowBatchLimit(3)
 	deepPast := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	tooRecent := insertShadowTestSource(t, pool, shadowTestSourceOpts{
-		createdAt: time.Now().Add(-1 * time.Hour), // window not closed yet
+		createdAt:     deepPast,
+		firstPolledAt: timePtr(time.Now().Add(-1 * time.Hour)), // window not closed yet
+	})
+	// neverPolled is the regression case for the real bug found live
+	// 2026-08-23 (infra/migrations/000019): a source registered long ago
+	// (deepPast, same as healthy/anomalous below) but never actually
+	// polled — first_polled_at stays NULL, exactly what every one of the
+	// ~1,400 sources seeded before this project's first live run looked
+	// like the moment that run started. Before the fix, this source's old
+	// created_at alone made it "due," and it would have been flagged
+	// "0 successful polls of 0 attempted — adapter or URL likely broken"
+	// despite never having been given a real chance. It must be completely
+	// invisible to this pass: not reviewed, not touched.
+	neverPolled := insertShadowTestSource(t, pool, shadowTestSourceOpts{
+		createdAt: deepPast,
 	})
 	healthy := insertShadowTestSource(t, pool, shadowTestSourceOpts{
 		createdAt:      deepPast,
+		firstPolledAt:  &deepPast,
 		totalPolls:     20,
 		totalSuccesses: 20,
 		totalJobsFound: 12,
@@ -168,6 +186,7 @@ func TestReviewShadowSources(t *testing.T) {
 	})
 	anomalous := insertShadowTestSource(t, pool, shadowTestSourceOpts{
 		createdAt:      deepPast,
+		firstPolledAt:  &deepPast,
 		totalPolls:     20,
 		totalSuccesses: 20,
 		totalJobsFound: 0,
@@ -175,6 +194,7 @@ func TestReviewShadowSources(t *testing.T) {
 	alreadyReviewed := time.Now().Add(-1 * time.Hour)
 	skipped := insertShadowTestSource(t, pool, shadowTestSourceOpts{
 		createdAt:        deepPast,
+		firstPolledAt:    &deepPast,
 		shadowReviewedAt: &alreadyReviewed,
 		totalPolls:       20,
 		totalSuccesses:   20,
@@ -187,11 +207,22 @@ func TestReviewShadowSources(t *testing.T) {
 		t.Fatalf("ReviewShadowSources: %v", err)
 	}
 	// healthy and anomalous are both due and both older (deepPast) than any
-	// real row, so a LIMIT-2 pass ordered by created_at ASC reaches exactly
-	// these two and nothing else. tooRecent's window hasn't closed; skipped
+	// real row, so a LIMIT-3 pass ordered by first_polled_at ASC reaches
+	// exactly these two plus tooRecent's slot never fills (its window hasn't
+	// closed) and nothing else. neverPolled is excluded entirely — it has no
+	// first_polled_at at all, deepPast created_at notwithstanding; skipped
 	// was already reviewed.
 	if n != 2 {
 		t.Fatalf("reviewed = %d, want 2", n)
+	}
+
+	neverPolledRow := getTestSource(t, pool, neverPolled)
+	if neverPolledRow.Status != "pending_review" || neverPolledRow.ShadowReviewedAt.Valid {
+		t.Errorf("neverPolled source should be completely untouched despite its old created_at: status=%q reviewed=%v",
+			neverPolledRow.Status, neverPolledRow.ShadowReviewedAt.Valid)
+	}
+	if neverPolledRow.Notes != nil && *neverPolledRow.Notes != "" {
+		t.Errorf("neverPolled source must not be flagged: notes = %q", *neverPolledRow.Notes)
 	}
 
 	healthyRow := getTestSource(t, pool, healthy)

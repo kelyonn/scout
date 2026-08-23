@@ -90,7 +90,7 @@ func (q *Queries) FlagShadowSource(ctx context.Context, arg FlagShadowSourcePara
 }
 
 const getSourceByID = `-- name: GetSourceByID :one
-select id, company_id, kind, status, legal_posture, url, url_hash, adapter_config, robots_allowed, robots_checked_at, robots_crawl_delay_s, max_rps, max_concurrency, base_interval_s, current_interval_s, min_interval_s, max_interval_s, next_poll_at, last_polled_at, hiring_pattern, last_etag, last_modified, last_content_hash, last_changed_at, consecutive_failures, circuit_open_until, total_polls, total_successes, total_jobs_found, total_new_jobs, yield_ratio, yield_computed_at, priority_tier, notes, created_at, updated_at, shadow_reviewed_at
+select id, company_id, kind, status, legal_posture, url, url_hash, adapter_config, robots_allowed, robots_checked_at, robots_crawl_delay_s, max_rps, max_concurrency, base_interval_s, current_interval_s, min_interval_s, max_interval_s, next_poll_at, last_polled_at, hiring_pattern, last_etag, last_modified, last_content_hash, last_changed_at, consecutive_failures, circuit_open_until, total_polls, total_successes, total_jobs_found, total_new_jobs, yield_ratio, yield_computed_at, priority_tier, notes, created_at, updated_at, shadow_reviewed_at, first_polled_at
 from source
 where id = $1::uuid
 `
@@ -139,6 +139,7 @@ func (q *Queries) GetSourceByID(ctx context.Context, id pgtype.UUID) (Source, er
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.ShadowReviewedAt,
+		&i.FirstPolledAt,
 	)
 	return i, err
 }
@@ -363,8 +364,9 @@ from source
 where status = 'pending_review'
     and shadow_reviewed_at is NULL
     and legal_posture in ('permitted', 'api_only')
-    and created_at <= now() - interval '48 hours'
-order by created_at asc
+    and first_polled_at is not null
+    and first_polled_at <= now() - interval '48 hours'
+order by first_polled_at asc
 limit $1::int
 `
 
@@ -385,6 +387,14 @@ type SelectShadowSourcesDueForReviewRow struct {
 // decideShadowPromotion function needs to decide, the same
 // read-the-counters-then-write-the-verdict split source.sql already uses for
 // UpdateSourceAfterPoll's interval math.
+//
+// Anchored on first_polled_at, not created_at (infra/migrations/000019) — a
+// source that was seeded but never actually polled has had zero real shadow
+// run regardless of how long its row has existed, which is exactly the
+// ADR-018 on-demand-hosting case: the collector can sit off for days between
+// sessions, so "created 48h ago" and "attempted 48h ago" are different
+// claims. first_polled_at is NULL excludes exactly the sources that have
+// never been polled at all, rather than judging them sight unseen.
 func (q *Queries) SelectShadowSourcesDueForReview(ctx context.Context, batchLimit int32) ([]SelectShadowSourcesDueForReviewRow, error) {
 	rows, err := q.db.Query(ctx, selectShadowSourcesDueForReview, batchLimit)
 	if err != nil {
@@ -419,6 +429,13 @@ set
     next_poll_at = $1::timestamptz,
     current_interval_s = $2::int,
     last_polled_at = now(),
+    -- Set once, on this source's first-ever poll attempt (success or
+    -- failure), never again — see infra/migrations/000019's own comment for
+    -- why this exists: SelectShadowSourcesDueForReview anchors the 48h
+    -- shadow window here, not on created_at, so a source seeded long before
+    -- the collector was ever run against it (ADR-018's on-demand model)
+    -- gets a real 48h window starting from when it was actually attempted.
+    first_polled_at = coalesce(first_polled_at, now()),
     last_etag = $3::text,
     last_modified = $4::text,
     last_content_hash = $5::bytea,
