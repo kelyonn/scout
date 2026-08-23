@@ -227,7 +227,7 @@ insert into job (
     location_raw, location_city, location_region, location_country,
     location_tier, work_mode, visa_sponsorship,
     paid, comp_min, comp_max, comp_currency, comp_period,
-    comp_normalized_inr_month, comp_confidence,
+    comp_normalized_inr_month, comp_confidence, prestige_exception,
     posted_at, posted_at_estimated, deadline_at,
     simhash, raw_payload
 ) values (
@@ -246,6 +246,7 @@ insert into job (
     sqlc.arg(paid)::paid_signal, sqlc.narg(comp_min)::numeric, sqlc.narg(comp_max)::numeric,
     sqlc.narg(comp_currency)::bpchar, sqlc.narg(comp_period)::text,
     sqlc.narg(comp_normalized_inr_month)::numeric, sqlc.narg(comp_confidence)::real,
+    sqlc.arg(prestige_exception)::boolean,
     sqlc.narg(posted_at)::timestamptz, sqlc.arg(posted_at_estimated)::boolean,
     sqlc.narg(deadline_at)::timestamptz,
     sqlc.narg(simhash)::bigint, sqlc.arg(raw_payload)::jsonb

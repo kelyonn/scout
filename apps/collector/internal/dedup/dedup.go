@@ -215,6 +215,7 @@ func toInsertJobParams(
 		CompPeriod:             nilIfEmpty(n.CompPeriod),
 		CompNormalizedInrMonth: numericFromFloat(n.CompNormalizedINRMonth),
 		CompConfidence:         n.CompConfidence,
+		PrestigeException:      n.PrestigeException,
 		PostedAt:               toTimestamptz(n.PostedAt),
 		PostedAtEstimated:      n.PostedAtEstimated,
 		DeadlineAt:             toTimestamptz(n.DeadlineAt),

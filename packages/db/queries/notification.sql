@@ -74,7 +74,16 @@ select
     -- "cannot scan unknown type" failure first — see its comment), so the
     -- native seniority[] type fails to scan here too without this cast.
     up.target_seniority::text[] as target_seniority,
-    js.priority
+    js.priority,
+    -- watchlist_hiring (docs/11 section 2): a LEFT JOIN rather than a
+    -- second per-row query keeps the trigger evaluator a pure function
+    -- over one already-fetched row, same shape as every other trigger
+    -- input here.
+    (w.company_id is not null)::boolean as is_watchlisted,
+    -- prestige_opening (docs/11 section 2): set at classification time
+    -- against the curated list in packages/taxonomy/prestige.yaml — see
+    -- that file and apps/collector/internal/scheduler.buildNormalizedJob.
+    j.prestige_exception as is_prestige
 from job_group as jg
 inner join job as j on jg.representative_job_id = j.id
 inner join company as c on j.company_id = c.id
@@ -83,6 +92,7 @@ inner join job_score as js on j.id = js.job_id
     and js.user_id = sqlc.arg(user_id)::uuid
     and js.weight_version = sqlc.arg(weight_version)::text
 inner join user_profile as up on sqlc.arg(user_id)::uuid = up.user_id
+left join watchlist as w on w.user_id = sqlc.arg(user_id)::uuid and w.company_id = j.company_id
 where jg.notified_at is NULL
     and j.is_software = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and js.priority >= 92))

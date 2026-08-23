@@ -126,6 +126,44 @@ func TestResolve_NewJobCreatesGroup(t *testing.T) {
 	}
 }
 
+// TestResolve_PrestigeExceptionPersists is a regression test for a real
+// bug: schema.NormalizedJob.PrestigeException was set by
+// apps/collector/internal/scheduler.buildNormalizedJob but silently
+// dropped between there and the database — toInsertJobParams never read
+// the field, and InsertJob's own column list didn't even accept it as a
+// parameter. It would have stayed false for every job regardless of what
+// the classifier decided. This asserts the value that goes in is the value
+// that comes back out.
+func TestResolve_PrestigeExceptionPersists(t *testing.T) {
+	pool := testPool(t)
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer func() { _ = tx.Rollback(ctx) }()
+	q := db.New(tx)
+
+	companyID := insertTestCompany(t, tx)
+	sourceID := insertTestSource(t, tx, companyID)
+
+	posting := testPosting(fmt.Sprintf("https://example.test/job/%d", time.Now().UnixNano()))
+	posting.PrestigeException = true
+
+	result, err := Resolve(ctx, q, posting, companyID, sourceID, []byte(`{}`))
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+
+	job, err := q.GetJobByID(ctx, result.JobID)
+	if err != nil {
+		t.Fatalf("GetJobByID: %v", err)
+	}
+	if !job.PrestigeException {
+		t.Error("job.PrestigeException = false, want true (the value set on the normalized posting)")
+	}
+}
+
 func TestResolve_ReobservationAttachesInsteadOfDuplicating(t *testing.T) {
 	pool := testPool(t)
 	ctx := context.Background()

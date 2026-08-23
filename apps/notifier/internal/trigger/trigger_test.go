@@ -485,6 +485,137 @@ func TestRun_RemoteHighQualityRequiresTier3(t *testing.T) {
 	}
 }
 
+// TestRun_FiresWatchlistHiring is docs/11 section 2's "the only filter is
+// role relevance" — a tier-2, priority-60 job clears none of
+// bengaluru_match/high_score/remote_high_quality's own thresholds, so
+// reaching watchlist_hiring at all proves the earlier cases correctly
+// fell through rather than proving the threshold alone.
+func TestRun_FiresWatchlistHiring(t *testing.T) {
+	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
+	userID := testUser(t, pool)
+	companyID := insertTestCompany(t, pool)
+	sourceID := insertTestSource(t, pool, companyID)
+	insertTestWatchlistEntry(t, pool, userID, companyID)
+
+	fixture := insertTestJobFixture(t, pool, companyID, sourceID, userID, tier2(), watchlistHiringThreshold)
+
+	if _, _, err := testEvaluator(pool).Run(context.Background(), userID, testWeightVersion, false); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var trig string
+	err := pool.QueryRow(context.Background(),
+		`select trigger from notification where job_group_id = $1::uuid`, fixture.JobGroupID).Scan(&trig)
+	if err != nil {
+		t.Fatalf("query trigger: %v", err)
+	}
+	if trig != "watchlist_hiring" {
+		t.Errorf("trigger = %q, want watchlist_hiring", trig)
+	}
+}
+
+// TestRun_WatchlistHiringRequiresWatchlistEntry confirms the same
+// below-every-other-threshold job does not fire anything at all when the
+// company is not actually watchlisted — the trigger reads a real join,
+// not company identity alone.
+func TestRun_WatchlistHiringRequiresWatchlistEntry(t *testing.T) {
+	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
+	userID := testUser(t, pool)
+	companyID := insertTestCompany(t, pool)
+	sourceID := insertTestSource(t, pool, companyID)
+
+	fixture := insertTestJobFixture(t, pool, companyID, sourceID, userID, tier2(), watchlistHiringThreshold)
+
+	if _, _, err := testEvaluator(pool).Run(context.Background(), userID, testWeightVersion, false); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if countNotifications(t, pool, fixture.JobGroupID) != 0 {
+		t.Error("a non-watchlisted company at watchlist_hiring's threshold should not fire it")
+	}
+}
+
+// TestRun_WatchlistHiringOutrankedByBengaluruMatch confirms evaluation
+// order (docs/11 section 2: "evaluated in the order listed and the first
+// match wins") — a watchlisted company's Bengaluru role clearing
+// bengaluru_match's own (higher) threshold fires that, not
+// watchlist_hiring, even though both would match.
+func TestRun_WatchlistHiringOutrankedByBengaluruMatch(t *testing.T) {
+	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
+	userID := testUser(t, pool)
+	companyID := insertTestCompany(t, pool)
+	sourceID := insertTestSource(t, pool, companyID)
+	insertTestWatchlistEntry(t, pool, userID, companyID)
+
+	fixture := insertTestJobFixture(t, pool, companyID, sourceID, userID, tier1(), bengaluruMatchThreshold)
+
+	if _, _, err := testEvaluator(pool).Run(context.Background(), userID, testWeightVersion, false); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var trig string
+	err := pool.QueryRow(context.Background(),
+		`select trigger from notification where job_group_id = $1::uuid`, fixture.JobGroupID).Scan(&trig)
+	if err != nil {
+		t.Fatalf("query trigger: %v", err)
+	}
+	if trig != "bengaluru_match" {
+		t.Errorf("trigger = %q, want bengaluru_match (evaluated before watchlist_hiring)", trig)
+	}
+}
+
+// TestRun_FiresPrestigeOpening mirrors TestRun_FiresWatchlistHiring: a
+// tier-2 job below every earlier threshold, this time flagged
+// prestige_exception rather than watchlisted.
+func TestRun_FiresPrestigeOpening(t *testing.T) {
+	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
+	userID := testUser(t, pool)
+	companyID := insertTestCompany(t, pool)
+	sourceID := insertTestSource(t, pool, companyID)
+
+	fixture := insertTestJobFixture(t, pool, companyID, sourceID, userID, tier2(), prestigeOpeningThreshold)
+	setJobPrestigeException(t, pool, fixture.JobID, true)
+
+	if _, _, err := testEvaluator(pool).Run(context.Background(), userID, testWeightVersion, false); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var trig string
+	err := pool.QueryRow(context.Background(),
+		`select trigger from notification where job_group_id = $1::uuid`, fixture.JobGroupID).Scan(&trig)
+	if err != nil {
+		t.Fatalf("query trigger: %v", err)
+	}
+	if trig != "prestige_opening" {
+		t.Errorf("trigger = %q, want prestige_opening", trig)
+	}
+}
+
+// TestRun_PrestigeOpeningRequiresException confirms the same job with
+// prestige_exception left false (the default every real posting has
+// until apps/collector/internal/prestige classifies it) does not fire.
+func TestRun_PrestigeOpeningRequiresException(t *testing.T) {
+	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
+	userID := testUser(t, pool)
+	companyID := insertTestCompany(t, pool)
+	sourceID := insertTestSource(t, pool, companyID)
+
+	fixture := insertTestJobFixture(t, pool, companyID, sourceID, userID, tier2(), prestigeOpeningThreshold)
+
+	if _, _, err := testEvaluator(pool).Run(context.Background(), userID, testWeightVersion, false); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	if countNotifications(t, pool, fixture.JobGroupID) != 0 {
+		t.Error("prestige_exception = false at prestige_opening's threshold should not fire it")
+	}
+}
+
 // TestRun_FiresNewgradMatch also checks the urgency written is 'batched',
 // not 'instant' — docs/11 section 2's table gives newgrad_match BATCHED
 // urgency, and apps/notifier/internal/deliver's sendBatch is what actually
@@ -602,6 +733,30 @@ func setJobSeniority(t *testing.T, pool *pgxpool.Pool, jobID pgtype.UUID, senior
 	if err != nil {
 		t.Fatalf("set job seniority: %v", err)
 	}
+}
+
+func setJobPrestigeException(t *testing.T, pool *pgxpool.Pool, jobID pgtype.UUID, value bool) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`update job set prestige_exception = $1::boolean where id = $2::uuid`, value, jobID)
+	if err != nil {
+		t.Fatalf("set job prestige_exception: %v", err)
+	}
+}
+
+// insertTestWatchlistEntry mirrors insertTestCompany/insertTestSource's own
+// insert-and-schedule-cleanup shape.
+func insertTestWatchlistEntry(t *testing.T, pool *pgxpool.Pool, userID, companyID pgtype.UUID) {
+	t.Helper()
+	_, err := pool.Exec(context.Background(),
+		`insert into watchlist (user_id, company_id) values ($1::uuid, $2::uuid)`, userID, companyID)
+	if err != nil {
+		t.Fatalf("insert test watchlist entry: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(),
+			`delete from watchlist where user_id = $1::uuid and company_id = $2::uuid`, userID, companyID)
+	})
 }
 
 // TestRun_SuppressNotifications is docs/17's backfill/rescore suppression

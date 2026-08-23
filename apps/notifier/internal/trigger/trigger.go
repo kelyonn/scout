@@ -1,21 +1,28 @@
 // Package trigger implements docs/11-notifications.md section 2's trigger
-// evaluation for five of the seven per-job triggers: bengaluru_match,
-// high_score, remote_high_quality, newgrad_match (all in Evaluator), and
-// deadline_approaching (DeadlineSweeper, in deadline.go — a data source
-// and evaluation shape different enough from the other four that it isn't
-// a fifth SelectUnnotifiedJobGroups case; see that type's own doc
-// comment). deadline_approaching is actually two trigger values,
+// evaluation for six of the seven per-job triggers: bengaluru_match,
+// high_score, remote_high_quality, watchlist_hiring, prestige_opening,
+// newgrad_match (all in Evaluator), and deadline_approaching
+// (DeadlineSweeper, in deadline.go — a data source and evaluation shape
+// different enough from the other five that it isn't a sixth
+// SelectUnnotifiedJobGroups case; see that type's own doc comment).
+// deadline_approaching is actually two trigger values,
 // deadline_t72h/deadline_t24h — docs/11 wants it to fire twice per job
 // (T-72h and T-24h) and notification_dedup_idx allows exactly one
 // notification per (job_group, trigger) ever, so a single trigger value
 // can't express both firings without weakening that guarantee; see
-// infra/migrations/000016's own comment. The remaining two
-// (watchlist_hiring, prestige_opening) need data this pass doesn't have —
-// a user-managed watchlist and a curated prestige-company registry,
-// genuinely new features rather than gaps in existing data. `digest` is
-// not evaluated as a per-job trigger at all — see
-// apps/notifier/internal/digest, which runs once daily rather than per
-// scored job.
+// infra/migrations/000016's own comment. `digest` is not evaluated as a
+// per-job trigger at all — see apps/notifier/internal/digest, which runs
+// once daily rather than per scored job.
+//
+// watchlist_hiring reads packages/db/queries/notification.sql's
+// is_watchlisted column (a LEFT JOIN against infra/migrations/
+// 000018_watchlist.up.sql's table, not a second query per row).
+// prestige_opening reads job.prestige_exception, set at classification
+// time (apps/collector/internal/scheduler.buildNormalizedJob) against
+// packages/taxonomy/prestige.yaml's curated list. Both columns default to
+// false/empty until a user populates a watchlist or a job matches the
+// curated list, so both cases are live code from day one, just dormant
+// until there is data for them to match.
 package trigger
 
 import (
@@ -43,6 +50,8 @@ const (
 	bengaluruMatchThreshold    int16 = 78
 	highScoreThreshold         int16 = 88
 	remoteHighQualityThreshold int16 = 82
+	watchlistHiringThreshold   int16 = 60
+	prestigeOpeningThreshold   int16 = 70
 	newgradMatchThreshold      int16 = 80
 	bengaluruTier1                   = 1
 	remoteTier3                      = 3
@@ -136,8 +145,14 @@ func evaluateTrigger(row db.SelectUnnotifiedJobGroupsRow) (name string, ok bool)
 		return "high_score", true
 	case isRemoteEligible && row.Priority >= remoteHighQualityThreshold:
 		return "remote_high_quality", true
-	// watchlist_hiring, prestige_opening: no watchlist/prestige registry
-	// exists yet — see package comment.
+	// docs/11 section 2: "The only filter is role relevance" — no
+	// additional quality bar beyond the threshold itself, since
+	// role/paid/seniority/excluded-company relevance is already the gate
+	// SelectUnnotifiedJobGroups applies before a row ever reaches here.
+	case row.IsWatchlisted && row.Priority >= watchlistHiringThreshold:
+		return "watchlist_hiring", true
+	case row.IsPrestige && row.Priority >= prestigeOpeningThreshold:
+		return "prestige_opening", true
 	case isNewGrad && row.Priority >= newgradMatchThreshold:
 		return "newgrad_match", true
 	default:
