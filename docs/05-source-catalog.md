@@ -565,7 +565,13 @@ The process, which should stay this cheap:
    `adapter_config` handles per-source variation.
 4. **Register** with a conservative rate limit and `status = 'pending_review'`.
 5. **Shadow run for 48 hours** — collect but do not notify. Verify parse
-   correctness against manual inspection.
+   correctness against manual inspection. The 48 hours is counted from the
+   source's first actual poll attempt (`source.first_polled_at`), not from
+   registration (`created_at`) — under [ADR-018](adr/ADR-018-laptop-only-hosting.md)'s
+   on-demand hosting, a source can sit registered for days before the
+   collector is ever run against it, so those aren't the same 48 hours. A
+   source with no poll attempts yet is not due for review no matter how old
+   its row is.
 6. **Promote** to `active` with a tier assigned by observed yield.
 
 Steps 1–4 for a company already on a known ATS take about 30 seconds and are

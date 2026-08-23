@@ -105,6 +105,13 @@ set
     next_poll_at = sqlc.arg(next_poll_at)::timestamptz,
     current_interval_s = sqlc.arg(current_interval_s)::int,
     last_polled_at = now(),
+    -- Set once, on this source's first-ever poll attempt (success or
+    -- failure), never again — see infra/migrations/000019's own comment for
+    -- why this exists: SelectShadowSourcesDueForReview anchors the 48h
+    -- shadow window here, not on created_at, so a source seeded long before
+    -- the collector was ever run against it (ADR-018's on-demand model)
+    -- gets a real 48h window starting from when it was actually attempted.
+    first_polled_at = coalesce(first_polled_at, now()),
     last_etag = sqlc.narg(last_etag)::text,
     last_modified = sqlc.narg(last_modified)::text,
     last_content_hash = sqlc.narg(last_content_hash)::bytea,
@@ -190,6 +197,14 @@ where status = 'active'
 -- decideShadowPromotion function needs to decide, the same
 -- read-the-counters-then-write-the-verdict split source.sql already uses for
 -- UpdateSourceAfterPoll's interval math.
+--
+-- Anchored on first_polled_at, not created_at (infra/migrations/000019) — a
+-- source that was seeded but never actually polled has had zero real shadow
+-- run regardless of how long its row has existed, which is exactly the
+-- ADR-018 on-demand-hosting case: the collector can sit off for days between
+-- sessions, so "created 48h ago" and "attempted 48h ago" are different
+-- claims. first_polled_at is NULL excludes exactly the sources that have
+-- never been polled at all, rather than judging them sight unseen.
 select
     id,
     url,
@@ -202,8 +217,9 @@ from source
 where status = 'pending_review'
     and shadow_reviewed_at is NULL
     and legal_posture in ('permitted', 'api_only')
-    and created_at <= now() - interval '48 hours'
-order by created_at asc
+    and first_polled_at is not null
+    and first_polled_at <= now() - interval '48 hours'
+order by first_polled_at asc
 limit sqlc.arg(batch_limit)::int;
 
 -- name: PromoteShadowSource :exec
