@@ -79,7 +79,11 @@ export function JobCard({ job }: { job: JobFeedItem }) {
           <CompanyAvatar id={job.company.id} name={job.company.name} size={28} />
           <div className="min-w-0">
             <h3 className="text-[14px] font-semibold text-text-secondary truncate">{job.title}</h3>
-            <p className="text-caption text-text-muted mt-0.5">
+            {/* suppressHydrationWarning: posted is Date.now()-relative, so
+                the server-rendered string and the client's own recompute a
+                moment later can legitimately differ (e.g. straddling a
+                minute boundary) without either one being wrong. */}
+            <p className="text-caption text-text-muted mt-0.5" suppressHydrationWarning>
               {job.company.name} · applied {posted ?? "recently"}
             </p>
           </div>
@@ -138,7 +142,9 @@ export function JobCard({ job }: { job: JobFeedItem }) {
       )}
 
       <div className="flex items-center justify-between mt-5">
-        <span className="text-caption text-text-muted">
+        {/* suppressHydrationWarning: posted is Date.now()-relative — see the
+            other timeAgo() call site's own comment above. */}
+        <span className="text-caption text-text-muted" suppressHydrationWarning>
           {[comp, posted].filter(Boolean).join(" · ")}
         </span>
         <StateControls groupId={job.job_group_id} state={job.state} applyUrl={job.apply_url} size="sm" />
