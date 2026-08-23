@@ -10,6 +10,8 @@ import (
 	"testing"
 
 	"github.com/kelyon/scout/apps/api/internal/auth"
+	"github.com/kelyon/scout/apps/api/internal/companies"
+	"github.com/kelyon/scout/apps/api/internal/googlecalendar"
 	"github.com/kelyon/scout/apps/api/internal/jobs"
 	"github.com/kelyon/scout/apps/api/internal/resume"
 	"github.com/kelyon/scout/apps/api/internal/search"
@@ -40,12 +42,20 @@ func testStreamHandler() *stream.Handler {
 	return stream.New(stream.NewBroker())
 }
 
+func testCompaniesHandler() *companies.Handler {
+	return companies.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func testGoogleCalendarHandler() *googlecalendar.Handler {
+	return googlecalendar.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)), googlecalendar.Config{})
+}
+
 func TestRoutes(t *testing.T) {
 	a, err := auth.New(testToken, true)
 	if err != nil {
 		t.Fatalf("auth.New: %v", err)
 	}
-	h := routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler())
+	h := routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler())
 
 	tests := []struct {
 		name       string
@@ -117,7 +127,7 @@ func TestHealthDoesNotLeakTheToken(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler()).
+	routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler()).
 		ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil))
 
 	if strings.Contains(w.Body.String(), testToken) {
@@ -130,7 +140,7 @@ func TestMetricsIsReachableWithoutACredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.New: %v", err)
 	}
-	h := routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler())
+	h := routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler())
 
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))
