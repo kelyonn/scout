@@ -277,7 +277,11 @@ export default function HomePage() {
           <h1 className="text-title text-text-primary">{greeting()}</h1>
           <p className="text-caption text-text-muted mt-1.5">Where things stand right now.</p>
         </div>
-        <span className="text-caption text-text-faint tabular-nums">
+        {/* suppressHydrationWarning: this renders the current instant, so
+            the server's render and the client's hydration a moment later
+            legitimately show different text — same pattern React's own
+            docs use a live clock to illustrate. */}
+        <span className="text-caption text-text-faint tabular-nums" suppressHydrationWarning>
           {new Date().toLocaleString("en-IN", {
             timeZone: "Asia/Kolkata",
             weekday: "short",
