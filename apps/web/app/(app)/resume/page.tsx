@@ -3,7 +3,6 @@
 import { useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchResumeStatus, uploadResume } from "@/lib/api";
-import { Shell } from "@/components/Shell";
 
 export default function ResumePage() {
   const queryClient = useQueryClient();
@@ -29,8 +28,7 @@ export default function ResumePage() {
   }
 
   return (
-    <Shell>
-      <div className="max-w-2xl mx-auto px-6 py-8">
+    <div className="max-w-2xl mx-auto px-10 py-10">
         <h1 className="text-title text-text-primary mb-1">Resume</h1>
         <p className="text-caption text-text-muted mb-6">
           Drives resume_match — the semantic and keyword terms in your priority
@@ -133,8 +131,7 @@ export default function ResumePage() {
             </div>
           )}
         </div>
-      </div>
-    </Shell>
+    </div>
   );
 }
 

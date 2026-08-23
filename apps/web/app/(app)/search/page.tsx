@@ -4,7 +4,6 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { searchJobs } from "@/lib/api";
 import { JobCard } from "@/components/JobCard";
-import { Shell } from "@/components/Shell";
 
 export default function SearchPage() {
   const [input, setInput] = useState("");
@@ -19,8 +18,7 @@ export default function SearchPage() {
   const results = data?.data ?? [];
 
   return (
-    <Shell>
-      <div className="max-w-3xl mx-auto px-6 py-8">
+    <div className="max-w-4xl mx-auto px-10 py-10">
         <h1 className="text-title text-text-primary mb-4">Search</h1>
 
         <form
@@ -72,7 +70,6 @@ export default function SearchPage() {
             </div>
           </>
         )}
-      </div>
-    </Shell>
+    </div>
   );
 }

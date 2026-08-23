@@ -4,7 +4,6 @@ import { use } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { fetchJobDetail } from "@/lib/api";
-import { Shell } from "@/components/Shell";
 import { ScoreBadge } from "@/components/ScoreBadge";
 import { ScoreRow } from "@/components/ScoreRow";
 import { DescriptionHtml } from "@/components/DescriptionHtml";
@@ -30,8 +29,7 @@ export default function JobDetailPage({
   });
 
   return (
-    <Shell>
-      <div className="max-w-5xl mx-auto px-6 py-8">
+    <div className="max-w-5xl mx-auto px-10 py-10">
         <Link
           href="/opportunities"
           className="text-label text-text-muted hover:text-text-secondary transition-colors duration-100"
@@ -159,8 +157,7 @@ export default function JobDetailPage({
             </div>
           </div>
         )}
-      </div>
-    </Shell>
+    </div>
   );
 }
 

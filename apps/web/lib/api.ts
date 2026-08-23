@@ -1,12 +1,18 @@
 import type {
   ApplicationState,
   ApplicationsResponse,
+  CompaniesResponse,
+  CompanyDetail,
+  GoogleCalendarEventsResponse,
+  GoogleCalendarStatus,
+  GoogleCalendarSyncResult,
   JobDetail,
   JobFeedResponse,
   ResumeStatus,
   ResumeUploadResponse,
   SearchResponse,
   StateResponse,
+  WatchlistResponse,
 } from "./types";
 
 async function getJSON<T>(url: string): Promise<T> {
@@ -22,6 +28,7 @@ export function fetchJobs(params: {
   minPriority?: number;
   seniority?: string[];
   roleFamily?: string[];
+  companyId?: string;
   cursor?: string;
   limit?: number;
 }): Promise<JobFeedResponse> {
@@ -29,9 +36,70 @@ export function fetchJobs(params: {
   if (params.minPriority !== undefined) qs.set("min_priority", String(params.minPriority));
   if (params.limit !== undefined) qs.set("limit", String(params.limit));
   if (params.cursor) qs.set("cursor", params.cursor);
+  if (params.companyId) qs.set("company_id", params.companyId);
   for (const s of params.seniority ?? []) qs.append("seniority", s);
   for (const r of params.roleFamily ?? []) qs.append("role_family", r);
   return getJSON<JobFeedResponse>(`/api/jobs?${qs.toString()}`);
+}
+
+export function fetchCompanies(query?: string): Promise<CompaniesResponse> {
+  const qs = new URLSearchParams();
+  if (query) qs.set("q", query);
+  const suffix = qs.toString() ? `?${qs.toString()}` : "";
+  return getJSON<CompaniesResponse>(`/api/companies${suffix}`);
+}
+
+export function fetchCompanyDetail(id: string): Promise<CompanyDetail> {
+  return getJSON<CompanyDetail>(`/api/companies/${id}`);
+}
+
+export function fetchWatchlist(): Promise<WatchlistResponse> {
+  return getJSON<WatchlistResponse>("/api/watchlist");
+}
+
+export async function addToWatchlist(companyId: string, notifyAnyRole = true): Promise<void> {
+  const res = await fetch("/api/watchlist", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ company_id: companyId, notify_any_role: notifyAnyRole }),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status}: ${body}`);
+  }
+}
+
+export async function removeFromWatchlist(companyId: string): Promise<void> {
+  const res = await fetch(`/api/watchlist/${companyId}`, { method: "DELETE" });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status}: ${body}`);
+  }
+}
+
+export function fetchGoogleCalendarStatus(): Promise<GoogleCalendarStatus> {
+  return getJSON<GoogleCalendarStatus>("/api/integrations/google/status");
+}
+
+export async function syncGoogleCalendar(): Promise<GoogleCalendarSyncResult> {
+  const res = await fetch("/api/integrations/google/sync", { method: "POST" });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status}: ${body}`);
+  }
+  return res.json() as Promise<GoogleCalendarSyncResult>;
+}
+
+export async function disconnectGoogleCalendar(): Promise<void> {
+  const res = await fetch("/api/integrations/google/disconnect", { method: "POST" });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status}: ${body}`);
+  }
+}
+
+export function fetchGoogleCalendarEvents(): Promise<GoogleCalendarEventsResponse> {
+  return getJSON<GoogleCalendarEventsResponse>("/api/integrations/google/events");
 }
 
 export function fetchJobDetail(groupId: string): Promise<JobDetail> {

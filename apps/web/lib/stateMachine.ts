@@ -10,7 +10,7 @@ export const VALID_TRANSITIONS: Record<ApplicationState, ApplicationState[]> = {
   viewed: ["saved", "dismissed"],
   saved: ["applied", "dismissed", "withdrawn"],
   dismissed: ["saved"],
-  applied: ["screening", "rejected", "withdrawn"],
+  applied: ["saved", "screening", "rejected", "withdrawn"],
   screening: ["interviewing", "rejected", "withdrawn"],
   interviewing: ["offer", "rejected", "withdrawn"],
   offer: ["accepted", "rejected", "withdrawn"],

@@ -1,50 +1,117 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { NavIcon } from "./NavIcon";
+import { COLLAPSE_COOKIE } from "@/lib/sidebar";
 
 // Sidebar matching docs/12-frontend-ux.md section 3's information
-// architecture — but only the sections with a real, working backend
-// (Opportunities, Pipeline, Search, Resume) are enabled. Calendar,
-// Companies, and Insights need state this schema doesn't track yet (a
-// company registry, interview scheduling, analytics aggregation) —
-// shown, disabled, rather than either hidden (which would misrepresent
-// the intended product shape) or faked with dead links.
+// architecture. Every entry is real now — Companies turned out to need
+// no schema work at all: the company table (infra/migrations/
+// 000003_company.up.sql) already had every enrichment field, just no
+// list endpoint in front of it (apps/api/internal/companies).
 const NAV_SECTIONS: {
   label: string;
+  icon: string;
   href?: string;
   disabled?: boolean;
 }[] = [
-  { label: "Opportunities", href: "/opportunities" },
-  { label: "Pipeline", href: "/pipeline" },
-  { label: "Search", href: "/search" },
-  { label: "Calendar", disabled: true },
-  { label: "Companies", disabled: true },
-  { label: "Insights", disabled: true },
-  { label: "Resume", href: "/resume" },
-  { label: "Settings", disabled: true },
+  { label: "Home", icon: "home", href: "/" },
+  { label: "Opportunities", icon: "opportunities", href: "/opportunities" },
+  { label: "Saved", icon: "saved", href: "/saved" },
+  { label: "Applied", icon: "applied", href: "/applied" },
+  { label: "Pipeline", icon: "pipeline", href: "/pipeline" },
+  { label: "Search", icon: "search", href: "/search" },
+  { label: "Calendar", icon: "calendar", href: "/calendar" },
+  { label: "Insights", icon: "insights", href: "/insights" },
+  { label: "Companies", icon: "companies", href: "/companies" },
+  { label: "Resume", icon: "resume", href: "/resume" },
+  { label: "Settings", icon: "settings", href: "/settings" },
 ];
 
-export function Shell({ children }: { children: React.ReactNode }) {
+// initialCollapsed comes from the (app) layout, a Server Component that
+// reads COLLAPSE_COOKIE via next/headers' cookies() — so the very first
+// HTML the server sends already has the right width, and there's nothing
+// to reconcile after hydration. The previous version read localStorage
+// via useSyncExternalStore, which is hydration-safe (no mismatch warning)
+// but still has no value to read until the client mounts, so a hard
+// reload painted expanded for one frame and then snapped to the saved
+// collapsed state — exactly the flash being fixed here.
+export function Shell({
+  children,
+  initialCollapsed,
+}: {
+  children: React.ReactNode;
+  initialCollapsed: boolean;
+}) {
   const pathname = usePathname();
+  const [collapsed, setCollapsed] = useState(initialCollapsed);
+
+  function toggle() {
+    const next = !collapsed;
+    setCollapsed(next);
+    // Not httpOnly — this is a UI preference, not a credential, and it
+    // needs to be writable from client JS. One year, same as the actual
+    // session cookie's lifetime reasoning (lib/auth.ts).
+    document.cookie = `${COLLAPSE_COOKIE}=${next ? "1" : "0"}; path=/; max-age=${365 * 24 * 60 * 60}; samesite=lax`;
+  }
 
   return (
     <div className="flex min-h-screen">
-      <aside className="w-56 shrink-0 border-r border-border-subtle bg-bg-surface flex flex-col">
-        <div className="px-4 py-5">
-          <span className="text-heading text-text-primary">Scout</span>
+      <aside
+        className={`shrink-0 border-r border-border-subtle bg-bg-base flex flex-col transition-[width] duration-150 ease-[var(--ease-quick)] overflow-hidden ${
+          collapsed ? "w-16" : "w-64"
+        }`}
+      >
+        <div
+          className={`flex items-center pt-8 pb-6 ${
+            collapsed ? "justify-center px-0" : "justify-between px-6"
+          }`}
+        >
+          {!collapsed && (
+            <span className="text-[18px] font-semibold tracking-[-0.01em] text-text-primary whitespace-nowrap">
+              Scout
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={toggle}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="shrink-0 w-7 h-7 flex items-center justify-center rounded-md text-text-faint transition-colors duration-100 hover:text-text-primary hover:bg-bg-elevated"
+          >
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 16 16"
+              fill="none"
+              className={`transition-transform duration-150 ${collapsed ? "rotate-180" : ""}`}
+            >
+              <path
+                d="M10.5 3L5.5 8L10.5 13"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
         </div>
-        <nav className="flex-1 px-2 space-y-0.5">
+        <nav className="flex-1 px-3 py-1 flex flex-col gap-1 overflow-y-auto">
           {NAV_SECTIONS.map((item) => {
-            const active = item.href && pathname?.startsWith(item.href);
+            const active = item.href && (item.href === "/" ? pathname === "/" : pathname?.startsWith(item.href));
             if (item.disabled) {
               return (
                 <div
                   key={item.label}
-                  className="text-label px-3 py-2 rounded-[var(--radius-card)] text-text-muted cursor-not-allowed select-none"
-                  title="Not built yet — needs backend that doesn't exist"
+                  className={`text-label py-2.5 rounded-lg flex items-center text-text-muted cursor-not-allowed select-none ${
+                    collapsed ? "justify-center px-0" : "gap-3 px-3.5"
+                  }`}
+                  title={`${item.label} — not built yet, needs a company registry that doesn't exist`}
                 >
-                  {item.label}
+                  <NavIcon name={item.icon} className="shrink-0 text-text-faint" />
+                  {!collapsed && item.label}
                 </div>
               );
             }
@@ -52,13 +119,17 @@ export function Shell({ children }: { children: React.ReactNode }) {
               <Link
                 key={item.label}
                 href={item.href!}
-                className={`block text-label px-3 py-2 rounded-[var(--radius-card)] transition-colors duration-100 ${
+                title={collapsed ? item.label : undefined}
+                className={`text-label py-2.5 rounded-lg flex items-center transition-colors duration-100 ${
+                  collapsed ? "justify-center px-0" : "gap-3 px-3.5"
+                } ${
                   active
-                    ? "bg-accent-subtle text-accent-primary"
+                    ? "bg-bg-elevated text-text-primary"
                     : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"
                 }`}
               >
-                {item.label}
+                <NavIcon name={item.icon} className={`shrink-0 ${active ? "text-accent-primary" : ""}`} />
+                {!collapsed && item.label}
               </Link>
             );
           })}

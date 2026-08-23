@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
 /*
- * Design tokens — docs/12-frontend-ux.md section 2. Dark mode is the
- * default (the user works evenings); light mode is the explicit
- * opt-out via [data-theme="light"] on <html>.
+ * Design tokens — docs/12-frontend-ux.md section 2, updated for the
+ * 2026-08 Gruvbox retheme. Standard Gruvbox Dark (medium contrast)
+ * palette, replacing the cream/olive light theme.
  *
  * "The interface should be boring and the data should be interesting."
  * One accent color, a restrained neutral ramp, no gradients or
@@ -11,31 +11,34 @@
  */
 
 :root {
-  --bg-base: #0a0b0d;
-  --bg-surface: #121316;
-  --bg-elevated: #1a1c20;
-  --border-subtle: #24262b;
-  --border-strong: #34373d;
-  --text-muted: #6e7178;
-  --text-secondary: #9ca0a8;
-  --text-primary: #e8eaed;
+  --bg-base: #282828; /* bg0 */
+  --bg-surface: #3c3836; /* bg1 */
+  --bg-elevated: #504945; /* bg2 */
+  --border-subtle: #504945; /* bg2 */
+  --border-strong: #665c54; /* bg3 */
+  --text-muted: #a89984; /* fg4 */
+  --text-faint: #7c6f64; /* bg4 */
+  --text-secondary: #d5c4a1; /* fg2 */
+  --text-primary: #ebdbb2; /* fg1 */
 
-  --accent-primary: #4f7cff;
-  --accent-hover: #6b90ff;
-  --accent-subtle: rgba(79, 124, 255, 0.08);
+  --accent-primary: #fe8019; /* bright orange */
+  --accent-hover: #d65d0e; /* neutral orange */
+  --accent-subtle: rgba(254, 128, 25, 0.14);
 
-  --success: #2fa96b;
-  --warning: #d99a2b;
-  --danger: #e5484d;
-  --info: #4f7cff;
+  --success: #b8bb26; /* bright green */
+  --warning: #fabd2f; /* bright yellow */
+  --danger: #fb4934; /* bright red */
+  --info: #83a598; /* bright blue */
 
   /* Score band colors — docs/12's one deliberate exception to the
-     single-accent rule: score is the primary scanning dimension. */
-  --score-exceptional: #2fa96b; /* 90-100 */
-  --score-strong: #4f7cff; /* 80-89 */
-  --score-good: #7a8390; /* 70-79 */
-  --score-moderate: #6e7178; /* 60-69 */
-  --score-weak: #4a4d53; /* <60 */
+     single-accent rule: score is the primary scanning dimension.
+     Gruvbox's own bright accents read as a green-to-red scan, rather
+     than a single desaturating hue. */
+  --score-exceptional: #b8bb26; /* 90-100 — bright green */
+  --score-strong: #8ec07c; /* 80-89 — bright aqua */
+  --score-good: #fabd2f; /* 70-79 — bright yellow */
+  --score-moderate: #fe8019; /* 60-69 — bright orange */
+  --score-weak: #fb4934; /* <60 — bright red */
 
   /* Spacing — 4px base scale */
   --space-1: 4px;
@@ -49,25 +52,14 @@
   --space-24: 96px;
   --space-32: 128px;
 
-  --radius-input: 4px;
-  --radius-card: 6px;
+  --radius-input: 6px;
+  --radius-card: 8px;
   --radius-modal: 8px;
   --radius-pill: 999px;
 
   --ease-instant: cubic-bezier(0.2, 0, 0, 1);
   --ease-quick: cubic-bezier(0.2, 0, 0, 1);
   --ease-smooth: cubic-bezier(0.4, 0, 0.2, 1);
-}
-
-:root[data-theme="light"] {
-  --bg-base: #ffffff;
-  --bg-surface: #f7f8f9;
-  --bg-elevated: #ffffff;
-  --border-subtle: #e8eaed;
-  --border-strong: #d2d5da;
-  --text-muted: #6e7178;
-  --text-secondary: #4a4d53;
-  --text-primary: #16181c;
 }
 
 @theme inline {
@@ -77,6 +69,7 @@
   --color-border-subtle: var(--border-subtle);
   --color-border-strong: var(--border-strong);
   --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
   --color-text-secondary: var(--text-secondary);
   --color-text-primary: var(--text-primary);
 
@@ -112,10 +105,6 @@ html {
   color-scheme: dark;
 }
 
-:root[data-theme="light"] {
-  color-scheme: light;
-}
-
 body {
   background: var(--bg-base);
   color: var(--text-primary);
@@ -123,6 +112,28 @@ body {
   font-size: 14px;
   line-height: 20px;
   -webkit-font-smoothing: antialiased;
+  position: relative;
+}
+
+/* Grain — a feTurbulence noise tile laid flat over the whole app at low
+   opacity with normal (not blended) compositing. An earlier version used
+   mix-blend-mode: overlay, which on this theme's near-black bg-base
+   crushes toward multiply and makes the noise nearly invisible — plain
+   opacity over the content is the simple, reliably-visible version.
+   Fixed + pointer-events: none so it never intercepts clicks or scroll. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0.18;
+  background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iMTYwIj48ZmlsdGVyIGlkPSJuIj48ZmVUdXJidWxlbmNlIHR5cGU9ImZyYWN0YWxOb2lzZSIgYmFzZUZyZXF1ZW5jeT0iMC43IiBudW1PY3RhdmVzPSIzIiBzdGl0Y2hUaWxlcz0ic3RpdGNoIi8+PGZlQ29sb3JNYXRyaXggdHlwZT0ic2F0dXJhdGUiIHZhbHVlcz0iMCIvPjwvZmlsdGVyPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbHRlcj0idXJsKCNuKSIvPjwvc3ZnPg==");
+  background-repeat: repeat;
+}
+
+::selection {
+  background: rgba(254, 128, 25, 0.28);
 }
 
 @media (prefers-reduced-motion: reduce) {

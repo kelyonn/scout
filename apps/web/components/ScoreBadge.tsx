@@ -10,8 +10,8 @@ function bandColor(score: number): string {
 }
 
 const SIZE_CLASSES = {
-  md: "w-11 h-11 text-heading",
-  sm: "w-9 h-9 text-label",
+  md: "text-xl",
+  sm: "text-base",
 } as const;
 
 export function ScoreBadge({
@@ -21,15 +21,10 @@ export function ScoreBadge({
   score: number;
   size?: keyof typeof SIZE_CLASSES;
 }) {
-  const color = bandColor(score);
   return (
     <div
-      className={`flex items-center justify-center rounded-[var(--radius-card)] font-mono tabular-nums shrink-0 ${SIZE_CLASSES[size]}`}
-      style={{
-        color,
-        background: `color-mix(in srgb, ${color} 14%, transparent)`,
-        border: `1px solid color-mix(in srgb, ${color} 30%, transparent)`,
-      }}
+      className={`font-mono font-semibold tabular-nums leading-none shrink-0 ${SIZE_CLASSES[size]}`}
+      style={{ color: bandColor(score) }}
     >
       {score}
     </div>

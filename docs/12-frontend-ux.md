@@ -30,9 +30,9 @@ premium.
 **How we avoid looking like default shadcn.** shadcn components are copied into
 the repo, not imported, so we own them. Before any feature work, the token layer
 is replaced wholesale: our own type scale, our own spacing rhythm (4px base, not
-the default), tighter radii (6px, not 8px), a custom neutral ramp, and our own
-motion curves. The components keep their accessible behavior and lose their
-recognizable appearance.
+the default), our own radii, a custom neutral ramp, and our own motion curves.
+The components keep their accessible behavior and lose their recognizable
+appearance.
 
 ---
 
@@ -40,42 +40,50 @@ recognizable appearance.
 
 ### Color
 
-A single accent on a carefully built neutral ramp. Dark mode is the default,
-because the user works evenings.
+A single accent on a carefully built neutral ramp. As of the 2026-08 Gruvbox
+retheme, the shell runs standard Gruvbox Dark (medium contrast) rather than
+the cream/olive light palette that preceded it — dark-default again, this
+time for the theme's own identity rather than the original "user works
+evenings" reasoning. Reopen if a light variant turns out to matter more than
+staying faithful to the reference palette.
 
 ```
-Neutral ramp (dark)                 Neutral ramp (light)
- bg-base        #0A0B0D              #FFFFFF
- bg-surface     #121316              #F7F8F9
- bg-elevated    #1A1C20              #FFFFFF
- border-subtle  #24262B              #E8EAED
- border-strong  #34373D              #D2D5DA
- text-muted     #6E7178              #6E7178
- text-secondary #9CA0A8              #4A4D53
- text-primary   #E8EAED              #16181C
+Neutral ramp
+ bg-base        #282828   page background, sidebar   (gruvbox bg0)
+ bg-surface     #3C3836   cards                       (bg1)
+ bg-elevated    #504945   chips/pills nested in a card (bg2)
+ border-subtle  #504945                                (bg2)
+ border-strong  #665C54                                (bg3)
+ text-muted     #A89984                                (fg4)
+ text-faint     #7C6F64   nav index numbers, stage-duration micro-labels (bg4)
+ text-secondary #D5C4A1                                (fg2)
+ text-primary   #EBDBB2                                (fg1)
 
 Accent (single, used sparingly)
- accent-primary #4F7CFF              interactive, focus, primary action
- accent-hover   #6B90FF
- accent-subtle  #4F7CFF14            backgrounds at 8% opacity
+ accent-primary #FE8019   bright orange — interactive, focus, primary action
+ accent-hover   #D65D0E   neutral orange
+ accent-subtle  #FE801924            rgba(254,128,25,0.14)
 
 Semantic
- success #2FA96B    warning #D99A2B    danger #E5484D    info #4F7CFF
+ success #B8BB26    warning #FABD2F    danger #FB4934    info #83A598
 ```
 
 **Score colors are a deliberate exception** — the one place a full ramp is
-justified, because score is the primary scanning dimension:
+justified, because score is the primary scanning dimension. Gruvbox's own
+bright accents give a natural green-to-red scan instead of the previous
+theme's single desaturating hue:
 
 ```
-90-100  #2FA96B  exceptional
-80-89   #4F7CFF  strong
-70-79   #7A8390  good
-60-69   #6E7178  moderate
-< 60    #4A4D53  weak
+90-100  #B8BB26  exceptional  bright green
+80-89   #8EC07C  strong       bright aqua
+70-79   #FABD2F  good         bright yellow
+60-69   #FE8019  moderate     bright orange
+< 60    #FB4934  weak         bright red
 ```
 
-Every foreground/background pair is verified at 4.5:1 minimum in CI by an
-automated contrast check over the token file — not spot-checked by eye.
+Every foreground/background pair should be verified at 4.5:1 minimum before
+shipping — there is no automated contrast check wired into CI yet, so this is
+presently a spot-check discipline, not an enforced gate.
 
 ### Type
 
@@ -99,8 +107,8 @@ faster.
 
 ### Spacing and motion
 
-4px base scale: `1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64`. Radii: 4 (inputs),
-6 (cards), 8 (modals), 999 (pills).
+4px base scale: `1, 2, 3, 4, 6, 8, 12, 16, 24, 32, 48, 64`. Radii: 6 (inputs),
+8 (cards), 8 (modals), 999 (pills).
 
 ```
 instant   100ms  cubic-bezier(0.2, 0, 0, 1)   hover, focus
@@ -161,36 +169,49 @@ Pipeline, Calendar, Search). Command palette on `⌘K` reaches everything.
 ### 4.1 Home
 
 The screen the user opens most, so it answers three questions immediately without
-scrolling: what is new, what needs action today, and is the system working.
+scrolling: what is new, what needs action today, and is the system working. A
+second column carries the at-a-glance calendar and a jump-list to every other
+screen, so the dashboard genuinely stands on its own — the user opens Home and
+either the next action is right there, or the link to where it lives is.
 
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│  Good evening                              Thu 6 Aug · 21:14 IST │
-│                                                                  │
-│  ┌────────┐ ┌────────┐ ┌────────┐ ┌────────┐                     │
-│  │   7    │ │   2    │ │   3    │ │  91%   │                     │
-│  │  new   │ │closing │ │interv- │ │ system │                     │
-│  │ today  │ │ ≤3days │ │ iews   │ │ health │                     │
-│  └────────┘ └────────┘ └────────┘ └────────┘                     │
-│                                                                  │
-│  ── Needs action ────────────────────────────────────────────    │
-│  ⏰  Stripe · SWE Intern · closes in 2 days      [Apply now]     │
-│  📅  Razorpay · Technical round · tomorrow 15:00 [Prepare]       │
-│                                                                  │
-│  ── New since you last looked ───────────────────────────────    │
-│  [ job card ]                                                    │
-│  [ job card ]                                                    │
-│  [ job card ]                                    [ See all 7 ]   │
-│                                                                  │
-│  ── This week ───────────────────────────────────────────────    │
-│  47 discovered · 12 saved · 6 applied · 2 interviews             │
-│  ▁▂▅▃▇▄▆   discovery, last 7 days                                │
-└──────────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┬──────────────────┐
+│  Good evening                     Thu 6 Aug · 21:14 IST│                  │
+│                                                        │                  │
+│  ┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐┌──────┐       │                  │
+│  │  7   ││  2   ││  3   ││ 12   ││  6   ││  1   │       │                  │
+│  │ new  ││clos- ││inter-││saved ││appl- ││stale │       │                  │
+│  │      ││ing≤3d││views ││      ││ied   ││ 14d+ │       │                  │
+│  └──────┘└──────┘└──────┘└──────┘└──────┘└──────┘       │                  │
+│                                                        │  ── Calendar ──  │
+│  ── Needs action ─────────────────────────────────    │  S M T W T F S   │
+│  Stripe · SWE Intern · closes in 2 days                │  23 24 25 26 ·   │
+│  Razorpay · applied 21 days ago — follow up?           │  Stripe   2d     │
+│                                                        │  [Open calendar] │
+│  ── New since you last looked ────────────────────    │                  │
+│  [ job card ]                                          │  ── Jump to ──   │
+│  [ job card ]                             [See all 7]  │  Opportunities   │
+│                                                        │  Pipeline        │
+│  This week: 12 saved · 6 applied · 2 interviewing      │  Companies · …   │
+└────────────────────────────────────────────────────────┴──────────────────┘
 ```
+
+Every stat tile and calendar day is a link to the screen that owns that data —
+Home is a dashboard, not a dead end, so tapping "3 interviews" goes straight to
+Pipeline filtered there rather than making the user re-navigate.
 
 "Needs action" is above "new opportunities" deliberately. A deadline in 2 days on
 a job already saved matters more than a new posting, and putting new things first
-would train the user to chase novelty over follow-through.
+would train the user to chase novelty over follow-through. It merges two sources
+— upcoming deadlines and pipeline items stale 14+ days — into one urgency-sorted
+list rather than two separate sections, since both are "things to do," not
+"things to read."
+
+The calendar widget is a 7-day strip (today highlighted, a dot on any day with a
+tracked deadline) plus the next few items — the same deadline data Calendar's
+full agenda view shows, not a separate feed, so the two never disagree. If Google
+Calendar is connected (docs/02-architecture.md, `apps/api/internal/googlecalendar`)
+its next couple of events surface here too.
 
 ### 4.2 Job card
 
@@ -220,6 +241,14 @@ to run down the right edge of a list and find the 90s.
 **States:** default, hover (subtle lift, 1px border brighten), saved (accent left
 border), applied (muted with a check), dismissed (collapsed to one line, with
 undo), ghost (amber "may be evergreen" badge), new since last visit (accent dot).
+
+**Save and Apply are toggles, not one-way actions.** Once a card is saved, its
+`[ Save ]` button becomes `[ Unsave ]` in the same slot rather than sitting
+alongside a separate remove control — the pair reads as one on/off switch. The
+same pairing holds for `[ Applied ]` → `[ Un-apply ]` on an applied card.
+Unsave transitions to `dismissed` (the only state `saved` allows besides
+`applied`); un-apply transitions back to `saved` — both are ordinary state-machine
+hops (`apps/api/internal/jobs/state.go`), not a special "undo" endpoint.
 
 ### 4.3 Job detail
 
