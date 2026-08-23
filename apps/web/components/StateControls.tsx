@@ -93,21 +93,41 @@ export function StateControls({
 
   return (
     <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
-      {state !== "saved" && state !== "applied" && (
+      {/* Save / Unsave toggle. Same target state either way (a fresh
+          `saved` from new/viewed, or back to `dismissed` once already
+          saved — the one transition saved allows besides applying) — the
+          button just flips which half of the pair is visible so the two
+          read as one on/off control rather than two separate actions. */}
+      {state === "saved" ? (
         <button
           type="button"
           onClick={(e) => {
             e.preventDefault();
-            transitionTo("saved");
+            transitionTo("dismissed");
           }}
           disabled={busy}
-          className={`${text} ${pad} rounded-[var(--radius-input)] border border-border-subtle text-text-secondary transition-colors duration-100 hover:text-text-primary hover:border-border-strong disabled:opacity-50`}
+          title="Remove from Saved"
+          className={`${text} ${pad} rounded-[var(--radius-input)] border border-accent-primary/30 text-accent-primary bg-accent-subtle transition-colors duration-100 hover:bg-danger/10 hover:border-danger/30 hover:text-danger disabled:opacity-50`}
         >
-          Save
+          Unsave
         </button>
+      ) : (
+        state !== "applied" && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              transitionTo("saved");
+            }}
+            disabled={busy}
+            className={`${text} ${pad} rounded-[var(--radius-input)] border border-border-subtle text-text-secondary transition-colors duration-100 hover:text-text-primary hover:border-border-strong disabled:opacity-50`}
+          >
+            Save
+          </button>
+        )
       )}
 
-      {state !== "applied" && (
+      {state !== "applied" && state !== "saved" && (
         <button
           type="button"
           onClick={(e) => {
@@ -122,9 +142,21 @@ export function StateControls({
       )}
 
       {state === "applied" ? (
-        <span className={`${text} ${pad} rounded-[var(--radius-input)] text-success flex items-center gap-1`}>
-          ✓ Applied
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className={`${text} ${pad} rounded-[var(--radius-input)] text-success`}>Applied</span>
+          <button
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              transitionTo("saved");
+            }}
+            disabled={busy}
+            title="Didn't actually submit an application — move this back to Saved"
+            className={`${text} ${pad} rounded-[var(--radius-input)] border border-border-subtle text-text-muted transition-colors duration-100 hover:text-text-primary hover:border-border-strong disabled:opacity-50`}
+          >
+            Un-apply
+          </button>
+        </div>
       ) : showElsewherePrompt ? (
         // Plain <button>s, not <a href>, deliberately: this component
         // renders inside JobCard's own outer <Link>, and a nested <a>

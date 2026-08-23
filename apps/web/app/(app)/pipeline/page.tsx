@@ -3,7 +3,6 @@
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { fetchApplications } from "@/lib/api";
-import { Shell } from "@/components/Shell";
 import { StateMenu } from "@/components/StateMenu";
 import { PIPELINE_COLUMNS } from "@/lib/stateMachine";
 import type { ApplicationItem } from "@/lib/types";
@@ -30,23 +29,23 @@ function capitalize(s: string): string {
 function PipelineCard({ item }: { item: ApplicationItem }) {
   const nudge = staleNudge(item);
   return (
-    <div className="rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-3">
+    <div className="rounded-[8px] border border-border-subtle bg-bg-surface p-4">
       <div className="flex items-start justify-between gap-2">
         <Link
           href={`/opportunities/${item.job_group_id}`}
-          className="min-w-0 text-label text-text-primary hover:text-accent-primary transition-colors duration-100 truncate"
+          className="min-w-0 text-[13px] font-semibold text-text-primary hover:text-accent-primary transition-colors duration-100 truncate"
         >
           {item.title}
         </Link>
         <StateMenu groupId={item.job_group_id} state={item.state} />
       </div>
-      <p className="text-caption text-text-secondary mt-0.5 truncate">{item.company.name}</p>
-      <p className="text-micro text-text-muted mt-1.5">
+      <p className="text-caption text-text-muted mt-1 truncate">{item.company.name}</p>
+      <p className="text-[10px] uppercase tracking-[0.03em] text-text-faint mt-2">
         {daysSince(item.state_changed_at)}d in {item.state}
         {item.job_status !== "open" && <span> · listing {item.job_status}</span>}
       </p>
       {nudge && (
-        <p className="text-micro text-warning mt-1.5 rounded-[var(--radius-input)] bg-warning/10 border border-warning/30 px-1.5 py-1">
+        <p className="text-[11px] text-text-secondary mt-2 rounded-[5px] bg-bg-elevated border border-border-subtle px-2 py-[5px] normal-case tracking-normal">
           {nudge}
         </p>
       )}
@@ -63,8 +62,7 @@ export default function PipelinePage() {
   const items = data?.data ?? [];
 
   return (
-    <Shell>
-      <div className="px-6 py-8">
+    <div className="px-10 py-10">
         <div className="mb-6">
           <h1 className="text-title text-text-primary">Pipeline</h1>
           <p className="text-caption text-text-muted mt-1">
@@ -85,18 +83,18 @@ export default function PipelinePage() {
         )}
 
         {!isLoading && items.length > 0 && (
-          <div className="flex gap-4 overflow-x-auto pb-4">
+          <div className="flex gap-5 overflow-x-auto pb-4">
             {PIPELINE_COLUMNS.map((col) => {
               const colItems = items
                 .filter((it) => col.states.includes(it.state))
                 .sort((a, b) => new Date(b.state_changed_at).getTime() - new Date(a.state_changed_at).getTime());
               return (
-                <div key={col.label} className="w-72 shrink-0">
-                  <div className="flex items-center justify-between mb-2 px-0.5">
+                <div key={col.label} className="w-80 shrink-0">
+                  <div className="flex items-center justify-between mb-3 px-0.5">
                     <h2 className="text-label text-text-secondary">{col.label}</h2>
                     <span className="text-micro text-text-muted">{colItems.length}</span>
                   </div>
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {colItems.map((item) => (
                       <PipelineCard key={item.job_group_id} item={item} />
                     ))}
@@ -111,7 +109,6 @@ export default function PipelinePage() {
             })}
           </div>
         )}
-      </div>
-    </Shell>
+    </div>
   );
 }

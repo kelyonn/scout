@@ -193,6 +193,85 @@ export interface SearchResponse {
   mode_served: string;
 }
 
+// Mirrors apps/api/internal/companies/handler.go's companyListItem.
+export interface CompanyListItem {
+  id: string;
+  name: string;
+  logo_url?: string;
+  company_type: string;
+  size_bucket?: string;
+  stage?: string;
+  industries: string[];
+  quality_score?: number;
+  hq_city?: string;
+  hq_country?: string;
+  open_job_count: number;
+}
+
+export interface CompaniesResponse {
+  data: CompanyListItem[];
+}
+
+// Mirrors apps/api/internal/companies/handler.go's watchlistItem.
+export interface WatchlistItem {
+  company_id: string;
+  company_name: string;
+  logo_url?: string;
+  company_type: string;
+  notify_any_role: boolean;
+  added_at: string;
+  open_job_count: number;
+}
+
+export interface WatchlistResponse {
+  data: WatchlistItem[];
+}
+
+// Mirrors apps/api/internal/companies/handler.go's companyDetail.
+export interface CompanyDetail {
+  id: string;
+  name: string;
+  legal_name?: string;
+  description?: string;
+  logo_url?: string;
+  website_url?: string;
+  linkedin_url?: string;
+  github_org?: string;
+  company_type: string;
+  size_bucket?: string;
+  founded_year?: number;
+  stage?: string;
+  industries: string[];
+  tech_stack: string[];
+  hq_city?: string;
+  hq_country?: string;
+  quality_score?: number;
+  engineering_score?: number;
+  open_job_count: number;
+}
+
+// Mirrors apps/api/internal/googlecalendar/routes.go's Status/Events responses.
+export interface GoogleCalendarStatus {
+  enabled: boolean;
+  connected: boolean;
+  calendar_id?: string;
+  connected_at?: string;
+}
+
+export interface GoogleCalendarSyncResult {
+  pushed: number;
+  errors?: string[];
+}
+
+export interface GoogleCalendarEvent {
+  summary: string;
+  date: string;
+}
+
+export interface GoogleCalendarEventsResponse {
+  data: GoogleCalendarEvent[];
+}
+
 export interface ResumeStatus {
   has_resume: boolean;
   has_embedding: boolean;
