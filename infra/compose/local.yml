@@ -60,6 +60,17 @@ services:
       retries: 10
       start_period: 10s
     mem_limit: 1g
+    # CPU caps across every service in this file (2026-08-24): the daily
+    # live-run window used to be able to burst to however many cores
+    # Docker Desktop's own VM allocates, with nothing in this repo
+    # bounding it — real, if the user happened to be using the laptop for
+    # anything else while it ran. Values are per-service peak ceilings,
+    # not reservations (Docker's own CFS-quota `cpus:` semantics), sized
+    # so the whole live-run set (postgres+redis+collector+brain+notifier)
+    # caps at ~3.3 cores combined — noticeable but not fan-spinning on a
+    # modern multi-core Mac, and generous relative to what a
+    # politeness-gated, ~2-sources/second-ceiling poll loop actually needs.
+    cpus: 1.0
 
   redis:
     image: redis:7-alpine
@@ -85,6 +96,7 @@ services:
       timeout: 3s
       retries: 10
     mem_limit: 320m
+    cpus: 0.3
 
   api:
     build:
@@ -173,6 +185,7 @@ services:
       retries: 3
       start_period: 30s
     mem_limit: 256m
+    cpus: 0.5
     depends_on:
       redis:
         condition: service_healthy
@@ -202,6 +215,7 @@ services:
       retries: 3
       start_period: 10s
     mem_limit: 192m
+    cpus: 0.3
     depends_on:
       postgres:
         condition: service_healthy
@@ -233,6 +247,7 @@ services:
     volumes:
       - brain_model_cache:/root/.cache/fastembed
     mem_limit: 1g
+    cpus: 1.2
     depends_on:
       postgres:
         condition: service_healthy
