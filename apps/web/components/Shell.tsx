@@ -60,7 +60,7 @@ export function Shell({
   return (
     <div className="flex min-h-screen">
       <aside
-        className={`shrink-0 border-r border-border-subtle bg-bg-base flex flex-col transition-[width] duration-150 ease-[var(--ease-quick)] overflow-hidden ${
+        className={`shrink-0 sticky top-0 h-screen border-r border-border-subtle bg-bg-base flex flex-col transition-[width] duration-150 ease-[var(--ease-quick)] overflow-hidden ${
           collapsed ? "w-16" : "w-64"
         }`}
       >
