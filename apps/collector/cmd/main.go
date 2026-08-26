@@ -33,6 +33,7 @@ import (
 
 	"github.com/kelyon/scout/adapters/ats/ashby"
 	"github.com/kelyon/scout/adapters/ats/greenhouse"
+	"github.com/kelyon/scout/adapters/ats/keka"
 	"github.com/kelyon/scout/adapters/ats/lever"
 	"github.com/kelyon/scout/adapters/ats/recruitee"
 	"github.com/kelyon/scout/adapters/ats/smartrecruiters"
@@ -220,6 +221,7 @@ func buildPipeline(fetcher *fetch.Fetcher) *scheduler.Pipeline {
 			padapter.SourceKindRecruitee:       recruitee.New(fetcher),
 			padapter.SourceKindTeamtailor:      teamtailor.New(fetcher),
 			padapter.SourceKindWorkday:         workday.New(fetcher),
+			padapter.SourceKindKeka:            keka.New(fetcher),
 		},
 		Gazetteer:    taxonomy.LoadGazetteer(),
 		Roles:        taxonomy.LoadRolePatterns(),

@@ -1,0 +1,15 @@
+[
+  {
+    "id": 999001,
+    "title": "Estagiário de Engenharia de Software — エンジニアリングインターン",
+    "description": "<p>São Paulo チーム</p>",
+    "departmentName": "Engenharia",
+    "jobLocations": [
+      { "id": 7001, "name": "São Paulo", "city": "São Paulo", "state": "SP", "countryCode": "BR", "countryName": "Brazil" }
+    ],
+    "jobType": 2,
+    "experience": "0-1",
+    "publishedOn": "2026-08-01T00:00:00Z",
+    "skillNames": ["Python"]
+  }
+]

@@ -1,0 +1,22 @@
+[
+  {
+    "id": 138476,
+    "title": "Backend Engineering Intern",
+    "description": "<p>Join our engineering team.</p>",
+    "departmentName": "Engineering",
+    "jobLocations": [{ "id": 5679, "name": "Bengaluru", "city": "Bengaluru", "state": "KA", "countryCode": "IN", "countryName": "India" }],
+    "jobType": 2,
+    "experience": "0-1",
+    "publishedOn": "2026-08-20T12:57:54.91Z"
+  },
+  {
+    "id": 138476,
+    "title": "Backend Engineering Intern (duplicate)",
+    "description": "<p>Join our engineering team.</p>",
+    "departmentName": "Engineering",
+    "jobLocations": [{ "id": 5679, "name": "Bengaluru", "city": "Bengaluru", "state": "KA", "countryCode": "IN", "countryName": "India" }],
+    "jobType": 2,
+    "experience": "0-1",
+    "publishedOn": "2026-08-20T12:57:54.91Z"
+  }
+]

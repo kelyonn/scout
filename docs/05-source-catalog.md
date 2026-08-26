@@ -48,7 +48,7 @@ public JSON.
 | **SuccessFactors** | HTML, OData sometimes | `career{N}.successfactors.eu/...` | Poor — enterprise, awkward | High | **P5** |
 | **Taleo** | HTML | Varies | Poor — legacy, being replaced | High | Deferred |
 | **Darwinbox** | Partial JSON | `{tenant}.darwinbox.in/ms/candidate/careers` | Fair — common at Indian enterprises and GCCs | Medium | P5 |
-| **Keka** | Public JSON | `{tenant}.keka.com/careers/api/...` | Good — widely used by Indian mid-market | Low | P5 |
+| **Keka** | Public JSON | `{tenant}.keka.com/careers/api/jobs/default/active` | Good — widely used by Indian mid-market | Low | **Covered** — `adapters/ats/keka`, 2026-08-24. Two of three real tenants checked resolve on the plain endpoint this adapter targets; a second "embed widget" portal variant (seen at one of the three) is a known, unsupported gap — see the adapter's own doc comment |
 | **Zoho Recruit** | Public JSON | `{tenant}.zohorecruit.in/recruit/portal/...` | Good — common at Indian SMBs | Low | P5 |
 
 **Why Greenhouse, Lever, and Ashby come first.** Between them they cover the
