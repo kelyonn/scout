@@ -164,6 +164,19 @@ type Querier interface {
 	// own created_at (via InsertNotification's coalesce-to-now default), so
 	// this clause is a no-op for them.
 	//
+	// The nd.status = 'failed' branch (000020) is the fix for a real,
+	// verified permanent-loss bug: before this, a failed send's
+	// notification_delivery row made GetUndeliveredNotifications exclude that
+	// notification forever, with no code path that ever revisited it — the
+	// default outcome of any Telegram failure at all, transient or not, was
+	// silent, permanent loss. attempts < 5 bounds the retry budget (must match
+	// deliver.go's maxDeliveryAttempts — deliberately not parameterized, since
+	// this query has no other per-call tuning and one more sqlc.arg for a
+	// constant that only ever takes one real value is not worth the
+	// indirection); next_attempt_at implements the backoff deliver.go's
+	// retryBackoff computes, NULL meaning "eligible now" (either never
+	// attempted, or backoff already elapsed).
+	//
 	// user_id filter added here rather than left to the caller's own
 	// `if n.UserID != userID { continue }` (which apps/notifier/internal/deliver
 	// used to do entirely in Go): ADR-015 means this never mattered for a
@@ -238,7 +251,6 @@ type Querier interface {
 	// delivered hourly on the hour") is what actually sets it, to the next
 	// hour boundary — see apps/notifier/internal/trigger's nextHourBoundary.
 	InsertNotification(ctx context.Context, arg InsertNotificationParams) (pgtype.UUID, error)
-	InsertNotificationDelivery(ctx context.Context, arg InsertNotificationDeliveryParams) (NotificationDelivery, error)
 	// raw_observation queries. See docs/06-ingestion-pipeline.md section 9 and
 	// infra/migrations/000005_raw_observation.up.sql.
 	//
@@ -479,6 +491,13 @@ type Querier interface {
 	// table requires ("Distinct seniority: Never merged") even though the
 	// section 3.2 query this is otherwise copied from doesn't show one.
 	// Excludes the job just inserted by this same call (excluding_job_id).
+	// Deterministic truncation, and biased toward the candidates most likely to
+	// actually be the same posting: a company that clears 200 open roles in one
+	// role_family/seniority pair within 45 days is rare, but an unordered LIMIT
+	// there would silently drop an arbitrary, non-reproducible subset — the same
+	// call could gate a different set of candidates on a retry. AGENTS.md rule 4
+	// (bias dedup toward under-merging) makes that the wrong kind of randomness
+	// to have here.
 	SelectStage2Candidates(ctx context.Context, arg SelectStage2CandidatesParams) ([]SelectStage2CandidatesRow, error)
 	// Notification trigger evaluation and delivery queries. See
 	// docs/11-notifications.md and infra/migrations/000009_notification.up.sql.
@@ -486,9 +505,12 @@ type Querier interface {
 	// Split matches apps/notifier's own package split: trigger.go selects
 	// unnotified job_group rows and evaluates bengaluru_match/high_score,
 	// inserting into `notification`; deliver.go separately picks up
-	// `notification` rows with no `notification_delivery` row yet — that
-	// absence of a delivery row IS the "queued" state (quiet hours, budget),
-	// rather than a separate status column tracking it.
+	// `notification` rows with no `notification_delivery` row yet, or with one
+	// whose status is 'failed' and still has retry attempts and backoff time
+	// left (000020) — either case is the "queued" state (quiet hours, budget,
+	// or a retryable send failure), rather than a separate status column
+	// tracking it. A 'failed' row that has exhausted its attempts is the one
+	// truly terminal outcome and stops showing up here at all.
 	// Eligibility (docs/11 section 8 step 2), minus excluded_keywords —
 	// P1 checks excluded_companies (a plain array-containment test) but not
 	// keyword matching against the title/description, which needs a pattern
@@ -588,6 +610,19 @@ type Querier interface {
 	// in this schema (ADR-015).
 	UpsertGoogleCalendarCredential(ctx context.Context, arg UpsertGoogleCalendarCredentialParams) (GoogleCalendarCredential, error)
 	UpsertGoogleCalendarEvent(ctx context.Context, arg UpsertGoogleCalendarEventParams) error
+	// Was InsertNotificationDelivery — plain insert, no conflict handling,
+	// because before 000020 a notification could only ever reach this call
+	// once (see GetUndeliveredNotifications' own comment: no code path
+	// revisited a 'failed' row, so there was nothing to conflict with). A
+	// retried send targets the same (notification_id, channel_id) row a
+	// second time; ON CONFLICT DO UPDATE is what makes that idempotent rather
+	// than a constraint-violation error against
+	// notification_delivery_notification_id_channel_id_key. attempts,
+	// next_attempt_at, and every other field come from the caller
+	// (deliver.go), computed from the prior_attempts GetUndeliveredNotifications
+	// returns — not derived here — so this stays a plain field-for-field
+	// upsert with no arithmetic of its own to get subtly wrong.
+	UpsertNotificationDelivery(ctx context.Context, arg UpsertNotificationDeliveryParams) (NotificationDelivery, error)
 	// Resume queries — docs/09-ranking-scoring.md section 3.2's resume_match.
 	// Single-user system (ADR-015): one resume row, upserted on
 	// user_id, never inserted a second time.

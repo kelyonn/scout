@@ -14,7 +14,7 @@ import (
 const claimSources = `-- name: ClaimSources :exec
 update source
 set next_poll_at = $1::timestamptz
-where id = any($2::uuid[])
+where id = any($2::uuid [])
 `
 
 type ClaimSourcesParams struct {
@@ -364,7 +364,7 @@ from source
 where status = 'pending_review'
     and shadow_reviewed_at is NULL
     and legal_posture in ('permitted', 'api_only')
-    and first_polled_at is not null
+    and first_polled_at is not NULL
     and first_polled_at <= now() - interval '48 hours'
 order by first_polled_at asc
 limit $1::int
@@ -453,7 +453,8 @@ set
     total_successes = total_successes + case when $9::boolean then 1 else 0 end,
     total_jobs_found = total_jobs_found + $10::bigint,
     total_new_jobs = total_new_jobs + $11::bigint,
-    yield_ratio = yield_ratio * 0.99 + (case when $11::bigint > 0 then 1 else 0 end) * 0.01,
+    yield_ratio
+    = yield_ratio * 0.99 + (case when $11::bigint > 0 then 1 else 0 end) * 0.01,
     yield_computed_at = now(),
     updated_at = now()
 where id = $12::uuid

@@ -525,6 +525,7 @@ const (
 	SourceKindHackathon          SourceKind = "hackathon"
 	SourceKindVcPortfolio        SourceKind = "vc_portfolio"
 	SourceKindResearchLab        SourceKind = "research_lab"
+	SourceKindAtsKeka            SourceKind = "ats_keka"
 )
 
 func (e *SourceKind) Scan(src interface{}) error {
@@ -881,6 +882,7 @@ type NotificationDelivery struct {
 	OpenedAt       pgtype.Timestamptz `db:"opened_at" json:"opened_at"`
 	LatencyMs      *int32             `db:"latency_ms" json:"latency_ms"`
 	ProviderMsgID  *string            `db:"provider_msg_id" json:"provider_msg_id"`
+	NextAttemptAt  pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
 }
 
 type RawObservation struct {

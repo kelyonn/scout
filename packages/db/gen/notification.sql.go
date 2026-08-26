@@ -98,11 +98,19 @@ select
     n.urgency,
     n.payload,
     n.priority_at_send,
-    n.created_at
+    n.created_at,
+    coalesce(nd.attempts, 0)::smallint as prior_attempts
 from notification as n
 left join notification_delivery as nd on n.id = nd.notification_id
 where n.user_id = $1::uuid
-    and nd.id is NULL
+    and (
+        nd.id is NULL
+        or (
+            nd.status = 'failed'
+            and nd.attempts < 5
+            and (nd.next_attempt_at is NULL or nd.next_attempt_at <= now())
+        )
+    )
     and n.scheduled_for <= now()
 order by n.created_at asc
 limit $2::int
@@ -122,6 +130,7 @@ type GetUndeliveredNotificationsRow struct {
 	Payload        []byte              `db:"payload" json:"payload"`
 	PriorityAtSend *int16              `db:"priority_at_send" json:"priority_at_send"`
 	CreatedAt      pgtype.Timestamptz  `db:"created_at" json:"created_at"`
+	PriorAttempts  int16               `db:"prior_attempts" json:"prior_attempts"`
 }
 
 // A notification with no notification_delivery row yet is, by
@@ -130,6 +139,19 @@ type GetUndeliveredNotificationsRow struct {
 // back until its hour boundary — INSTANT rows have scheduled_for = their
 // own created_at (via InsertNotification's coalesce-to-now default), so
 // this clause is a no-op for them.
+//
+// The nd.status = 'failed' branch (000020) is the fix for a real,
+// verified permanent-loss bug: before this, a failed send's
+// notification_delivery row made GetUndeliveredNotifications exclude that
+// notification forever, with no code path that ever revisited it — the
+// default outcome of any Telegram failure at all, transient or not, was
+// silent, permanent loss. attempts < 5 bounds the retry budget (must match
+// deliver.go's maxDeliveryAttempts — deliberately not parameterized, since
+// this query has no other per-call tuning and one more sqlc.arg for a
+// constant that only ever takes one real value is not worth the
+// indirection); next_attempt_at implements the backoff deliver.go's
+// retryBackoff computes, NULL meaning "eligible now" (either never
+// attempted, or backoff already elapsed).
 //
 // user_id filter added here rather than left to the caller's own
 // `if n.UserID != userID { continue }` (which apps/notifier/internal/deliver
@@ -160,6 +182,7 @@ func (q *Queries) GetUndeliveredNotifications(ctx context.Context, arg GetUndeli
 			&i.Payload,
 			&i.PriorityAtSend,
 			&i.CreatedAt,
+			&i.PriorAttempts,
 		); err != nil {
 			return nil, err
 		}
@@ -172,7 +195,9 @@ func (q *Queries) GetUndeliveredNotifications(ctx context.Context, arg GetUndeli
 }
 
 const insertNotification = `-- name: InsertNotification :one
-insert into notification (user_id, job_group_id, trigger, urgency, payload, priority_at_send, scheduled_for)
+insert into notification (
+    user_id, job_group_id, trigger, urgency, payload, priority_at_send, scheduled_for
+)
 values (
     $1::uuid, $2::uuid, $3::notification_trigger,
     $4::text, $5::jsonb, $6::smallint,
@@ -221,55 +246,6 @@ func (q *Queries) InsertNotification(ctx context.Context, arg InsertNotification
 	return id, err
 }
 
-const insertNotificationDelivery = `-- name: InsertNotificationDelivery :one
-insert into notification_delivery (
-    notification_id, channel_id, status, attempts, error, sent_at, latency_ms, provider_msg_id
-) values (
-    $1::uuid, $2::uuid, $3::text,
-    $4::smallint, $5::text, $6::timestamptz,
-    $7::int, $8::text
-)
-returning id, notification_id, channel_id, status, attempts, error, sent_at, opened_at, latency_ms, provider_msg_id
-`
-
-type InsertNotificationDeliveryParams struct {
-	NotificationID pgtype.UUID        `db:"notification_id" json:"notification_id"`
-	ChannelID      pgtype.UUID        `db:"channel_id" json:"channel_id"`
-	Status         string             `db:"status" json:"status"`
-	Attempts       int16              `db:"attempts" json:"attempts"`
-	Error          *string            `db:"error" json:"error"`
-	SentAt         pgtype.Timestamptz `db:"sent_at" json:"sent_at"`
-	LatencyMs      *int32             `db:"latency_ms" json:"latency_ms"`
-	ProviderMsgID  *string            `db:"provider_msg_id" json:"provider_msg_id"`
-}
-
-func (q *Queries) InsertNotificationDelivery(ctx context.Context, arg InsertNotificationDeliveryParams) (NotificationDelivery, error) {
-	row := q.db.QueryRow(ctx, insertNotificationDelivery,
-		arg.NotificationID,
-		arg.ChannelID,
-		arg.Status,
-		arg.Attempts,
-		arg.Error,
-		arg.SentAt,
-		arg.LatencyMs,
-		arg.ProviderMsgID,
-	)
-	var i NotificationDelivery
-	err := row.Scan(
-		&i.ID,
-		&i.NotificationID,
-		&i.ChannelID,
-		&i.Status,
-		&i.Attempts,
-		&i.Error,
-		&i.SentAt,
-		&i.OpenedAt,
-		&i.LatencyMs,
-		&i.ProviderMsgID,
-	)
-	return i, err
-}
-
 const markJobGroupNotified = `-- name: MarkJobGroupNotified :exec
 update job_group
 set notified_at = now()
@@ -297,12 +273,12 @@ select
     j.comp_normalized_inr_month,
     j.deadline_at
 from user_job_state as ujs
-inner join job_group as jg on jg.id = ujs.job_group_id
-inner join job as j on j.id = jg.representative_job_id
-inner join company as c on c.id = j.company_id
+inner join job_group as jg on ujs.job_group_id = jg.id
+inner join job as j on jg.representative_job_id = j.id
+inner join company as c on j.company_id = c.id
 where ujs.user_id = $1::uuid
     and ujs.state not in ('rejected', 'withdrawn', 'dismissed', 'accepted', 'expired')
-    and j.deadline_at is not null
+    and j.deadline_at is not NULL
     and j.deadline_at > now()
     and j.deadline_at <= now() + interval '72 hours'
 `
@@ -374,22 +350,31 @@ select
     j.location_tier,
     j.location_city,
     j.work_mode,
+    j.role_family,
     j.paid,
     j.comp_normalized_inr_month,
     j.posted_at,
     j.posted_at_estimated,
     j.seniority,
+    -- Always non-NULL by the time a notification fires:
+    -- apps/collector/internal/scoring.Explain writes a deterministic
+    -- template synchronously at score time specifically so a notification
+    -- is never sent unexplained (docs/09 section 6/7) — packages/queue's
+    -- TaskExplain may have since upgraded it to an LLM-generated sentence,
+    -- but either way there is always something here for the Telegram
+    -- message to show.
+    js.explanation,
     -- Cast to text[]: pgx has no default codec for an ARRAY of a custom
     -- enum (packages/db/queries/user.sql's GetUserProfile hit the same
     -- "cannot scan unknown type" failure first — see its comment), so the
     -- native seniority[] type fails to scan here too without this cast.
-    up.target_seniority::text[] as target_seniority,
+    up.target_seniority::text [] as target_seniority,
     js.priority,
     -- watchlist_hiring (docs/11 section 2): a LEFT JOIN rather than a
     -- second per-row query keeps the trigger evaluator a pure function
     -- over one already-fetched row, same shape as every other trigger
     -- input here.
-    (w.company_id is not null)::boolean as is_watchlisted,
+    (w.company_id is not NULL)::boolean as is_watchlisted,
     -- prestige_opening (docs/11 section 2): set at classification time
     -- against the curated list in packages/taxonomy/prestige.yaml — see
     -- that file and apps/collector/internal/scheduler.buildNormalizedJob.
@@ -402,14 +387,18 @@ inner join job_score as js on j.id = js.job_id
     and js.user_id = $1::uuid
     and js.weight_version = $2::text
 inner join user_profile as up on $1::uuid = up.user_id
-left join watchlist as w on w.user_id = $1::uuid and w.company_id = j.company_id
+left join watchlist as w on w.user_id = $1::uuid and j.company_id = w.company_id
 where jg.notified_at is NULL
     and j.is_software = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and js.priority >= 92))
     and j.status = 'open'
     and src.status <> 'pending_review'
     and not (j.company_id = any(up.excluded_companies))
-    and (not up.seniority_filter_enabled or j.seniority = any(up.target_seniority) or j.seniority = 'unknown')
+    and (
+        not up.seniority_filter_enabled
+        or j.seniority = any(up.target_seniority)
+        or j.seniority = 'unknown'
+    )
 order by js.priority desc
 limit $3::int
 `
@@ -430,11 +419,13 @@ type SelectUnnotifiedJobGroupsRow struct {
 	LocationTier           *int16             `db:"location_tier" json:"location_tier"`
 	LocationCity           *string            `db:"location_city" json:"location_city"`
 	WorkMode               WorkMode           `db:"work_mode" json:"work_mode"`
+	RoleFamily             RoleFamily         `db:"role_family" json:"role_family"`
 	Paid                   PaidSignal         `db:"paid" json:"paid"`
 	CompNormalizedInrMonth pgtype.Numeric     `db:"comp_normalized_inr_month" json:"comp_normalized_inr_month"`
 	PostedAt               pgtype.Timestamptz `db:"posted_at" json:"posted_at"`
 	PostedAtEstimated      bool               `db:"posted_at_estimated" json:"posted_at_estimated"`
 	Seniority              Seniority          `db:"seniority" json:"seniority"`
+	Explanation            *string            `db:"explanation" json:"explanation"`
 	TargetSeniority        []string           `db:"target_seniority" json:"target_seniority"`
 	Priority               int16              `db:"priority" json:"priority"`
 	IsWatchlisted          bool               `db:"is_watchlisted" json:"is_watchlisted"`
@@ -447,9 +438,12 @@ type SelectUnnotifiedJobGroupsRow struct {
 // Split matches apps/notifier's own package split: trigger.go selects
 // unnotified job_group rows and evaluates bengaluru_match/high_score,
 // inserting into `notification`; deliver.go separately picks up
-// `notification` rows with no `notification_delivery` row yet — that
-// absence of a delivery row IS the "queued" state (quiet hours, budget),
-// rather than a separate status column tracking it.
+// `notification` rows with no `notification_delivery` row yet, or with one
+// whose status is 'failed' and still has retry attempts and backoff time
+// left (000020) — either case is the "queued" state (quiet hours, budget,
+// or a retryable send failure), rather than a separate status column
+// tracking it. A 'failed' row that has exhausted its attempts is the one
+// truly terminal outcome and stops showing up here at all.
 // Eligibility (docs/11 section 8 step 2), minus excluded_keywords —
 // P1 checks excluded_companies (a plain array-containment test) but not
 // keyword matching against the title/description, which needs a pattern
@@ -514,11 +508,13 @@ func (q *Queries) SelectUnnotifiedJobGroups(ctx context.Context, arg SelectUnnot
 			&i.LocationTier,
 			&i.LocationCity,
 			&i.WorkMode,
+			&i.RoleFamily,
 			&i.Paid,
 			&i.CompNormalizedInrMonth,
 			&i.PostedAt,
 			&i.PostedAtEstimated,
 			&i.Seniority,
+			&i.Explanation,
 			&i.TargetSeniority,
 			&i.Priority,
 			&i.IsWatchlisted,
@@ -532,6 +528,88 @@ func (q *Queries) SelectUnnotifiedJobGroups(ctx context.Context, arg SelectUnnot
 		return nil, err
 	}
 	return items, nil
+}
+
+const upsertNotificationDelivery = `-- name: UpsertNotificationDelivery :one
+insert into notification_delivery (
+    notification_id,
+    channel_id,
+    status,
+    attempts,
+    error,
+    sent_at,
+    latency_ms,
+    provider_msg_id,
+    next_attempt_at
+) values (
+    $1::uuid, $2::uuid, $3::text,
+    $4::smallint, $5::text, $6::timestamptz,
+    $7::int,
+    $8::text,
+    $9::timestamptz
+)
+on conflict (notification_id, channel_id) do update set
+    status = excluded.status,
+    attempts = excluded.attempts,
+    error = excluded.error,
+    sent_at = excluded.sent_at,
+    latency_ms = excluded.latency_ms,
+    provider_msg_id = excluded.provider_msg_id,
+    next_attempt_at = excluded.next_attempt_at
+returning id, notification_id, channel_id, status, attempts, error, sent_at, opened_at, latency_ms, provider_msg_id, next_attempt_at
+`
+
+type UpsertNotificationDeliveryParams struct {
+	NotificationID pgtype.UUID        `db:"notification_id" json:"notification_id"`
+	ChannelID      pgtype.UUID        `db:"channel_id" json:"channel_id"`
+	Status         string             `db:"status" json:"status"`
+	Attempts       int16              `db:"attempts" json:"attempts"`
+	Error          *string            `db:"error" json:"error"`
+	SentAt         pgtype.Timestamptz `db:"sent_at" json:"sent_at"`
+	LatencyMs      *int32             `db:"latency_ms" json:"latency_ms"`
+	ProviderMsgID  *string            `db:"provider_msg_id" json:"provider_msg_id"`
+	NextAttemptAt  pgtype.Timestamptz `db:"next_attempt_at" json:"next_attempt_at"`
+}
+
+// Was InsertNotificationDelivery — plain insert, no conflict handling,
+// because before 000020 a notification could only ever reach this call
+// once (see GetUndeliveredNotifications' own comment: no code path
+// revisited a 'failed' row, so there was nothing to conflict with). A
+// retried send targets the same (notification_id, channel_id) row a
+// second time; ON CONFLICT DO UPDATE is what makes that idempotent rather
+// than a constraint-violation error against
+// notification_delivery_notification_id_channel_id_key. attempts,
+// next_attempt_at, and every other field come from the caller
+// (deliver.go), computed from the prior_attempts GetUndeliveredNotifications
+// returns — not derived here — so this stays a plain field-for-field
+// upsert with no arithmetic of its own to get subtly wrong.
+func (q *Queries) UpsertNotificationDelivery(ctx context.Context, arg UpsertNotificationDeliveryParams) (NotificationDelivery, error) {
+	row := q.db.QueryRow(ctx, upsertNotificationDelivery,
+		arg.NotificationID,
+		arg.ChannelID,
+		arg.Status,
+		arg.Attempts,
+		arg.Error,
+		arg.SentAt,
+		arg.LatencyMs,
+		arg.ProviderMsgID,
+		arg.NextAttemptAt,
+	)
+	var i NotificationDelivery
+	err := row.Scan(
+		&i.ID,
+		&i.NotificationID,
+		&i.ChannelID,
+		&i.Status,
+		&i.Attempts,
+		&i.Error,
+		&i.SentAt,
+		&i.OpenedAt,
+		&i.LatencyMs,
+		&i.ProviderMsgID,
+		&i.NextAttemptAt,
+	)
+	return i, err
 }
 
 const upsertTelegramChannel = `-- name: UpsertTelegramChannel :one

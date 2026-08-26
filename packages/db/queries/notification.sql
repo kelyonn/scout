@@ -4,9 +4,12 @@
 -- Split matches apps/notifier's own package split: trigger.go selects
 -- unnotified job_group rows and evaluates bengaluru_match/high_score,
 -- inserting into `notification`; deliver.go separately picks up
--- `notification` rows with no `notification_delivery` row yet — that
--- absence of a delivery row IS the "queued" state (quiet hours, budget),
--- rather than a separate status column tracking it.
+-- `notification` rows with no `notification_delivery` row yet, or with one
+-- whose status is 'failed' and still has retry attempts and backoff time
+-- left (000020) — either case is the "queued" state (quiet hours, budget,
+-- or a retryable send failure), rather than a separate status column
+-- tracking it. A 'failed' row that has exhausted its attempts is the one
+-- truly terminal outcome and stops showing up here at all.
 
 -- name: SelectUnnotifiedJobGroups :many
 -- Eligibility (docs/11 section 8 step 2), minus excluded_keywords —
@@ -64,22 +67,31 @@ select
     j.location_tier,
     j.location_city,
     j.work_mode,
+    j.role_family,
     j.paid,
     j.comp_normalized_inr_month,
     j.posted_at,
     j.posted_at_estimated,
     j.seniority,
+    -- Always non-NULL by the time a notification fires:
+    -- apps/collector/internal/scoring.Explain writes a deterministic
+    -- template synchronously at score time specifically so a notification
+    -- is never sent unexplained (docs/09 section 6/7) — packages/queue's
+    -- TaskExplain may have since upgraded it to an LLM-generated sentence,
+    -- but either way there is always something here for the Telegram
+    -- message to show.
+    js.explanation,
     -- Cast to text[]: pgx has no default codec for an ARRAY of a custom
     -- enum (packages/db/queries/user.sql's GetUserProfile hit the same
     -- "cannot scan unknown type" failure first — see its comment), so the
     -- native seniority[] type fails to scan here too without this cast.
-    up.target_seniority::text[] as target_seniority,
+    up.target_seniority::text [] as target_seniority,
     js.priority,
     -- watchlist_hiring (docs/11 section 2): a LEFT JOIN rather than a
     -- second per-row query keeps the trigger evaluator a pure function
     -- over one already-fetched row, same shape as every other trigger
     -- input here.
-    (w.company_id is not null)::boolean as is_watchlisted,
+    (w.company_id is not NULL)::boolean as is_watchlisted,
     -- prestige_opening (docs/11 section 2): set at classification time
     -- against the curated list in packages/taxonomy/prestige.yaml — see
     -- that file and apps/collector/internal/scheduler.buildNormalizedJob.
@@ -92,14 +104,18 @@ inner join job_score as js on j.id = js.job_id
     and js.user_id = sqlc.arg(user_id)::uuid
     and js.weight_version = sqlc.arg(weight_version)::text
 inner join user_profile as up on sqlc.arg(user_id)::uuid = up.user_id
-left join watchlist as w on w.user_id = sqlc.arg(user_id)::uuid and w.company_id = j.company_id
+left join watchlist as w on w.user_id = sqlc.arg(user_id)::uuid and j.company_id = w.company_id
 where jg.notified_at is NULL
     and j.is_software = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and js.priority >= 92))
     and j.status = 'open'
     and src.status <> 'pending_review'
     and not (j.company_id = any(up.excluded_companies))
-    and (not up.seniority_filter_enabled or j.seniority = any(up.target_seniority) or j.seniority = 'unknown')
+    and (
+        not up.seniority_filter_enabled
+        or j.seniority = any(up.target_seniority)
+        or j.seniority = 'unknown'
+    )
 order by js.priority desc
 limit sqlc.arg(limit_)::int;
 
@@ -129,7 +145,9 @@ where id = sqlc.arg(id)::uuid;
 -- threaded through. docs/11 section 3's BATCHED class ("accumulated and
 -- delivered hourly on the hour") is what actually sets it, to the next
 -- hour boundary — see apps/notifier/internal/trigger's nextHourBoundary.
-insert into notification (user_id, job_group_id, trigger, urgency, payload, priority_at_send, scheduled_for)
+insert into notification (
+    user_id, job_group_id, trigger, urgency, payload, priority_at_send, scheduled_for
+)
 values (
     sqlc.arg(user_id)::uuid, sqlc.arg(job_group_id)::uuid, sqlc.arg(trigger)::notification_trigger,
     sqlc.arg(urgency)::text, sqlc.arg(payload)::jsonb, sqlc.arg(priority_at_send)::smallint,
@@ -145,6 +163,19 @@ returning id;
 -- back until its hour boundary — INSTANT rows have scheduled_for = their
 -- own created_at (via InsertNotification's coalesce-to-now default), so
 -- this clause is a no-op for them.
+--
+-- The nd.status = 'failed' branch (000020) is the fix for a real,
+-- verified permanent-loss bug: before this, a failed send's
+-- notification_delivery row made GetUndeliveredNotifications exclude that
+-- notification forever, with no code path that ever revisited it — the
+-- default outcome of any Telegram failure at all, transient or not, was
+-- silent, permanent loss. attempts < 5 bounds the retry budget (must match
+-- deliver.go's maxDeliveryAttempts — deliberately not parameterized, since
+-- this query has no other per-call tuning and one more sqlc.arg for a
+-- constant that only ever takes one real value is not worth the
+-- indirection); next_attempt_at implements the backoff deliver.go's
+-- retryBackoff computes, NULL meaning "eligible now" (either never
+-- attempted, or backoff already elapsed).
 --
 -- user_id filter added here rather than left to the caller's own
 -- `if n.UserID != userID { continue }` (which apps/notifier/internal/deliver
@@ -165,11 +196,19 @@ select
     n.urgency,
     n.payload,
     n.priority_at_send,
-    n.created_at
+    n.created_at,
+    coalesce(nd.attempts, 0)::smallint as prior_attempts
 from notification as n
 left join notification_delivery as nd on n.id = nd.notification_id
 where n.user_id = sqlc.arg(user_id)::uuid
-    and nd.id is NULL
+    and (
+        nd.id is NULL
+        or (
+            nd.status = 'failed'
+            and nd.attempts < 5
+            and (nd.next_attempt_at is NULL or nd.next_attempt_at <= now())
+        )
+    )
     and n.scheduled_for <= now()
 order by n.created_at asc
 limit sqlc.arg(limit_)::int;
@@ -201,12 +240,12 @@ select
     j.comp_normalized_inr_month,
     j.deadline_at
 from user_job_state as ujs
-inner join job_group as jg on jg.id = ujs.job_group_id
-inner join job as j on j.id = jg.representative_job_id
-inner join company as c on c.id = j.company_id
+inner join job_group as jg on ujs.job_group_id = jg.id
+inner join job as j on jg.representative_job_id = j.id
+inner join company as c on j.company_id = c.id
 where ujs.user_id = sqlc.arg(user_id)::uuid
     and ujs.state not in ('rejected', 'withdrawn', 'dismissed', 'accepted', 'expired')
-    and j.deadline_at is not null
+    and j.deadline_at is not NULL
     and j.deadline_at > now()
     and j.deadline_at <= now() + interval '72 hours';
 
@@ -228,14 +267,44 @@ on conflict (user_id, kind) where kind in ('telegram', 'email', 'discord')
 do update set config = excluded.config, enabled = TRUE, verified_at = now()
 returning *;
 
--- name: InsertNotificationDelivery :one
+-- name: UpsertNotificationDelivery :one
+-- Was InsertNotificationDelivery — plain insert, no conflict handling,
+-- because before 000020 a notification could only ever reach this call
+-- once (see GetUndeliveredNotifications' own comment: no code path
+-- revisited a 'failed' row, so there was nothing to conflict with). A
+-- retried send targets the same (notification_id, channel_id) row a
+-- second time; ON CONFLICT DO UPDATE is what makes that idempotent rather
+-- than a constraint-violation error against
+-- notification_delivery_notification_id_channel_id_key. attempts,
+-- next_attempt_at, and every other field come from the caller
+-- (deliver.go), computed from the prior_attempts GetUndeliveredNotifications
+-- returns — not derived here — so this stays a plain field-for-field
+-- upsert with no arithmetic of its own to get subtly wrong.
 insert into notification_delivery (
-    notification_id, channel_id, status, attempts, error, sent_at, latency_ms, provider_msg_id
+    notification_id,
+    channel_id,
+    status,
+    attempts,
+    error,
+    sent_at,
+    latency_ms,
+    provider_msg_id,
+    next_attempt_at
 ) values (
     sqlc.arg(notification_id)::uuid, sqlc.arg(channel_id)::uuid, sqlc.arg(status)::text,
     sqlc.arg(attempts)::smallint, sqlc.narg(error)::text, sqlc.narg(sent_at)::timestamptz,
-    sqlc.narg(latency_ms)::int, sqlc.narg(provider_msg_id)::text
+    sqlc.narg(latency_ms)::int,
+    sqlc.narg(provider_msg_id)::text,
+    sqlc.narg(next_attempt_at)::timestamptz
 )
+on conflict (notification_id, channel_id) do update set
+    status = excluded.status,
+    attempts = excluded.attempts,
+    error = excluded.error,
+    sent_at = excluded.sent_at,
+    latency_ms = excluded.latency_ms,
+    provider_msg_id = excluded.provider_msg_id,
+    next_attempt_at = excluded.next_attempt_at
 returning *;
 
 -- name: CountDeliveriesSince :one

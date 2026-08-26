@@ -94,14 +94,15 @@ where job_id = sqlc.arg(job_id)::uuid
 -- is simpler than fighting that in SQL.
 select
     count(*)::int as comparable_count,
-    count(*) filter (where comp_normalized_inr_month <= sqlc.arg(this_comp)::numeric)::int as at_or_below_count
+    count(*) filter (where comp_normalized_inr_month <= sqlc.arg(this_comp)::numeric)::int
+        as at_or_below_count
 from job
 where role_family = sqlc.arg(role_family)::role_family
     and seniority = sqlc.arg(seniority)::seniority
     and location_country = sqlc.arg(location_country)::bpchar
     and posted_at > now() - interval '180 days'
-    and comp_normalized_inr_month is not null
-    and deleted_at is null;
+    and comp_normalized_inr_month is not NULL
+    and deleted_at is NULL;
 
 -- name: SelectCompensationPercentileBroad :one
 -- docs/09 section 3.4's fallback: "below that we fall back to a
@@ -109,13 +110,14 @@ where role_family = sqlc.arg(role_family)::role_family
 -- filter, used only when the exact comparable set has fewer than 20 rows.
 select
     count(*)::int as comparable_count,
-    count(*) filter (where comp_normalized_inr_month <= sqlc.arg(this_comp)::numeric)::int as at_or_below_count
+    count(*) filter (where comp_normalized_inr_month <= sqlc.arg(this_comp)::numeric)::int
+        as at_or_below_count
 from job
 where seniority = sqlc.arg(seniority)::seniority
     and location_country = sqlc.arg(location_country)::bpchar
     and posted_at > now() - interval '180 days'
-    and comp_normalized_inr_month is not null
-    and deleted_at is null;
+    and comp_normalized_inr_month is not NULL
+    and deleted_at is NULL;
 
 -- name: SelectResumeJobCosine :one
 -- docs/09 section 3.2's semantic term. Zero rows (pgx.ErrNoRows) means at
@@ -125,17 +127,19 @@ where seniority = sqlc.arg(seniority)::seniority
 -- that exactly like "job has no compensation data": a real, common,
 -- honestly-represented unknown, not an error.
 select (1 - (r.embedding <=> j.embedding))::float8 as cosine
-from resume r, job j
+from resume as r, job as j
 where r.user_id = sqlc.arg(user_id)::uuid
     and j.id = sqlc.arg(job_id)::uuid
-    and r.embedding is not null and j.embedding is not null
+    and r.embedding is not NULL and j.embedding is not NULL
     and r.embedding_version = j.embedding_version;
 
 -- name: GetResumeRawText :one
-select raw_text from resume where user_id = sqlc.arg(user_id)::uuid;
+select raw_text from resume
+where user_id = sqlc.arg(user_id)::uuid;
 
 -- name: GetCompanySlug :one
 -- Resolves company_id -> slug so the scoring step can look up
 -- packages/taxonomy/companies.yaml's well_known flag (competition_estimate's
 -- brand-recognition proxy) — that registry is keyed by slug, not UUID.
-select slug from company where id = sqlc.arg(id)::uuid;
+select slug from company
+where id = sqlc.arg(id)::uuid;

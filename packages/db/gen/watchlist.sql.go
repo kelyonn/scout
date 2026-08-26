@@ -21,8 +21,8 @@ select
     w.added_at,
     count(j.id) filter (where j.status = 'open' and j.is_software = TRUE) as open_job_count
 from watchlist as w
-inner join company as c on c.id = w.company_id
-left join job as j on j.company_id = w.company_id
+inner join company as c on w.company_id = c.id
+left join job as j on w.company_id = j.company_id
 where w.user_id = $1::uuid
 group by w.company_id, c.canonical_name, c.logo_url, c.company_type, w.notify_any_role, w.added_at
 order by w.added_at desc

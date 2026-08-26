@@ -38,6 +38,14 @@ where company_id = sqlc.arg(company_id)::uuid
     and posted_at > now() - interval '45 days'
     and deleted_at is NULL
     and id != sqlc.arg(excluding_job_id)::uuid
+-- Deterministic truncation, and biased toward the candidates most likely to
+-- actually be the same posting: a company that clears 200 open roles in one
+-- role_family/seniority pair within 45 days is rare, but an unordered LIMIT
+-- there would silently drop an arbitrary, non-reproducible subset — the same
+-- call could gate a different set of candidates on a retry. AGENTS.md rule 4
+-- (bias dedup toward under-merging) makes that the wrong kind of randomness
+-- to have here.
+order by posted_at desc
 limit 200;
 
 -- name: SelectRecentDescriptionsForCompany :many
@@ -54,7 +62,10 @@ order by posted_at desc nulls last
 limit 50;
 
 -- name: SelectJobGroupForMerge :one
-select id, first_seen_at, member_count
+select
+id,
+first_seen_at,
+member_count
 from job_group
 where id = sqlc.arg(id)::uuid;
 
@@ -73,10 +84,13 @@ set member_count = member_count + sqlc.arg(absorbed_member_count)::int,
 where id = sqlc.arg(id)::uuid;
 
 -- name: DeleteJobGroup :exec
-delete from job_group where id = sqlc.arg(id)::uuid;
+delete from job_group
+where id = sqlc.arg(id)::uuid;
 
 -- name: InsertJobMergeEvent :exec
-insert into job_merge_event (job_id, matched_job_id, from_group_id, into_group_id, stage, certainty, signal)
+insert into job_merge_event (
+    job_id, matched_job_id, from_group_id, into_group_id, stage, certainty, signal
+)
 values (
     sqlc.arg(job_id)::uuid, sqlc.arg(matched_job_id)::uuid,
     sqlc.arg(from_group_id)::uuid, sqlc.arg(into_group_id)::uuid,

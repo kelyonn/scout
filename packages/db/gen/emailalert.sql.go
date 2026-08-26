@@ -15,10 +15,16 @@ const findOrCreateEmailAlertCompany = `-- name: FindOrCreateEmailAlertCompany :o
 
 with new_company as (
     insert into company (slug, canonical_name, normalized_name, discovered_via)
-    values ($1::citext, $2::text, $3::citext, 'email_alert')
+    values (
+        $1::citext,
+        $2::text,
+        $3::citext,
+        'email_alert'
+    )
     on conflict (slug) do update set slug = excluded.slug
     returning id
 )
+
 select id from new_company
 `
 
@@ -54,12 +60,16 @@ const findOrCreateEmailAlertSource = `-- name: FindOrCreateEmailAlertSource :one
 with new_source as (
     insert into source (company_id, kind, url, url_hash, legal_posture, status, adapter_config)
     values (
-        $1::uuid, 'email_alert', $2::text, digest($2::text, 'sha256'),
+        $1::uuid,
+        'email_alert',
+        $2::text,
+        digest($2::text, 'sha256'),
         'email_only', 'active', $3::jsonb
     )
     on conflict (url_hash) do update set url = excluded.url
     returning id
 )
+
 select id from new_source
 `
 

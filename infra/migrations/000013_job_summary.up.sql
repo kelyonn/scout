@@ -7,6 +7,6 @@
 -- the same way description_text does, not duplicated per user_id in
 -- job_score.
 ALTER TABLE job
-    ADD COLUMN ai_summary TEXT,
-    ADD COLUMN ai_summary_model TEXT,
-    ADD COLUMN ai_summary_generated_at TIMESTAMPTZ;
+ADD COLUMN ai_summary TEXT,
+ADD COLUMN ai_summary_model TEXT,
+ADD COLUMN ai_summary_generated_at TIMESTAMPTZ;

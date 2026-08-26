@@ -15,7 +15,7 @@
 CREATE TABLE watchlist (
     user_id      UUID NOT NULL REFERENCES app_user (id) ON DELETE CASCADE,
     company_id   UUID NOT NULL REFERENCES company (id) ON DELETE CASCADE,
-    notify_any_role BOOLEAN NOT NULL DEFAULT true,
+    notify_any_role BOOLEAN NOT NULL DEFAULT TRUE,
     added_at     TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (user_id, company_id)
 );

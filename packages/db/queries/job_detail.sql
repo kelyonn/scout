@@ -66,15 +66,15 @@ select
     ujs.rating
 from job_group as jg
 inner join job as j on jg.representative_job_id = j.id
-inner join company as c on c.id = j.company_id
-left join job_score as js on js.job_id = j.id
+inner join company as c on j.company_id = c.id
+left join job_score as js on j.id = js.job_id
     and js.user_id = sqlc.arg(user_id)::uuid
     and js.weight_version = sqlc.arg(weight_version)::text
-left join user_job_state as ujs on ujs.job_group_id = jg.id
+left join user_job_state as ujs on jg.id = ujs.job_group_id
     and ujs.user_id = sqlc.arg(user_id)::uuid
 where jg.id = sqlc.arg(job_group_id)::uuid
     -- A job the user has tracked (saved, applied, ...) stays viewable after
     -- it closes — the Pipeline/Archive view (docs/12 section 3's IA) links
     -- to this same detail page, and a closed listing shouldn't 404 an
     -- in-flight or historical application.
-    and (j.status = 'open' or ujs.user_id is not null);
+    and (j.status = 'open' or ujs.user_id is not NULL);

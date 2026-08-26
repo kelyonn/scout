@@ -36,7 +36,8 @@ func (q *Queries) GetActiveWeightVersion(ctx context.Context) (WeightVersion, er
 }
 
 const getCompanySlug = `-- name: GetCompanySlug :one
-select slug from company where id = $1::uuid
+select slug from company
+where id = $1::uuid
 `
 
 // Resolves company_id -> slug so the scoring step can look up
@@ -102,7 +103,8 @@ func (q *Queries) GetJobScore(ctx context.Context, arg GetJobScoreParams) (JobSc
 }
 
 const getResumeRawText = `-- name: GetResumeRawText :one
-select raw_text from resume where user_id = $1::uuid
+select raw_text from resume
+where user_id = $1::uuid
 `
 
 func (q *Queries) GetResumeRawText(ctx context.Context, userID pgtype.UUID) (string, error) {
@@ -255,13 +257,14 @@ func (q *Queries) InsertJobScore(ctx context.Context, arg InsertJobScoreParams) 
 const selectCompensationPercentileBroad = `-- name: SelectCompensationPercentileBroad :one
 select
     count(*)::int as comparable_count,
-    count(*) filter (where comp_normalized_inr_month <= $1::numeric)::int as at_or_below_count
+    count(*) filter (where comp_normalized_inr_month <= $1::numeric)::int
+        as at_or_below_count
 from job
 where seniority = $2::seniority
     and location_country = $3::bpchar
     and posted_at > now() - interval '180 days'
-    and comp_normalized_inr_month is not null
-    and deleted_at is null
+    and comp_normalized_inr_month is not NULL
+    and deleted_at is NULL
 `
 
 type SelectCompensationPercentileBroadParams struct {
@@ -288,14 +291,15 @@ func (q *Queries) SelectCompensationPercentileBroad(ctx context.Context, arg Sel
 const selectCompensationPercentileExact = `-- name: SelectCompensationPercentileExact :one
 select
     count(*)::int as comparable_count,
-    count(*) filter (where comp_normalized_inr_month <= $1::numeric)::int as at_or_below_count
+    count(*) filter (where comp_normalized_inr_month <= $1::numeric)::int
+        as at_or_below_count
 from job
 where role_family = $2::role_family
     and seniority = $3::seniority
     and location_country = $4::bpchar
     and posted_at > now() - interval '180 days'
-    and comp_normalized_inr_month is not null
-    and deleted_at is null
+    and comp_normalized_inr_month is not NULL
+    and deleted_at is NULL
 `
 
 type SelectCompensationPercentileExactParams struct {
@@ -331,10 +335,10 @@ func (q *Queries) SelectCompensationPercentileExact(ctx context.Context, arg Sel
 
 const selectResumeJobCosine = `-- name: SelectResumeJobCosine :one
 select (1 - (r.embedding <=> j.embedding))::float8 as cosine
-from resume r, job j
+from resume as r, job as j
 where r.user_id = $1::uuid
     and j.id = $2::uuid
-    and r.embedding is not null and j.embedding is not null
+    and r.embedding is not NULL and j.embedding is not NULL
     and r.embedding_version = j.embedding_version
 `
 

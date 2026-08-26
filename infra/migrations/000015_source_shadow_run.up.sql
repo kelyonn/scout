@@ -15,7 +15,7 @@
 -- forever, since nothing else distinguishes "not old enough yet" from
 -- "reviewed and left pending on purpose."
 ALTER TABLE source
-    ADD COLUMN shadow_reviewed_at TIMESTAMPTZ;
+ADD COLUMN shadow_reviewed_at TIMESTAMPTZ;
 
 -- The scheduler's hot-path index needs to admit 'pending_review' rows too,
 -- now that SelectDueSources polls them during their shadow window — an

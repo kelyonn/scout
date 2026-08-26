@@ -102,15 +102,15 @@ select
     ujs.applied_at
 from user_job_state as ujs
 inner join job_group as jg on ujs.job_group_id = jg.id
-inner join job as j on j.id = jg.representative_job_id
-inner join company as c on c.id = j.company_id
-left join job_score as js on js.job_id = j.id
+inner join job as j on jg.representative_job_id = j.id
+inner join company as c on j.company_id = c.id
+left join job_score as js on j.id = js.job_id
     and js.user_id = $1::uuid
     and js.weight_version = $2::text
 where ujs.user_id = $1::uuid
     and (
-        $3::text[] is null
-        or ujs.state = any($3::text[]::application_state[])
+        $3::text [] is NULL
+        or ujs.state = any($3::text []::application_state [])
     )
 order by ujs.state_changed_at desc
 `

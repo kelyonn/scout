@@ -24,7 +24,13 @@ returning id, user_id, raw_text, updated_at;
 -- sqlc's analyzer) without one, and falls back to `interface{}` — the same
 -- reason source.sql's own boolean expressions over non-builtin-typed
 -- columns get an explicit cast elsewhere in this project.
-select id, user_id, raw_text, (embedding is not null)::boolean as has_embedding, embedding_version, updated_at
+select
+    id,
+user_id,
+raw_text,
+(embedding is not NULL)::boolean as has_embedding,
+embedding_version,
+updated_at
 from resume
 where user_id = sqlc.arg(user_id)::uuid;
 
@@ -36,7 +42,7 @@ where user_id = sqlc.arg(user_id)::uuid;
 -- replacement on every resume upload is what actually satisfies "remove
 -- the old one, put a new one there."
 update user_profile
-set skills = sqlc.arg(skills)::text[],
+set skills = sqlc.arg(skills)::text [],
     skill_levels = sqlc.arg(skill_levels)::jsonb,
     updated_at = now()
 where user_id = sqlc.arg(user_id)::uuid;
