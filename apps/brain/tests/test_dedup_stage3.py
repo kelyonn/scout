@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 import os
+import threading
 import uuid
 
 import psycopg
@@ -221,5 +222,73 @@ def test_handle_llm_adjudicates_and_merges_genuinely_same_role(llm: OllamaClient
             groups = {r[0] for r in cur.fetchall()}
         assert len(groups) == 1, "a real LLM call on near-identical postings should judge them the same role and merge"
     finally:
+        _cleanup(conn, job_a, job_b)
+        conn.close()
+
+
+def test_merge_waits_for_a_concurrent_holder_of_the_same_companys_dedup_lock(llm: OllamaClient) -> None:
+    """A real, not-mocked proof that the merge path takes
+    apps/collector/internal/dedup/stage2.go's own advisory lock
+    (hashtext('dedup:' || company_id)) rather than just documenting the
+    intent: a second connection takes that exact lock manually and holds
+    it open; the merge (on a separate connection, in a background thread)
+    must not complete until the second connection releases it. Before the
+    fix this added, dedup_stage3.py never touched this lock at all, so
+    this test would have raced (and this assertion could fail either way,
+    depending on timing) rather than deterministically block.
+    """
+    conn = psycopg.connect(_conn_string(), autocommit=False)
+    job_a, job_b = _insert_job_pair(conn, title_a="Backend Engineer Intern", title_b="Backend Engineer Intern", cosine=0.97)
+    lock_conn = psycopg.connect(_conn_string(), autocommit=False)
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT company_id FROM job WHERE id = %s", (job_a,))
+            (company_id,) = fetchone(cur)
+
+        with lock_conn.cursor() as cur:
+            cur.execute(
+                "SELECT pg_advisory_xact_lock(hashtext('dedup:' || %s::uuid::text))",
+                (company_id,),
+            )
+
+        consumer = DedupStage3Consumer(conn, llm)
+        merge_done = threading.Event()
+
+        def run_merge() -> None:
+            consumer.handle(Job(id=1, kind="brain_deep", queue="brain_deep", attempt=1, max_attempts=25,
+                                 args={"job_id": job_a, "candidate_job_id": job_b, "task": "dedup_stage3"}))
+            merge_done.set()
+
+        thread = threading.Thread(target=run_merge, daemon=True)
+        thread.start()
+        try:
+            # The merge must still be blocked on lock_conn's held lock —
+            # a short, generous wait, not a race we're hoping to win.
+            still_blocked = not merge_done.wait(timeout=0.5)
+            assert still_blocked, "merge completed before the concurrent lock holder released it"
+
+            # Checked via lock_conn, not conn: conn is mid-execute in the
+            # background thread (blocked server-side on the advisory
+            # lock), and psycopg serializes concurrent use of one
+            # connection object across threads — reading through conn here
+            # would itself block on that same in-flight call, which can
+            # only resolve after lock_conn.rollback() below, deadlocking
+            # this test against itself rather than testing anything.
+            with lock_conn.cursor() as cur:
+                cur.execute("SELECT job_group_id FROM job WHERE id IN (%s, %s)", (job_a, job_b))
+                groups_while_locked = {r[0] for r in cur.fetchall()}
+            assert len(groups_while_locked) == 2, "merge must not proceed while the company's dedup lock is held elsewhere"
+        finally:
+            lock_conn.rollback()  # releases the advisory lock
+
+        assert merge_done.wait(timeout=5.0), "merge never completed after the lock was released"
+        thread.join(timeout=5.0)
+
+        with conn.cursor() as cur:
+            cur.execute("SELECT job_group_id FROM job WHERE id IN (%s, %s)", (job_a, job_b))
+            groups_after = {r[0] for r in cur.fetchall()}
+        assert len(groups_after) == 1, "merge should complete once the lock is free"
+    finally:
+        lock_conn.close()
         _cleanup(conn, job_a, job_b)
         conn.close()
