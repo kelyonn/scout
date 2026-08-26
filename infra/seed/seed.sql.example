@@ -1,0 +1,83 @@
+-- Template for infra/seed/seed.sql, which is gitignored because it holds
+-- real personal data — university, degree, graduation year, and a
+-- self-rated skills profile (AGENTS.md rule 10's corollary: personal seed
+-- lists never enter this public repository, same rule as
+-- infra/seed/resume.sql.example). Copy this file to seed.sql, replace the
+-- placeholder values below with your own, then run `make seed`.
+--
+-- The email address is not in this file at all — it's a psql variable
+-- (:'user_email') that infra/scripts/seed.sh passes in from SCOUT_USER_EMAIL,
+-- so the file itself never needs to change per operator.
+
+INSERT INTO app_user (email, display_name, timezone, locale)
+VALUES (:'user_email', 'Scout', 'Asia/Kolkata', 'en-IN')
+ON CONFLICT (email) DO NOTHING;
+
+-- Replace every value below with your own. target_roles/target_seniority
+-- gate what job.role_family/seniority the feed and scoring consider a
+-- match at all (docs/09-ranking-scoring.md section 3); skills/skill_levels
+-- (1-5) feed overall_match's skill_match subscore directly.
+INSERT INTO user_profile (
+    user_id, graduation_year, degree, university,
+    target_roles, target_seniority, skills, skill_levels, location_tiers
+)
+SELECT
+    id,
+    2027,
+    'B.Tech Computer Science',
+    'Example University',
+    ARRAY['swe.general', 'swe.backend', 'swe.frontend']::role_family[],
+    '{internship,new_grad}'::seniority[],
+    ARRAY['python', 'go', 'sql', 'git', 'data_structures', 'algorithms'],
+    '{"python": 4, "go": 3, "sql": 3, "git": 4, "data_structures": 3, "algorithms": 3}'::jsonb,
+    '{
+        "1": {"cities": ["Bengaluru"], "multiplier": 1.20},
+        "2": {"countries": ["IN"], "multiplier": 1.05},
+        "3": {"remote": true, "multiplier": 1.12},
+        "4": {"countries": ["US", "CA", "SG", "GB", "AU", "JP", "DE", "NL"], "multiplier": 1.00}
+    }'::jsonb
+FROM app_user WHERE email = :'user_email'
+ON CONFLICT (user_id) DO UPDATE SET
+    graduation_year = excluded.graduation_year,
+    degree = excluded.degree,
+    university = excluded.university,
+    target_roles = excluded.target_roles,
+    target_seniority = excluded.target_seniority,
+    skills = excluded.skills,
+    skill_levels = excluded.skill_levels,
+    location_tiers = excluded.location_tiers,
+    updated_at = now();
+
+-- docs/09-ranking-scoring.md section 4's literal example weights — a
+-- reasonable starting point, not personal data, so this part is safe to
+-- keep as-is.
+INSERT INTO weight_version (version, weights, source, active)
+VALUES (
+    'v1-hand-tuned-2026-08',
+    '{
+        "priority": {
+            "overall_match": 0.24,
+            "company_quality": 0.14,
+            "learning_opportunity": 0.12,
+            "interview_probability": 0.10,
+            "competition_estimate": 0.10,
+            "compensation": 0.09,
+            "growth_potential": 0.07,
+            "engineering_culture": 0.06,
+            "ease_of_applying": 0.05,
+            "deadline_urgency": 0.03
+        },
+        "overall_match": {
+            "skill_match": 0.40,
+            "resume_match": 0.30,
+            "role_family_fit": 0.20,
+            "seniority_fit": 0.10
+        },
+        "location_multipliers": {"1": 1.20, "2": 1.05, "3": 1.12, "4": 1.00},
+        "freshness_half_life_days": 14,
+        "freshness_floor": 0.55
+    }'::jsonb,
+    'hand_tuned',
+    TRUE
+)
+ON CONFLICT (version) DO UPDATE SET weights = excluded.weights;
