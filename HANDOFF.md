@@ -5,11 +5,14 @@ describes what actually exists right now — the roadmap describes what's
 intended. When they disagree, this file is more current and the roadmap's
 checkboxes should be trusted less than the prose here.
 
-**Last updated:** 2026-08-19 (everything below is now committed; see the
-"Update, 2026-08-19" note further down for what changed getting there,
-including the ADR-018 laptop-only hosting pivot). Last commit on `main` is
-`6dad399` (ci(web): add lint/typecheck/build job). Nothing has been pushed to
-GitHub yet — this is all local to `main` in this working tree.
+**Last updated:** 2026-08-26 — see that date's own update at the bottom of
+this file for what's new: the Opportunities/Search filter bar, the four real
+CI breaks found and fixed (golangci-lint/sqlfluff/web-typecheck/Postgres never
+running in the `go` job at all), and a real PII exposure
+(`infra/seed/seed.sql`, committed and live on GitHub) found, scrubbed from
+history, and force-pushed. Everything below this point through the
+2026-08-24 update was pushed to GitHub back on 2026-08-20; treat "nothing
+pushed yet" language anywhere below as historical, not current.
 
 ---
 
@@ -547,3 +550,406 @@ needs a curated company list (a content decision, not a code gap), and
 P4 (Capacitor/FCM) and Web Push/email channels all need a Firebase
 project, an Android SDK, and SMTP/VAPID credentials this environment
 doesn't have.
+
+---
+
+**Update, 2026-08-23/24 (overnight session): Telegram is finally really
+connected, and a real permanent-notification-loss bug is fixed.**
+
+- **Telegram was never actually wired up.** `notification_channel` held a
+  placeholder `chat_id: 555` inserted 2026-08-11 during early development
+  and never replaced — every real send since then (there had only ever
+  been one: today's 08:00 digest) failed with Telegram's own "Bad Request:
+  chat not found." Ran `notifier -setup` for real this time: the user
+  messaged `@scout_kelyon_alerts_bot`, the flow captured the real chat id
+  (`8813898212`), and `notification_channel.config` now holds it. A digest
+  fired for real immediately after and was delivered successfully —
+  confirmed live, not just "no error."
+- **Found and fixed a real, permanent notification-loss bug while
+  diagnosing the above.** `GetUndeliveredNotifications` excluded any
+  notification with a `notification_delivery` row at all — including one
+  with `status = 'failed'`. There was no code path anywhere that ever
+  revisited a failed send. The one real digest send that failed against
+  the fake chat_id was silently, permanently dropped; nothing about that
+  failure would ever have surfaced without direct DB inspection.
+  `infra/migrations/000020` adds `notification_delivery.next_attempt_at`;
+  `GetUndeliveredNotifications` now also offers a `'failed'` row back once
+  `attempts < 5` and its backoff window has elapsed;
+  `InsertNotificationDelivery` became `UpsertNotificationDelivery` (ON
+  CONFLICT on the existing `(notification_id, channel_id)` unique index,
+  so a retry updates the same row rather than fighting that constraint).
+  `apps/notifier/internal/deliver`'s `retryBackoff` is exponential
+  (2/4/8/16 min, capped 30). Four new tests reproduce the bug and prove
+  the fix: stays queued after one failure, not retried before backoff,
+  retried and delivered after backoff, and permanently stops after 5
+  attempts. `apps/notifier/internal/digest` calls the same renamed query
+  but was **not** given the same retry treatment — `DigestAlreadySentSince`
+  checks whether *a* digest notification exists today, not whether one was
+  *delivered*, so a failed digest still won't retry until tomorrow's
+  window. Real, still open, deliberately not closed tonight — see "Known
+  gaps" below.
+- **SmartRecruiters was never fetching anything, for a different reason
+  than assumed.** Both live sources (Bosch, Nagarro) had `total_polls =
+  total_successes` but `total_jobs_found = 0` since 2026-08-18 — looked
+  like a healthy adapter finding nothing, not a broken one. The real cause,
+  found via a real captured Bosch response in `raw_observation` (stored by
+  today's earlier `dfede0d` fix): the adapter's `postingUrl` field
+  **does not exist** on the real API at all — not a rename, an invented
+  field that was never there. The only URL-shaped thing the list endpoint
+  actually returns is `company.identifier`; the real public apply link is
+  `https://jobs.smartrecruiters.com/{identifier}/{id}` (no SEO slug
+  needed — SmartRecruiters resolves the bare form). Every posting from
+  both sources had been failing `Validate`'s "empty apply URL" check on
+  every single poll since the adapter was written, silently, for five
+  days. Fixed in `adapters/ats/smartrecruiters/adapter.go`
+  (`publicPostingURL`); all four fixtures were also wrong (built from the
+  same imagined schema) and are now the real captured shape. Verified: all
+  existing adapter tests pass with real assertions (not relaxed), and a
+  10-minute live run (`make live-run DURATION=600`) confirms real postings
+  now parse and validate from both sources.
+- Both `collector` and `notifier` images were rebuilt and the containers
+  recreated to pick up both fixes — this was not just committed, it's
+  running.
+
+**Known gaps opened or left by this session, not closed tonight:**
+- `apps/notifier/internal/digest`'s per-day idempotency check
+  (`DigestAlreadySentSince`) doesn't distinguish "sent" from "failed and
+  never retried" the way the instant/batched path now does. Fixing it
+  properly needs a real decision (retry within the same day? what's the
+  dedup key for a retried digest, given `InsertDigestNotification` always
+  creates a fresh row?) that wasn't made tonight — flagged rather than
+  guessed at, per AGENTS.md's own guidance on notification changes.
+- SmartRecruiters' `department` field is frequently an empty `{}` in the
+  real API (the real department data lives in the unused `function` field
+  instead) — not touched tonight, since the diagnosed failure was
+  specifically the apply-URL field, not department mapping.
+
+---
+
+**Update, 2026-08-24 (same overnight session, continued): user-facing feedback
+from actually using the running app — four more real fixes.**
+
+- **The AI summary's real latency bug: a 28,836-job queue backlog, not a
+  slow model.** A user opening a job detail page enqueues `TaskSummarize`
+  (`apps/api`'s detail handler) into the same `brain_deep` river queue as
+  every bulk `TaskDedupStage3`/`TaskClassifyTier2`/`TaskExplain` job the
+  collector's own ingest path produces — and every job in that queue
+  shared river's default priority (1), so a fresh interactive request
+  landed at the back of whatever bulk backlog a recent live run had just
+  produced, ordered by `scheduled_at` alone. Confirmed live: 28,836
+  available `brain_deep` jobs right after tonight's SmartRecruiters
+  live-run test. `packages/queue`'s new `bulkBrainDeepPriority` (river
+  priority 4, lowest) demotes every bulk task; `TaskSummarize` keeps
+  river's default (1, highest) — `river_job_prioritized_fetching_index`
+  sorts on priority before `scheduled_at`, so a fresh summary request is
+  now claimed on the consumer's very next fetch regardless of backlog
+  size. The existing 28,023-row backlog was also backfilled to priority 4
+  directly (a one-time `UPDATE`, not a migration — `river_job` is
+  operational queue state, not user data) so the fix took effect
+  immediately rather than only for future enqueues. Two new regression
+  tests (`TestEnqueueBrainDeep_SummarizeGetsHighPriority`,
+  `TestEnqueueDedupStage3_GetsBulkPriority`) assert the priority split
+  directly.
+  - **Also switched `TaskSummarize` off the shared hosted LLM cascade
+    onto its own local-only Ollama client** (`apps/brain/scout_brain/
+    worker.py`) — not a data-sensitivity requirement the way
+    `TaskExplain`'s local-only client is (posting text is public), a
+    latency one: the cascade's `RateLimitedProvider.call` blocks
+    synchronously on its own rpm window before attempting a hosted
+    request, shared with whatever bulk dedup/classify traffic is running
+    at that moment. A real local `qwen2.5:3b-instruct` call measured
+    ~2.4s directly against Ollama. Verified end-to-end against the real
+    running stack: a job with no prior summary went from click to a
+    written, readable `job.ai_summary` in a few seconds, not indefinitely
+    (previously unbounded — nobody had actually timed it before tonight).
+- **Telegram messages were thin and used emoji throughout — both fixed.**
+  `trigger.Payload` was carrying only title/company/URL/location/comp/
+  deadline even though `SelectUnnotifiedJobGroups` already joined
+  role_family, seniority, work_mode, and `job_score.explanation` (the
+  same "why this matched you" sentence `apps/collector/internal/
+  scoring.Explain` writes synchronously at score time, upgradable by
+  `TaskExplain`) and simply never passed them through. Extended the query
+  (+`j.role_family`, +`js.explanation`) and `Payload`, and rewrote
+  `renderMessage`/`renderBatchMessage`/`renderDeadlineMessage`
+  (`apps/notifier/internal/deliver`) to actually show them — location +
+  work mode + role family + seniority on one line, compensation,
+  freshness ("Posted 12 minutes ago"), a deadline countdown, and the real
+  match explanation, not just a bare title and a link. Every emoji
+  removed from every Telegram-bound string in the codebase — `deliver.go`,
+  `digest.go`, and the `-setup` confirmation message in `cmd/main.go` — a
+  deliberate, explicit product decision, not an oversight; docs/11's own
+  mockups (sections 6.1 and 6.5, the two channels actually built) are
+  corrected to match. Two new tests:
+  `TestRenderMessage_IncludesEnrichedFields` asserts the new content
+  actually appears in the rendered text, `TestNotifierMessages_ContainNoEmoji`
+  scans every render path's output for emoji Unicode ranges as a direct
+  regression guard.
+- **The web sidebar scrolled away with the page instead of staying put.**
+  `Shell.tsx`'s `<aside>` had no positioning at all — `body`/`html` are
+  `min-h-full`/`h-full` (grow with content, not fixed to the viewport), so
+  the whole flex row including the sidebar scrolled together at the
+  document level. Added `sticky top-0 h-screen` to the aside. Verified via
+  direct DOM inspection after rebuilding the `web` image (it has no
+  volume mount — a source edit alone does nothing until the image is
+  rebuilt, unlike the Go services' `docker compose build` habit this
+  session already had): `getComputedStyle` confirms `position: sticky`,
+  `top: 0px`, and the aside's `getBoundingClientRect().top` stays exactly
+  `0` while `window.scrollY` is 800–1000px. The Browser pane's own
+  screenshot capture reproducibly blanks out at any non-zero scroll
+  position this session (a tool/environment quirk — DOM state, computed
+  styles, and element counts all confirm real content is present and
+  correctly positioned throughout), so this was verified programmatically
+  rather than by a visual screenshot.
+- **Internship/consultancy/advocacy scarcity is a sourcing gap, not a bug**
+  — checked against real data rather than guessed at. `company.company_type`
+  is populated for only 113 of 1,429 companies (73 product, 38 GCC, and
+  **2** `services_engineering` — Thoughtworks and Nagarro, contributing
+  exactly 100 jobs between them, both from tonight's SmartRecruiters fix).
+  No IT-consultancy-focused source curation has happened beyond those two;
+  docs/05 section 5.2 already names EPAM, Globant, and Publicis Sapient as
+  "checked against every adapter this project supports... resolved on
+  none" — a real, already-documented gap, not new information. Similarly,
+  `role_family = 'advocacy.*'` postings (804, all `advocacy.solutions`)
+  are whatever happened to surface from the existing general source mix,
+  not the product of any dedicated DevRel/DevEx source curation.
+  Internships specifically: 883 of ~46,000 jobs are `seniority =
+  'internship'` — the web feed's `SENIORITY_FILTER` already includes it
+  (`["internship", "new_grad", "entry", "unknown"]`, `apps/web/app/(app)/
+  opportunities/page.tsx` and two other pages sharing the same hardcoded
+  constant), so this isn't a filtering bug either; internships are
+  genuinely a small slice of what the current source mix contains. Same
+  shape as the GCC coverage gap this file already tracks — the fix is
+  curating more consultancy/services-firm and internship-heavy sources
+  (the same kind of one-by-one verified seeding `infra/seed/gcc_sources.sql`
+  already does for GCCs), not a code change, and wasn't attempted tonight
+  given the size of that undertaking.
+- Rebuilt and restarted every affected container tonight (`collector`,
+  `notifier`, `api`, `brain`, `web`) — nothing above is only-committed,
+  all of it is running against the real local stack.
+
+---
+
+**Update, 2026-08-24 (same overnight session, still continued): source
+discovery expanded massively, the daily live-run got real resource
+discipline, and the first P5 item — a Keka adapter — is built and
+verified live.**
+
+- **Source discovery: ~1,500 → 3,562 sources**, via `apps/collector/cmd/
+  discover` (the existing MIT-licensed Greenhouse/Lever/Ashby
+  candidate-list tool, run several times tonight, briefly with its
+  `maxNewCandidatesPerRun` cap raised from 1,500 to 15,000 for one pass to
+  clear the backlog rather than repeatedly resampling the same
+  already-assessed slice — reverted to 1,500 afterward, confirmed via
+  `git diff` showing no net change). First pass, unfiltered: 2,053 new
+  companies, almost entirely non-India (the candidate lists have no
+  location signal at all). Added a hand-curated `india_candidates.go`
+  (~130 guessed Indian-startup slugs across the three platforms) — real
+  hit rate was near zero (most guesses were simply wrong slugs), but the
+  handful that did resolve (Groww, PhonePe, Branch, Observe.AI) were
+  inserted regardless of whether they had an entry-level posting *at
+  verification time*, since the shadow-review pipeline is built to keep
+  watching, not require an instant hit. **The bigger finding**: the
+  original *unfiltered* global discovery run already surfaces real India
+  roles from companies that aren't Indian at all — Pure Storage (US) and
+  Ajax both turned up with genuine Bengaluru entry-level/new-grad
+  postings, confirming broad, unrestricted discovery is the right
+  default, not a narrower India-only one. Ran two more 30-minute
+  `make live-run` passes to poll through the resulting backlog; real
+  numbers climbed from 86 → 212 India-located entry-level jobs over the
+  session (2,904 total India jobs, 1,913 in Bengaluru) — 2,057 of the
+  3,436 newly-discovered `pending_review` sources still hadn't been
+  polled even once by the end of the session, so this number keeps
+  climbing on its own as future live-run windows work through the
+  backlog.
+- **The daily live-run now tears down completely and stays inside a real
+  CPU budget.** `infra/scripts/daily-live-run.sh` used to leave
+  postgres/redis/brain/notifier running indefinitely after every window
+  (only `collector` was ever stopped) — a real, unbounded background
+  resource cost with nothing to do with "on demand." Now does
+  `docker compose down` on all five instead. `infra/compose/local.yml`
+  gained explicit `cpus:` limits on every service in that set (postgres
+  1.0, brain 1.2, collector 0.5, notifier 0.3, redis 0.3 — ~3.3 cores
+  combined ceiling), verified live via `docker inspect`'s `NanoCpus`
+  field on real running containers, not just config review. One
+  known, accepted transitional gap: the in-flight live-run window that
+  happened to be running when this script was edited used its
+  already-buffered copy of the old logic when it woke from `sleep` (a
+  real, if narrow, bash gotcha — editing a running script mid-execution)
+  — confirmed live, cleaned up manually once. Every run from here on uses
+  the new logic correctly, confirmed via a full fresh up/inspect/down
+  cycle. **One remaining manual step, not something code can fix**:
+  Docker Desktop's "Start Docker Desktop when you sign in" is off, and
+  the script silently skips the whole run if Docker isn't already
+  running — the 9am schedule needs that toggled on to fire reliably
+  unattended. Also confirmed and documented for the user: closing the
+  laptop lid sleeps it, launchd defers the missed calendar job to next
+  wake rather than dropping it, and this is [ADR-018](docs/adr/ADR-018-laptop-only-hosting.md)'s
+  own accepted trade-off, not a bug to route around (`docs/15-infrastructure-deployment.md`
+  section 6's own `caffeinate -s` + "never sleep on power" prescription
+  is explicit that lid-close is still a gap even with both applied).
+- **`adapters/ats/keka` — the first P5 item, built and verified live**,
+  not scaffolded. docs/05 rated Keka "Low effort" without the endpoint
+  ever being confirmed against a real tenant; the real one
+  (`{tenant}.keka.com/careers/api/jobs/default/active`, no auth, no
+  pagination) was found by inspecting three real companies' live careers
+  pages in a browser (fynd.keka.com, pennanttech.keka.com,
+  achiralabs.keka.com) rather than guessed at. **Real finding along the
+  way**: Keka has at least two different careers-portal templates in the
+  wild — the plain JSON endpoint this adapter targets (2 of 3 tenants
+  checked) and a second "embed widget" variant (Fynd's own custom-built
+  page) that needs an organization GUID scraped out of a `<script>` tag
+  before an equivalent `/embedjobs/...` endpoint resolves. Deliberately
+  not supported — a two-step HTML-scrape-then-JSON-fetch is a materially
+  different and riskier shape than every other adapter in this codebase,
+  and "some real Keka tenants won't resolve" is an honest, bounded,
+  documented gap (the adapter's own doc comment, `adapters/README.md`,
+  and docs/05 all say so) rather than a silently wrong one. New
+  migration `000021` adds `ats_keka` to the `source_kind` enum (Postgres
+  enums need a migration to grow, by design — 000002's own comment).
+  Full fixture set (standard/empty/malformed/shape-changed/
+  duplicate-ids/unicode-heavy) and 9 tests, all passing; separately
+  verified against the real live pennanttech.keka.com API through the
+  actual `Fetch`→`Parse`→`Validate` chain (not just fixtures) via a
+  throwaway verification binary, deleted afterward — 2 real postings
+  parsed and validated correctly, real apply URLs. Two real tenants
+  seeded as `pending_review` sources (Pennant Technologies,
+  which has real open roles; Achira Labs, which currently has zero —
+  kept anyway, same "shadow-review can wait for it" reasoning as
+  tonight's India-candidate insertions). Darwinbox and Zoho Recruit
+  (docs/05's other two P5-rated "Low effort" Indian ATS platforms)
+  remain unbuilt — real estimation, not guessed: this one took real
+  browser-based endpoint discovery before a line of adapter code was
+  written, and each of the other two needs the same treatment
+  independently, not an assumption that they share Keka's shape.
+
+---
+
+**Update, 2026-08-26: a filter bar shipped without ever being written up, CI
+turned out to be broken in four different real ways, and a real PII exposure
+was found live on GitHub and purged.** This picks up after a gap this file
+itself didn't track: five commits landed on `main` on 2026-08-23 (auth +
+app-shell restructuring and companies/watchlist/calendar/insights/settings
+pages, ADR-018's daily live-run window automated via launchd, a root-level
+`start.sh`/`stop.sh`, a hydration-warning fix, and a routine sqlc regen) that
+this file never mentioned — they're real and already on GitHub, just
+undocumented here until now.
+
+- **A URL-state filter bar for Opportunities and Search**
+  (`apps/web/components/FilterBar.tsx`, `apps/web/lib/useJobFilters.ts`,
+  `apps/web/lib/taxonomy.ts`) existed in the working tree, fully wired into
+  both pages and the search API's new `role_family`/`seniority`/`work_mode`
+  params (`apps/api/internal/search/handler.go`, `packages/db/queries/
+  search.sql`), but had never been mentioned in this file or browser-verified.
+  Verified today against the real running stack (`pnpm dev` pointed at the
+  live `api` container, not a rebuilt Docker image — the web container has no
+  volume mount, so its own build is stale): checkbox toggles update the URL
+  (`?seniority=internship&seniority=new_grad...`), Opportunities' seeded
+  defaults render correctly, and toggling a facet on either page re-fires a
+  real request against the live API and changes the real result set (a
+  Senior SRE role appeared on Opportunities after checking "Senior"; Search's
+  result count and network calls both reflected an added `role_family`
+  filter). Zero console errors across the whole session.
+
+- **CI has been red on every push since 2026-08-23, for four unrelated real
+  reasons — none of them what anyone would have guessed from the commit
+  history:**
+  1. **The `go` job's "pass" was a false green.** It has never had a
+     Postgres service. 20 test files (`grep -rl "testPool(t)"`) silently
+     `t.Skip()` without one — `TestSearch_MatchesOnTitle`,
+     `TestList_OnlyReturnsCompaniesWithAtLeastOneOpenJob`,
+     `TestReviewShadowSources`, all of `apps/notifier/internal/trigger`'s
+     deadline tests, all of it — none of these have ever actually executed
+     in CI, on any push, ever. Fixed by adding the same `pgvector/
+     pgvector:pg16` Postgres service the `migrations` job already uses,
+     applying migrations the same way, and seeding the sole user +
+     `weight_version` via the new `infra/seed/seed.sql.example` (see the PII
+     item below for why that's the committed file and not `seed.sql`
+     itself). Verified for real, not just by editing YAML: stood up an
+     identical throwaway Postgres + Redis locally, ran `go test -count=1
+     ./...` against them — **0 skips, 0 failures**, the first time this
+     repository's test suite has ever actually exercised its
+     Postgres-backed tests end to end.
+  2. **golangci-lint failed with "the Go language version (go1.24) used to
+     build golangci-lint is lower than the targeted Go version (1.25.0)."**
+     `go.mod` requires `go 1.25.0` (bumped by a dependency, probably when
+     `golang.org/x/oauth2` was added for the Google Calendar integration);
+     `golangci-lint-action@v6`'s `version: latest` resolved a stale v1.64.8
+     binary that predates golangci-lint's v2 line and can't even parse
+     `.golangci.yml`'s `version: "2"` schema. Fixed: bumped the action to
+     `@v9` and pinned `version: v2.12.2` (matching the locally-installed
+     version this was verified against — `golangci-lint run` reports 0
+     issues), and bumped both `go` and `golangci` jobs' `actions/setup-go`
+     to `go-version: '1.25'` to match `go.mod` instead of silently relying
+     on Go's auto-toolchain-download to paper over the mismatch.
+  3. **sqlfluff failed on real, long-standing formatting violations — not
+     just in the one migration the first broken run happened to show.**
+     Re-ran with the exact CI-pinned `sqlfluff==3.5.0` (installed in an
+     isolated venv, not whatever was on the CLI PATH) against both
+     `infra/migrations` and `packages/db/queries` — the latter had never
+     actually run in this CI failure at all, since the workflow's two
+     sqlfluff steps are sequential and the first one failing skips the
+     second. Found 7 migrations and 15 query files with real violations
+     (indentation, capitalization, line length, join-operand order,
+     spacing). `sqlfluff fix` cleared all but one automatically; the one
+     manual fix was a >100-char string literal in `infra/migrations/
+     000019` (split across a `||` concatenation, identical resulting
+     string, verified against `apps/collector/internal/scheduler/
+     shadow.go`'s own construction of that exact text). One violation
+     wasn't a formatting issue at all: `packages/db/queries/dedup.sql`'s
+     `SelectStage2Candidates` had `LIMIT 200` with no `ORDER BY` — a real,
+     if narrow, dedup-candidate-selection determinism gap AGENTS.md rule 4
+     makes worth closing, not just silencing. Added `ORDER BY posted_at
+     DESC` (mirrors `SelectRecentDescriptionsForCompany`'s existing
+     convention in the same file) so a company that ever clears 200 open
+     roles in one role_family/seniority pair within 45 days gets a
+     deterministic, freshness-biased truncation instead of an arbitrary one
+     that could vary between calls. `docs/08-dedup-identity.md`'s own
+     literal copy of the query updated to match. `make db-generate` re-run
+     for every touched query file; `make db-verify` and the full Go test
+     suite both confirm nothing broke.
+  4. **`apps/web`'s typecheck step failed on `Cannot find name 'LayoutProps'`
+     in `app/layout.tsx`** — reproduced locally by deleting `.next` and
+     running `tsc --noEmit` alone (fails), then `next build` followed by
+     `tsc --noEmit` (passes). `LayoutProps` is a Next.js-generated ambient
+     type (`.next/types/**/*.ts`, referenced by `tsconfig.json`'s own
+     `include`) that only exists after `next build` or `next dev` has run
+     once — CI ran `typecheck` before `build`, so every fresh checkout hit
+     this; local runs only passed by accident, from `.next/types` left over
+     from earlier dev-server use in the same tree. Fixed by swapping the
+     step order.
+  5. Left alone, deliberately: the `eval harness` job's red X. It fails on
+     `classify_role`/`dedup` not clearing their docs/17 gate thresholds —
+     this is the exact, already-documented gap `evals/README.md`'s "Honest
+     current state" section describes (local-only Ollama tier in CI, no
+     hosted-cascade API key available there), not a new regression. Worth
+     revisiting when CI has a hosted provider key, not tonight.
+
+- **A real PII exposure was found and fixed while diagnosing the CI-Postgres
+  gap.** Seeding a fresh test database meant reading `infra/seed/seed.sql`
+  closely for the first time in a while, which turned out to hardcode real
+  personal data — actual university, degree, 2027 graduation year, and a
+  detailed, specifically-tailored skill/skill-level list — committed
+  (`afcc666`, `2c02bae`) and live on GitHub since the 2026-08-20 push. This
+  is the same class of leak this file already describes catching once, for
+  a *different* file (`infra/seed/resume.sql`) — that one was caught before
+  it ever reached a commit; this one wasn't, and had been public for six
+  days. Only the email address had been parameterized out (`:'user_email'`,
+  passed in by `infra/scripts/seed.sh`); everything else was hardcoded.
+  Remediated for real, not just going forward: `git filter-repo --path
+  infra/seed/seed.sql --invert-paths` against a fresh mirror clone (verified
+  zero remaining matches for the real university name across every commit
+  on every branch afterward, including the local-only `backup-pre-
+  rewrite-2026-08-20` branch, which had the same content), then `git push
+  --force-with-lease origin main`. Confirmed via the GitHub API that
+  `main` now points at the rewritten history and the file is absent from
+  the current tree. The repo has zero forks and zero stargazers, so no
+  other clone needed to be told to re-pull. `infra/seed/seed.sql` is now
+  gitignored (real data restored locally from a pre-purge mirror backup so
+  `make seed` keeps working unchanged); `infra/seed/seed.sql.example` is the
+  new committed placeholder template, same pattern as `resume.sql`/
+  `resume.sql.example`, and doubles as what CI now seeds a fresh test
+  database with (see the CI item above).
+
+Everything above is committed and pushed. Nothing in this update is still
+sitting uncommitted the way most of this file's earlier entries describe —
+that was itself part of what today's session found and closed.
