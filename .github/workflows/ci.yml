@@ -254,6 +254,18 @@ jobs:
           for f in infra/migrations/*.up.sql; do
             psql -v ON_ERROR_STOP=1 -h localhost -U scout -d scout -f "$f"
           done
+      # Three more apps/brain tests (test_embed_consumer's resume-embed
+      # dispatch, both of test_explain's integration tests) need a seeded
+      # app_user/weight_version and skip without one — same as the go
+      # job's own seed step, missed here the first time this was wired up
+      # (confirmed live: that first run showed "3 skipped").
+      - name: seed sole user and weight_version
+        env:
+          PGPASSWORD: scout_ci
+        run: |
+          psql -v ON_ERROR_STOP=1 -h localhost -U scout -d scout \
+            -v "user_email=ci@scout.local" \
+            -f infra/seed/seed.sql.example
       - name: install and start ollama
         run: |
           set -euo pipefail
