@@ -1,13 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchApplications, fetchJobs } from "@/lib/api";
 import { JobCard } from "@/components/JobCard";
+import { FilterBar } from "@/components/FilterBar";
 import { useLiveFeed } from "@/lib/useLiveFeed";
+import { useJobFilters, type JobFilters } from "@/lib/useJobFilters";
 import type { ApplicationItem, JobFeedItem } from "@/lib/types";
 
-const SENIORITY_FILTER = ["internship", "new_grad", "entry", "unknown"];
+// The starting filter this page always used before FilterBar existed —
+// seeded into the URL on first visit (useJobFilters.seedDefaults), not
+// hardcoded into the fetch itself, so it's a starting point the user can
+// see and change, not an invisible floor they can't get past.
+const DEFAULT_FILTERS: JobFilters = {
+  seniority: ["internship", "new_grad", "entry", "unknown"],
+  roleFamily: [],
+  workMode: [],
+  locationTier: [],
+  minPriority: 1,
+};
 
 function isNewToday(job: JobFeedItem): boolean {
   const iso = job.first_seen_at ?? job.posted_at;
@@ -47,12 +59,38 @@ function StatsStrip({ jobs, applications }: { jobs: JobFeedItem[]; applications:
 export default function OpportunitiesPage() {
   const queryClient = useQueryClient();
   const [newSinceMount, setNewSinceMount] = useState(0);
+  const { filters, hasAnyFilterParam, setFilters, seedDefaults } = useJobFilters();
+
+  useEffect(() => {
+    seedDefaults(DEFAULT_FILTERS);
+    // seedDefaults itself is stable-enough (memoized on searchParams) but
+    // only needs to run once per mount — re-running on every searchParams
+    // change would fight the user's own edits by re-checking "is a filter
+    // param present" against a URL that already has one because they just
+    // set it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Fetches with DEFAULT_FILTERS for the one render before seedDefaults'
+  // effect above has written them into the URL, rather than fetching
+  // unfiltered first and refetching once the URL catches up — same data
+  // either way, one fewer network round trip and no flash of an
+  // unfiltered (much larger) result set.
+  const effectiveFilters = hasAnyFilterParam ? filters : DEFAULT_FILTERS;
 
   const { data, isLoading, isError, error, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useInfiniteQuery({
-      queryKey: ["jobs", SENIORITY_FILTER],
+      queryKey: ["jobs", effectiveFilters],
       queryFn: ({ pageParam }: { pageParam?: string }) =>
-        fetchJobs({ minPriority: 1, seniority: SENIORITY_FILTER, cursor: pageParam, limit: 30 }),
+        fetchJobs({
+          minPriority: effectiveFilters.minPriority ?? undefined,
+          seniority: effectiveFilters.seniority,
+          roleFamily: effectiveFilters.roleFamily,
+          workMode: effectiveFilters.workMode,
+          locationTier: effectiveFilters.locationTier,
+          cursor: pageParam,
+          limit: 30,
+        }),
       initialPageParam: undefined as string | undefined,
       getNextPageParam: (lastPage) =>
         lastPage.page.has_more ? lastPage.page.next_cursor : undefined,
@@ -83,6 +121,8 @@ export default function OpportunitiesPage() {
         </div>
 
         {!isLoading && !isError && jobs.length > 0 && <StatsStrip jobs={jobs} applications={applications} />}
+
+        <FilterBar filters={effectiveFilters} onChange={setFilters} resultCount={isLoading ? undefined : jobs.length} />
 
         {newSinceMount > 0 && (
           <button
@@ -115,9 +155,8 @@ export default function OpportunitiesPage() {
 
         {!isLoading && !isError && jobs.length === 0 && (
           <div className="text-body text-text-secondary rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-8 text-center">
-            No jobs match right now. This filters to internship / new-grad /
-            unresolved seniority — check back after the next crawl, or adjust
-            source coverage.
+            No jobs match the current filters — try widening Seniority or
+            Location above, or Clear all.
           </div>
         )}
 

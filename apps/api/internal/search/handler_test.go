@@ -219,3 +219,136 @@ func TestSearch_MatchesOnCompanyName(t *testing.T) {
 		t.Error("expected a query matching the company's slug/name to find its job")
 	}
 }
+
+// insertSearchableJobWithAttrs is insertSearchableJob plus explicit
+// role_family/seniority/work_mode, for TestSearch_FiltersByFacet below —
+// a separate helper rather than widening insertSearchableJob's own
+// signature, so its three existing callers (which don't care about these
+// fields) stay untouched.
+func insertSearchableJobWithAttrs(t *testing.T, pool *pgxpool.Pool, title, roleFamily, seniority, workMode string) string {
+	t.Helper()
+	ctx := context.Background()
+	s := slug(t)
+
+	var companyID string
+	if err := pool.QueryRow(ctx, `
+		insert into company (slug, canonical_name, normalized_name, discovered_via)
+		values ($1::citext, $1::text, $1::citext, 'seed') returning id
+	`, s).Scan(&companyID); err != nil {
+		t.Fatalf("insert company: %v", err)
+	}
+
+	url := "https://example.test/" + s
+	var sourceID string
+	if err := pool.QueryRow(ctx, `
+		insert into source (company_id, kind, status, legal_posture, url, url_hash, next_poll_at)
+		values ($1::uuid, 'ats_greenhouse', 'active', 'permitted', $2, digest($2, 'sha256'), now() + interval '10 years')
+		returning id
+	`, companyID, url).Scan(&sourceID); err != nil {
+		t.Fatalf("insert source: %v", err)
+	}
+
+	var groupID string
+	if err := pool.QueryRow(ctx, `insert into job_group (company_id) values ($1::uuid) returning id`, companyID).
+		Scan(&groupID); err != nil {
+		t.Fatalf("insert job_group: %v", err)
+	}
+
+	canonicalURL := url + "/job"
+	canonicalHash := sha256.Sum256([]byte(canonicalURL))
+	contentHash := sha256.Sum256([]byte(canonicalURL + "-content"))
+	var jobID string
+	err := pool.QueryRow(ctx, `
+		insert into job (
+			job_group_id, company_id, primary_source_id, canonical_url, canonical_url_hash,
+			content_hash, title, normalized_title, description_text, apply_url, is_software, paid, status,
+			role_family, seniority, work_mode
+		) values (
+			$1::uuid, $2::uuid, $3::uuid, $4, $5,
+			$6, $7, $8, $9, $4, TRUE, 'paid', 'open',
+			$10::role_family, $11::seniority, $12::work_mode
+		) returning id
+	`, groupID, companyID, sourceID, canonicalURL, canonicalHash[:], contentHash[:], title, title, "Filter test fixture.",
+		roleFamily, seniority, workMode).Scan(&jobID)
+	if err != nil {
+		t.Fatalf("insert job: %v", err)
+	}
+
+	if _, err := pool.Exec(ctx, `update job_group set representative_job_id = $1::uuid where id = $2::uuid`,
+		jobID, groupID); err != nil {
+		t.Fatalf("set representative: %v", err)
+	}
+
+	t.Cleanup(func() {
+		ctx := context.Background()
+		_, _ = pool.Exec(ctx, `update job_group set representative_job_id = NULL where id = $1::uuid`, groupID)
+		_, _ = pool.Exec(ctx, `delete from job where job_group_id = $1::uuid`, groupID)
+		_, _ = pool.Exec(ctx, `delete from job_group where id = $1::uuid`, groupID)
+		_, _ = pool.Exec(ctx, `delete from source where company_id = $1::uuid`, companyID)
+		_, _ = pool.Exec(ctx, `delete from company where id = $1::uuid`, companyID)
+	})
+
+	return groupID
+}
+
+// TestSearch_FiltersByFacet is the contract test for tonight's addition
+// of role_family/seniority/work_mode filters to GET /v1/search
+// (packages/db/queries/search.sql, mirroring GET /v1/jobs' own
+// SelectJobFeed filters). Both fixtures share the same distinctive
+// keyword — a real, large corpus makes plain-keyword assertions fragile
+// (see TestSearch_MatchesOnTitle's own known flakiness against this same
+// dev database), but two jobs sharing a fabricated, unique title word are
+// robust regardless of corpus size: nothing else in a real database will
+// ever contain it.
+func TestSearch_FiltersByFacet(t *testing.T) {
+	pool := testPool(t)
+	h := New(pool, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
+
+	keyword := "Zqxvintern" + fmt.Sprintf("%08x", slugCounter.Add(1))
+	internID := insertSearchableJobWithAttrs(t, pool, keyword+" Backend Intern", "swe.backend", "internship", "remote")
+	seniorID := insertSearchableJobWithAttrs(t, pool, keyword+" Staff Engineer", "swe.backend", "staff", "onsite")
+
+	// Unfiltered: both fixtures should be findable by the shared keyword.
+	w := doSearch(t, h, "q="+keyword)
+	var resp searchResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !containsGroupID(resp.Data, internID) || !containsGroupID(resp.Data, seniorID) {
+		t.Fatalf("expected both fixtures in unfiltered results, got %d items", len(resp.Data))
+	}
+
+	// Filtered to seniority=internship: only the intern fixture should
+	// survive.
+	w = doSearch(t, h, "q="+keyword+"&seniority=internship")
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !containsGroupID(resp.Data, internID) {
+		t.Error("expected the internship fixture to survive seniority=internship")
+	}
+	if containsGroupID(resp.Data, seniorID) {
+		t.Error("expected the staff fixture to be excluded by seniority=internship")
+	}
+
+	// Filtered to work_mode=onsite: only the staff fixture should survive.
+	w = doSearch(t, h, "q="+keyword+"&work_mode=onsite")
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !containsGroupID(resp.Data, seniorID) {
+		t.Error("expected the staff fixture to survive work_mode=onsite")
+	}
+	if containsGroupID(resp.Data, internID) {
+		t.Error("expected the intern fixture (remote) to be excluded by work_mode=onsite")
+	}
+}
+
+func containsGroupID(items []searchResultItem, groupID string) bool {
+	for _, item := range items {
+		if item.JobGroupID == groupID {
+			return true
+		}
+	}
+	return false
+}

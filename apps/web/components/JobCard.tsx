@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { JobFeedItem } from "@/lib/types";
+import { SENIORITY_LABEL } from "@/lib/taxonomy";
 import { ScoreBadge } from "./ScoreBadge";
 import { StateControls } from "./StateControls";
 import { CompanyAvatar } from "./CompanyAvatar";
@@ -36,18 +37,12 @@ function formatComp(comp: JobFeedItem["compensation"]): string | null {
   return `₹${amount.toLocaleString("en-IN")}/mo`;
 }
 
-const SENIORITY_LABEL: Record<string, string> = {
-  internship: "Internship",
-  new_grad: "New grad",
-  entry: "Entry",
-  mid: "Mid",
-  senior: "Senior",
-  staff: "Staff",
-  unknown: "",
-};
-
 export function JobCard({ job }: { job: JobFeedItem }) {
-  const seniority = SENIORITY_LABEL[job.seniority] ?? "";
+  // "unknown" renders blank here (card text stays clean when
+  // classification found no signal), unlike lib/taxonomy's own
+  // "Unspecified" label — that one is for FilterBar, where an option
+  // needs a visible name to click on.
+  const seniority = job.seniority === "unknown" ? "" : (SENIORITY_LABEL[job.seniority] ?? "");
   const posted = timeAgo(job.first_seen_at ?? job.posted_at);
   const comp = formatComp(job.compensation);
 

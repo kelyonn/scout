@@ -107,8 +107,12 @@ func (h *Handler) Search(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	urlQuery := r.URL.Query()
 	rows, err := q.SearchJobs(ctx, db.SearchJobsParams{
 		Query: query, UserID: user.ID, WeightVersion: weightVersion, Limit: limit,
+		RoleFamilies: urlQuery["role_family"],
+		Seniorities:  urlQuery["seniority"],
+		WorkModes:    urlQuery["work_mode"],
 	})
 	if err != nil {
 		h.log.Error("search: query failed", "err", err)

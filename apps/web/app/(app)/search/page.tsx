@@ -4,14 +4,28 @@ import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { searchJobs } from "@/lib/api";
 import { JobCard } from "@/components/JobCard";
+import { FilterBar } from "@/components/FilterBar";
+import { useJobFilters } from "@/lib/useJobFilters";
+
+// GET /v1/search only accepts role_family/seniority/work_mode
+// (packages/db/queries/search.sql) — no location_tier or min_priority,
+// unlike the feed. Passed to FilterBar so it doesn't render controls
+// that would silently do nothing here.
+const SEARCH_FACETS = ["seniority", "workMode", "roleFamily"] as const;
 
 export default function SearchPage() {
   const [input, setInput] = useState("");
   const [query, setQuery] = useState("");
+  const { filters, setFilters } = useJobFilters();
 
   const { data, isLoading, isError, error, isFetched } = useQuery({
-    queryKey: ["search", query],
-    queryFn: () => searchJobs(query),
+    queryKey: ["search", query, filters],
+    queryFn: () =>
+      searchJobs(query, {
+        seniority: filters.seniority,
+        roleFamily: filters.roleFamily,
+        workMode: filters.workMode,
+      }),
     enabled: query.length > 0,
   });
 
@@ -43,6 +57,8 @@ export default function SearchPage() {
             Search
           </button>
         </form>
+
+        <FilterBar filters={filters} onChange={setFilters} facets={[...SEARCH_FACETS]} resultCount={isFetched ? results.length : undefined} />
 
         {isError && (
           <div className="text-body text-danger rounded-[var(--radius-card)] border border-danger/30 bg-danger/10 p-4">
