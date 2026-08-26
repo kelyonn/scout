@@ -1,13 +1,25 @@
 """Job posting TL;DR — packages/queue's TaskSummarize. A factual summary
 of the posting itself (what the company does, what the role is,
 requirements, pay), not a personalized match narrative — that is
-TaskExplain's job (job_score.explanation), unimplemented, and a different
-column on a different table. Consumes brain_deep TaskSummarize jobs,
-enqueued on demand by apps/api's job detail handler the first time a job
-is actually viewed — most of the 2,000+ ingested jobs are never looked at,
-so summarizing every one at ingest time would be mostly wasted Ollama
-compute for a local model that already has plenty to do (dedup Stage 3,
-Tier 2 classification).
+TaskExplain's job (job_score.explanation), a different column on a
+different table. Consumes brain_deep TaskSummarize jobs, enqueued on
+demand by apps/api's job detail handler the first time a job is actually
+viewed — most ingested jobs are never looked at, so summarizing every one
+at ingest time would be mostly wasted compute.
+
+**Constructed with a plain, local-only OllamaClient, not
+scout_brain.llm.CascadeClient** — unlike TaskClassifyTier2/TaskDedupStage3,
+this is not a data-sensitivity requirement (posting text is public; AGENTS.md
+rule 9 doesn't apply here the way it does to TaskExplain). It's a latency
+one: this is the one brain_deep task on a real interactive path — a user is
+looking at a loading state until it completes — and the shared hosted
+cascade's `RateLimitedProvider.call` blocks synchronously on its own rpm
+window before even attempting a hosted request, shared with whatever bulk
+TaskDedupStage3/TaskClassifyTier2 traffic happens to be running at that
+moment. A local qwen2.5:3b-instruct call measured ~2.4s and has no such
+queueing behind other tasks' rate limits — see worker.py's own comment
+and packages/queue's bulkBrainDeepPriority for the queue-ordering half of
+this same fix (2026-08-24).
 """
 
 from __future__ import annotations
