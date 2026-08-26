@@ -49,7 +49,11 @@ func TestParse_Standard(t *testing.T) {
 	if first.TitleRaw != "Backend Engineering Intern" {
 		t.Errorf("TitleRaw = %q", first.TitleRaw)
 	}
-	if first.ApplyURL != "https://jobs.smartrecruiters.com/AcmeHQ/post-001-backend-engineering-intern" {
+	// No SEO slug: the real list endpoint has no field to build one from
+	// (see publicPostingURL's own comment) — company identifier + id is
+	// the whole of what's actually available, and SmartRecruiters resolves
+	// that bare form fine.
+	if first.ApplyURL != "https://jobs.smartrecruiters.com/AcmeHQ/post-001" {
 		t.Errorf("ApplyURL = %q", first.ApplyURL)
 	}
 	if first.LocationRaw != "Bengaluru, Karnataka, in" {
@@ -161,7 +165,7 @@ func TestKind(t *testing.T) {
 func pageResponse(totalFound int, ids ...string) []byte {
 	content := make([]smartRecruitersPosting, len(ids))
 	for i, id := range ids {
-		content[i] = smartRecruitersPosting{ID: id, Name: "Job " + id, PostingURL: "https://jobs.smartrecruiters.com/AcmeHQ/" + id}
+		content[i] = smartRecruitersPosting{ID: id, Name: "Job " + id, Company: smartRecruitersCompany{Identifier: "AcmeHQ"}}
 	}
 	b, _ := json.Marshal(smartRecruitersResponse{TotalFound: totalFound, Content: content})
 	return b

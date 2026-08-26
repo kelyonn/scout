@@ -9,7 +9,7 @@
       "location": { "city": "Bengaluru", "region": "Karnataka", "country": "in", "remote": false },
       "department": { "label": "Engineering" },
       "typeOfEmployment": { "label": "Internship" },
-      "postingUrl": "https://jobs.smartrecruiters.com/AcmeHQ/post-001-backend-engineering-intern"
+      "company": { "identifier": "AcmeHQ" }
     }
   ]
 }

@@ -168,7 +168,20 @@ type smartRecruitersPosting struct {
 	Location         smartRecruitersLocation   `json:"location"`
 	Department       smartRecruitersNamedLabel `json:"department"`
 	TypeOfEmployment smartRecruitersNamedLabel `json:"typeOfEmployment"`
-	PostingURL       string                    `json:"postingUrl"`
+	Company          smartRecruitersCompany    `json:"company"`
+}
+
+// smartRecruitersCompany carries the tenant identifier
+// (`company.identifier`, e.g. "BoschGroup") used to build the public
+// posting URL. There never was a `postingUrl` field on this endpoint —
+// verified 2026-08-23 against a real captured response (Bosch, stored via
+// InsertParseErrorObservation after every posting failed Validate with
+// "empty apply URL"): the response has no field of that name, or any other
+// URL-shaped field, at all. `ref` exists but points at the API resource
+// (`api.smartrecruiters.com/v1/companies/{id}/postings/{postingId}`), not
+// the public apply page.
+type smartRecruitersCompany struct {
+	Identifier string `json:"identifier"`
 }
 
 type smartRecruitersLocation struct {
@@ -200,10 +213,11 @@ func (a *Adapter) Parse(_ context.Context, _ adapter.Source, raw *adapter.RawRes
 }
 
 func toPosting(c smartRecruitersPosting, raw *adapter.RawResponse) schema.Posting {
+	applyURL := publicPostingURL(c)
 	p := schema.Posting{
 		ExternalID:        c.ID,
-		URL:               c.PostingURL,
-		ApplyURL:          c.PostingURL,
+		URL:               applyURL,
+		ApplyURL:          applyURL,
 		TitleRaw:          c.Name,
 		Department:        c.Department.Label,
 		EmploymentTypeRaw: c.TypeOfEmployment.Label,
@@ -220,6 +234,20 @@ func toPosting(c smartRecruitersPosting, raw *adapter.RawResponse) schema.Postin
 	}
 
 	return p
+}
+
+// publicPostingURL builds the public jobs.smartrecruiters.com apply page
+// from the two identifiers the list endpoint actually returns —
+// company.identifier and the posting's own numeric id. SmartRecruiters
+// accepts this bare form with no SEO slug suffix; the slug is cosmetic,
+// not required for the link to resolve. Empty if either identifier is
+// missing, which Validate then correctly rejects as an implausible
+// response rather than writing a dead link.
+func publicPostingURL(c smartRecruitersPosting) string {
+	if c.Company.Identifier == "" || c.ID == "" {
+		return ""
+	}
+	return "https://jobs.smartrecruiters.com/" + c.Company.Identifier + "/" + c.ID
 }
 
 func locationLabel(loc smartRecruitersLocation) string {
