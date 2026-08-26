@@ -168,6 +168,99 @@ func TestEnqueueBrainDeep(t *testing.T) {
 	}
 }
 
+// TestEnqueueBrainDeep_SummarizeGetsHighPriority is the regression test for
+// a real, measured latency bug: before bulkBrainDeepPriority existed, every
+// brain_deep job shared river's default priority (1), so a TaskSummarize
+// enqueued on apps/api's interactive job-detail path landed at the back of
+// whatever bulk TaskDedupStage3/TaskClassifyTier2/TaskExplain backlog a
+// recent live run had just produced — 28,836 available brain_deep jobs,
+// confirmed live 2026-08-24. This asserts the fix directly: TaskSummarize
+// keeps river's default (highest) priority while every other task is
+// demoted, so river_job_prioritized_fetching_index's priority-first
+// ordering puts a fresh summary ahead of any bulk backlog regardless of
+// enqueue time.
+func TestEnqueueBrainDeep_SummarizeGetsHighPriority(t *testing.T) {
+	pool := testPool(t)
+	c, err := New(pool)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := context.Background()
+	cases := []struct {
+		task         BrainDeepTask
+		jobID        string
+		wantPriority int
+	}{
+		{TaskSummarize, "00000000-0000-0000-0000-0000000000f1", 1},
+		{TaskClassifyTier2, "00000000-0000-0000-0000-0000000000f2", bulkBrainDeepPriority},
+		{TaskExplain, "00000000-0000-0000-0000-0000000000f3", bulkBrainDeepPriority},
+	}
+
+	for _, tc := range cases {
+		jobID := tc.jobID
+		tx, err := pool.Begin(ctx)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		if enqueueErr := c.EnqueueBrainDeep(ctx, tx, jobID, tc.task); enqueueErr != nil {
+			t.Fatalf("EnqueueBrainDeep(%s): %v", tc.task, enqueueErr)
+		}
+		if commitErr := tx.Commit(ctx); commitErr != nil {
+			t.Fatalf("commit: %v", commitErr)
+		}
+		t.Cleanup(func() {
+			_, _ = pool.Exec(context.Background(), `delete from river_job where kind = 'brain_deep' and args->>'job_id' = $1`, jobID)
+		})
+
+		var priority int
+		err = pool.QueryRow(ctx,
+			`select priority from river_job where kind = 'brain_deep' and args->>'job_id' = $1`, jobID,
+		).Scan(&priority)
+		if err != nil {
+			t.Fatalf("query inserted job priority for %s: %v", tc.task, err)
+		}
+		if priority != tc.wantPriority {
+			t.Errorf("task=%s priority=%d, want %d", tc.task, priority, tc.wantPriority)
+		}
+	}
+}
+
+func TestEnqueueDedupStage3_GetsBulkPriority(t *testing.T) {
+	pool := testPool(t)
+	c, err := New(pool)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	ctx := context.Background()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	const jobID = "00000000-0000-0000-0000-0000000000e4"
+	if enqueueErr := c.EnqueueDedupStage3(ctx, tx, jobID, "00000000-0000-0000-0000-0000000000e5"); enqueueErr != nil {
+		t.Fatalf("EnqueueDedupStage3: %v", enqueueErr)
+	}
+	if commitErr := tx.Commit(ctx); commitErr != nil {
+		t.Fatalf("commit: %v", commitErr)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `delete from river_job where kind = 'brain_deep' and args->>'job_id' = $1`, jobID)
+	})
+
+	var priority int
+	err = pool.QueryRow(ctx,
+		`select priority from river_job where kind = 'brain_deep' and args->>'job_id' = $1`, jobID,
+	).Scan(&priority)
+	if err != nil {
+		t.Fatalf("query inserted job priority: %v", err)
+	}
+	if priority != bulkBrainDeepPriority {
+		t.Errorf("priority = %d, want %d (bulk)", priority, bulkBrainDeepPriority)
+	}
+}
+
 func TestEnqueueEmbedResume(t *testing.T) {
 	pool := testPool(t)
 	c, err := New(pool)

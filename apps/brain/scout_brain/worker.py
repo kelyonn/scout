@@ -59,14 +59,23 @@ def main() -> None:
     embed_pending_resumes(startup_conn, embedder)
     startup_conn.close()
 
-    # Public-data tasks (dedup adjudication, Tier 2 classification, posting
-    # summaries) get the full ADR-016 cascade — hosted providers first,
-    # local Ollama once they're exhausted or unconfigured. explain is
-    # deliberately excluded: it reads job_score's resume-derived match
-    # data, and AGENTS.md rule 9 requires that to stay local, so it builds
-    # its own OllamaClient below rather than sharing this one.
+    # Public-data bulk tasks (dedup adjudication, Tier 2 classification)
+    # get the full ADR-016 cascade — hosted providers first, local Ollama
+    # once they're exhausted or unconfigured. explain and summarize both
+    # build their own local-only OllamaClient below instead of sharing
+    # this one, for two different reasons: explain reads job_score's
+    # resume-derived match data (AGENTS.md rule 9 requires that stay
+    # local, regardless of speed); summarize is on a real interactive
+    # path (apps/api's job detail handler enqueues it the instant a user
+    # opens a job) and the shared cascade's rate limiter blocks on hosted
+    # providers' rpm windows shared with whatever bulk dedup/classify
+    # traffic is running — see summarize.py's own comment and
+    # packages/queue's bulkBrainDeepPriority for the queue-ordering half
+    # of this fix (2026-08-24). Both reuse one OllamaClient instance:
+    # brain_deep's tasks all run in the same single worker thread below,
+    # so there's no concurrency reason for two.
     llm = build_cascade_client(config.llm, config.ollama_host)
-    explain_llm = OllamaClient(config.ollama_host, model=config.llm.local_model)
+    local_llm = OllamaClient(config.ollama_host, model=config.llm.local_model)
 
     embed_conn = psycopg.connect(config.database_url, autocommit=False)
     embed_consumer = EmbedConsumer(embed_conn, embedder, role_index)
@@ -74,8 +83,8 @@ def main() -> None:
     brain_deep_conn = psycopg.connect(config.database_url, autocommit=False)
     dedup_stage3 = DedupStage3Consumer(brain_deep_conn, llm)
     classify_tier2 = ClassifyTier2Consumer(brain_deep_conn, llm)
-    summarize = SummarizeConsumer(brain_deep_conn, llm)
-    explain = ExplainConsumer(brain_deep_conn, explain_llm)
+    summarize = SummarizeConsumer(brain_deep_conn, local_llm)
+    explain = ExplainConsumer(brain_deep_conn, local_llm)
     brain_deep_consumer = BrainDeepConsumer(
         dedup_stage3, classify_tier2, summarize, explain
     )

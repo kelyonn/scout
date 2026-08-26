@@ -132,11 +132,36 @@ func (c *Client) EnqueueEmbedResume(ctx context.Context, tx pgx.Tx) error {
 	return nil
 }
 
+// bulkBrainDeepPriority is river's lowest priority (1 highest, 4 lowest —
+// infra/migrations/000010_river.up.sql's priority_in_range check), used
+// for every BrainDeepTask except TaskSummarize. TaskDedupStage3,
+// TaskClassifyTier2, and TaskExplain all run at ingest time, in bulk, for
+// every job the collector ever writes, with nobody waiting on any single
+// one of them — TaskSummarize is the one task on a real interactive path
+// (apps/api's job detail handler enqueues it the instant a user opens a
+// job, and the user is looking at a loading state until it completes).
+// Before this, every brain_deep job shared river's default priority (1),
+// so a freshly enqueued TaskSummarize landed at the back of whatever bulk
+// backlog a recent live run had just produced, ordered by scheduled_at
+// alone — confirmed live 2026-08-24: 28,836 available brain_deep jobs
+// after one 10-minute live run, a single-threaded consumer, and a real
+// summary request stuck behind all of them despite the LLM call itself
+// (a local Ollama call, ~2.4s measured) being fast. Demoting the bulk
+// tasks here means a fresh TaskSummarize is claimed on the consumer's very
+// next fetch regardless of backlog size — river_job_prioritized_fetching_index
+// sorts on priority before scheduled_at — without a second queue or a
+// second consumer thread.
+const bulkBrainDeepPriority = 4
+
 // EnqueueBrainDeep enqueues a brain_deep job for jobID/task, transactionally
 // with tx. For TaskDedupStage3, use EnqueueDedupStage3 instead — that task
 // needs the candidate job id this method has no way to carry.
 func (c *Client) EnqueueBrainDeep(ctx context.Context, tx pgx.Tx, jobID string, task BrainDeepTask) error {
-	_, err := c.river.InsertTx(ctx, tx, BrainDeepArgs{JobID: jobID, Task: task}, &river.InsertOpts{Queue: QueueBrainDeep})
+	opts := &river.InsertOpts{Queue: QueueBrainDeep}
+	if task != TaskSummarize {
+		opts.Priority = bulkBrainDeepPriority
+	}
+	_, err := c.river.InsertTx(ctx, tx, BrainDeepArgs{JobID: jobID, Task: task}, opts)
 	if err != nil {
 		return fmt.Errorf("queue: enqueue brain_deep: %w", err)
 	}
@@ -146,11 +171,12 @@ func (c *Client) EnqueueBrainDeep(ctx context.Context, tx pgx.Tx, jobID string, 
 // EnqueueDedupStage3 enqueues a TaskDedupStage3 brain_deep job comparing
 // jobID against candidateJobID — the pair Stage 2 found structurally
 // plausible but couldn't confirm (apps/collector/internal/dedup's
-// Stage2Result.Stage3CandidateJobID).
+// Stage2Result.Stage3CandidateJobID). Always bulk — see
+// bulkBrainDeepPriority's own comment.
 func (c *Client) EnqueueDedupStage3(ctx context.Context, tx pgx.Tx, jobID, candidateJobID string) error {
 	_, err := c.river.InsertTx(ctx, tx, BrainDeepArgs{
 		JobID: jobID, Task: TaskDedupStage3, CandidateJobID: candidateJobID,
-	}, &river.InsertOpts{Queue: QueueBrainDeep})
+	}, &river.InsertOpts{Queue: QueueBrainDeep, Priority: bulkBrainDeepPriority})
 	if err != nil {
 		return fmt.Errorf("queue: enqueue dedup stage3: %w", err)
 	}
