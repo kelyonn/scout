@@ -293,7 +293,7 @@ func completeSetup(ctx context.Context, pool *pgxpool.Pool, tg *telegram.Client,
 		return fmt.Errorf("save telegram channel: %w", err)
 	}
 
-	if _, err := tg.SendMessage(ctx, chatID, "✅ Scout is connected. You'll get job alerts here."); err != nil {
+	if _, err := tg.SendMessage(ctx, chatID, "Scout is connected. You'll get job alerts here."); err != nil {
 		log.Warn("setup: confirmation message failed to send", "err", err)
 	}
 

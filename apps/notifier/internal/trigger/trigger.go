@@ -60,16 +60,27 @@ const (
 )
 
 // Payload is what a notification's rendering needs — deliver.go's Telegram
-// formatter reads this back out. Kept intentionally small; docs/11 section
-// 6.1's richer message (skills matched, missing skills, time-to-apply
-// estimate) needs data this pass doesn't compute yet.
+// formatter reads this back out. Extended 2026-08-24 with everything
+// SelectUnnotifiedJobGroups already had on hand but wasn't passing
+// through — role family, seniority, work mode, freshness, and
+// job_score.explanation (docs/09's "why this matched you," always
+// populated by score time, upgraded to an LLM sentence later by
+// TaskExplain when it beats this notification to the punch) — closing
+// most of docs/11 section 6.1's "richer message" gap without new scoring
+// work: it was already computed, just not threaded through to here.
+// time-to-apply estimate is still not computed anywhere and stays out.
 type Payload struct {
 	Title                  string     `json:"title"`
 	CompanyName            string     `json:"company_name,omitempty"`
 	ApplyURL               string     `json:"apply_url"`
 	LocationCity           string     `json:"location_city,omitempty"`
+	WorkMode               string     `json:"work_mode,omitempty"`
+	RoleFamily             string     `json:"role_family,omitempty"`
+	Seniority              string     `json:"seniority,omitempty"`
 	CompNormalizedINRMonth *int64     `json:"comp_normalized_inr_month,omitempty"`
+	PostedAt               *time.Time `json:"posted_at,omitempty"`
 	DeadlineAt             *time.Time `json:"deadline_at,omitempty"`
+	Explanation            string     `json:"explanation,omitempty"`
 }
 
 // Evaluator runs docs/11 section 8 steps 2-4 (eligibility, trigger
@@ -248,15 +259,29 @@ func (e *Evaluator) insertNotification(
 }
 
 func toPayload(row db.SelectUnnotifiedJobGroupsRow) Payload {
-	p := Payload{Title: row.Title, CompanyName: row.CompanyName, ApplyURL: row.ApplyUrl}
+	p := Payload{
+		Title:       row.Title,
+		CompanyName: row.CompanyName,
+		ApplyURL:    row.ApplyUrl,
+		WorkMode:    string(row.WorkMode),
+		RoleFamily:  string(row.RoleFamily),
+		Seniority:   string(row.Seniority),
+	}
 	if row.LocationCity != nil {
 		p.LocationCity = *row.LocationCity
+	}
+	if row.Explanation != nil {
+		p.Explanation = *row.Explanation
 	}
 	if row.CompNormalizedInrMonth.Valid {
 		if f, err := row.CompNormalizedInrMonth.Float64Value(); err == nil && f.Valid {
 			v := int64(f.Float64)
 			p.CompNormalizedINRMonth = &v
 		}
+	}
+	if row.PostedAt.Valid {
+		t := row.PostedAt.Time
+		p.PostedAt = &t
 	}
 	return p
 }
