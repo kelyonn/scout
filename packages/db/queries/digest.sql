@@ -39,8 +39,8 @@ select
     coalesce(js.priority, 0)::smallint as priority
 from job_group as jg
 inner join job as j on jg.representative_job_id = j.id
-inner join company as c on c.id = j.company_id
-left join job_score as js on js.job_id = j.id
+inner join company as c on j.company_id = c.id
+left join job_score as js on j.id = js.job_id
     and js.user_id = sqlc.arg(user_id)::uuid
     and js.weight_version = sqlc.arg(weight_version)::text
 where j.status = 'open'
@@ -62,14 +62,17 @@ where j.status = 'open'
 -- Tracked jobs (user_job_state, any non-terminal state) with a deadline in
 -- the near future — docs/11 section 6.5's "Closing soon" section.
 select
-    jg.id as job_group_id, c.canonical_name as company_name, j.title, j.deadline_at
+    jg.id as job_group_id,
+c.canonical_name as company_name,
+j.title,
+j.deadline_at
 from user_job_state as ujs
-inner join job_group as jg on jg.id = ujs.job_group_id
-inner join job as j on j.id = jg.representative_job_id
-inner join company as c on c.id = j.company_id
+inner join job_group as jg on ujs.job_group_id = jg.id
+inner join job as j on jg.representative_job_id = j.id
+inner join company as c on j.company_id = c.id
 where ujs.user_id = sqlc.arg(user_id)::uuid
     and ujs.state not in ('rejected', 'withdrawn', 'dismissed', 'accepted', 'expired')
-    and j.deadline_at is not null
+    and j.deadline_at is not NULL
     and j.deadline_at between sqlc.arg(after)::timestamptz and sqlc.arg(before)::timestamptz
 order by j.deadline_at asc
 limit sqlc.arg(limit_)::int;

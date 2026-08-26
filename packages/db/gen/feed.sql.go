@@ -39,41 +39,41 @@ select
     coalesce(ujs.state::text, 'new')::text as state
 from job_group as jg
 inner join job as j on jg.representative_job_id = j.id
-inner join company as c on c.id = j.company_id
-left join job_score as js on js.job_id = j.id
+inner join company as c on j.company_id = c.id
+left join job_score as js on j.id = js.job_id
     and js.user_id = $1::uuid
     and js.weight_version = $2::text
-left join user_job_state as ujs on ujs.job_group_id = jg.id
+left join user_job_state as ujs on jg.id = ujs.job_group_id
     and ujs.user_id = $1::uuid
 where j.status = 'open'
     and j.is_software = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and coalesce(js.priority, 0) >= 92))
     and (
-        $3::text[] is null
-        or j.role_family = any($3::text[]::role_family[])
+        $3::text [] is NULL
+        or j.role_family = any($3::text []::role_family [])
     )
     and (
-        $4::text[] is null
-        or j.seniority = any($4::text[]::seniority[])
+        $4::text [] is NULL
+        or j.seniority = any($4::text []::seniority [])
     )
     and (
-        $5::smallint[] is null
-        or j.location_tier = any($5::smallint[])
+        $5::smallint [] is NULL
+        or j.location_tier = any($5::smallint [])
     )
     and (
-        $6::text[] is null
-        or j.work_mode = any($6::text[]::work_mode[])
+        $6::text [] is NULL
+        or j.work_mode = any($6::text []::work_mode [])
     )
     and (
-        $7::uuid[] is null
-        or c.id = any($7::uuid[])
+        $7::uuid [] is NULL
+        or c.id = any($7::uuid [])
     )
     and (
-        $8::smallint is null
+        $8::smallint is NULL
         or coalesce(js.priority, 0) >= $8::smallint
     )
     and (
-        $9::smallint is null
+        $9::smallint is NULL
         or coalesce(js.priority, 0) < $9::smallint
         or (
             coalesce(js.priority, 0) = $9::smallint

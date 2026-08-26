@@ -29,10 +29,10 @@ select
     c.hq_country,
     count(j.id) filter (where j.status = 'open' and j.is_software = TRUE) as open_job_count
 from company as c
-inner join job as j on j.company_id = c.id
-where c.deleted_at is null
+inner join job as j on c.id = j.company_id
+where c.deleted_at is NULL
     and (
-        sqlc.narg(query)::text is null
+        sqlc.narg(query)::text is NULL
         or c.normalized_name ilike '%' || sqlc.narg(query)::text || '%'
     )
 group by c.id
@@ -62,7 +62,7 @@ select
     c.engineering_score,
     count(j.id) filter (where j.status = 'open' and j.is_software = TRUE) as open_job_count
 from company as c
-left join job as j on j.company_id = c.id
+left join job as j on c.id = j.company_id
 where c.id = sqlc.arg(id)::uuid
-    and c.deleted_at is null
+    and c.deleted_at is NULL
 group by c.id;

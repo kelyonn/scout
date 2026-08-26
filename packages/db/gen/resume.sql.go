@@ -12,7 +12,13 @@ import (
 )
 
 const getResume = `-- name: GetResume :one
-select id, user_id, raw_text, (embedding is not null)::boolean as has_embedding, embedding_version, updated_at
+select
+    id,
+user_id,
+raw_text,
+(embedding is not NULL)::boolean as has_embedding,
+embedding_version,
+updated_at
 from resume
 where user_id = $1::uuid
 `
@@ -47,7 +53,7 @@ func (q *Queries) GetResume(ctx context.Context, userID pgtype.UUID) (GetResumeR
 
 const updateUserProfileSkills = `-- name: UpdateUserProfileSkills :exec
 update user_profile
-set skills = $1::text[],
+set skills = $1::text [],
     skill_levels = $2::jsonb,
     updated_at = now()
 where user_id = $3::uuid

@@ -46,41 +46,41 @@ select
     coalesce(ujs.state::text, 'new')::text as state
 from job_group as jg
 inner join job as j on jg.representative_job_id = j.id
-inner join company as c on c.id = j.company_id
-left join job_score as js on js.job_id = j.id
+inner join company as c on j.company_id = c.id
+left join job_score as js on j.id = js.job_id
     and js.user_id = sqlc.arg(user_id)::uuid
     and js.weight_version = sqlc.arg(weight_version)::text
-left join user_job_state as ujs on ujs.job_group_id = jg.id
+left join user_job_state as ujs on jg.id = ujs.job_group_id
     and ujs.user_id = sqlc.arg(user_id)::uuid
 where j.status = 'open'
     and j.is_software = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and coalesce(js.priority, 0) >= 92))
     and (
-        sqlc.narg(role_families)::text[] is null
-        or j.role_family = any(sqlc.narg(role_families)::text[]::role_family[])
+        sqlc.narg(role_families)::text [] is NULL
+        or j.role_family = any(sqlc.narg(role_families)::text []::role_family [])
     )
     and (
-        sqlc.narg(seniorities)::text[] is null
-        or j.seniority = any(sqlc.narg(seniorities)::text[]::seniority[])
+        sqlc.narg(seniorities)::text [] is NULL
+        or j.seniority = any(sqlc.narg(seniorities)::text []::seniority [])
     )
     and (
-        sqlc.narg(location_tiers)::smallint[] is null
-        or j.location_tier = any(sqlc.narg(location_tiers)::smallint[])
+        sqlc.narg(location_tiers)::smallint [] is NULL
+        or j.location_tier = any(sqlc.narg(location_tiers)::smallint [])
     )
     and (
-        sqlc.narg(work_modes)::text[] is null
-        or j.work_mode = any(sqlc.narg(work_modes)::text[]::work_mode[])
+        sqlc.narg(work_modes)::text [] is NULL
+        or j.work_mode = any(sqlc.narg(work_modes)::text []::work_mode [])
     )
     and (
-        sqlc.narg(company_ids)::uuid[] is null
-        or c.id = any(sqlc.narg(company_ids)::uuid[])
+        sqlc.narg(company_ids)::uuid [] is NULL
+        or c.id = any(sqlc.narg(company_ids)::uuid [])
     )
     and (
-        sqlc.narg(min_priority)::smallint is null
+        sqlc.narg(min_priority)::smallint is NULL
         or coalesce(js.priority, 0) >= sqlc.narg(min_priority)::smallint
     )
     and (
-        sqlc.narg(cursor_priority)::smallint is null
+        sqlc.narg(cursor_priority)::smallint is NULL
         or coalesce(js.priority, 0) < sqlc.narg(cursor_priority)::smallint
         or (
             coalesce(js.priority, 0) = sqlc.narg(cursor_priority)::smallint

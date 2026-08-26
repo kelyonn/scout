@@ -34,7 +34,8 @@ func (q *Queries) AdvisoryLockCompanyDedup(ctx context.Context, companyID string
 }
 
 const deleteJobGroup = `-- name: DeleteJobGroup :exec
-delete from job_group where id = $1::uuid
+delete from job_group
+where id = $1::uuid
 `
 
 func (q *Queries) DeleteJobGroup(ctx context.Context, id pgtype.UUID) error {
@@ -43,7 +44,9 @@ func (q *Queries) DeleteJobGroup(ctx context.Context, id pgtype.UUID) error {
 }
 
 const insertJobMergeEvent = `-- name: InsertJobMergeEvent :exec
-insert into job_merge_event (job_id, matched_job_id, from_group_id, into_group_id, stage, certainty, signal)
+insert into job_merge_event (
+    job_id, matched_job_id, from_group_id, into_group_id, stage, certainty, signal
+)
 values (
     $1::uuid, $2::uuid,
     $3::uuid, $4::uuid,
@@ -94,7 +97,10 @@ func (q *Queries) ReassignJobsToGroup(ctx context.Context, arg ReassignJobsToGro
 }
 
 const selectJobGroupForMerge = `-- name: SelectJobGroupForMerge :one
-select id, first_seen_at, member_count
+select
+id,
+first_seen_at,
+member_count
 from job_group
 where id = $1::uuid
 `
@@ -214,6 +220,7 @@ where company_id = $1::uuid
     and posted_at > now() - interval '45 days'
     and deleted_at is NULL
     and id != $4::uuid
+order by posted_at desc
 limit 200
 `
 
@@ -242,6 +249,13 @@ type SelectStage2CandidatesRow struct {
 // table requires ("Distinct seniority: Never merged") even though the
 // section 3.2 query this is otherwise copied from doesn't show one.
 // Excludes the job just inserted by this same call (excluding_job_id).
+// Deterministic truncation, and biased toward the candidates most likely to
+// actually be the same posting: a company that clears 200 open roles in one
+// role_family/seniority pair within 45 days is rare, but an unordered LIMIT
+// there would silently drop an arbitrary, non-reproducible subset — the same
+// call could gate a different set of candidates on a retry. AGENTS.md rule 4
+// (bias dedup toward under-merging) makes that the wrong kind of randomness
+// to have here.
 func (q *Queries) SelectStage2Candidates(ctx context.Context, arg SelectStage2CandidatesParams) ([]SelectStage2CandidatesRow, error) {
 	rows, err := q.db.Query(ctx, selectStage2Candidates,
 		arg.CompanyID,

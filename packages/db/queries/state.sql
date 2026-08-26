@@ -80,14 +80,14 @@ select
     ujs.applied_at
 from user_job_state as ujs
 inner join job_group as jg on ujs.job_group_id = jg.id
-inner join job as j on j.id = jg.representative_job_id
-inner join company as c on c.id = j.company_id
-left join job_score as js on js.job_id = j.id
+inner join job as j on jg.representative_job_id = j.id
+inner join company as c on j.company_id = c.id
+left join job_score as js on j.id = js.job_id
     and js.user_id = sqlc.arg(user_id)::uuid
     and js.weight_version = sqlc.arg(weight_version)::text
 where ujs.user_id = sqlc.arg(user_id)::uuid
     and (
-        sqlc.narg(states)::text[] is null
-        or ujs.state = any(sqlc.narg(states)::text[]::application_state[])
+        sqlc.narg(states)::text [] is NULL
+        or ujs.state = any(sqlc.narg(states)::text []::application_state [])
     )
 order by ujs.state_changed_at desc;

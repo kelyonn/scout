@@ -12,7 +12,8 @@ import (
 )
 
 const deleteGoogleCalendarCredential = `-- name: DeleteGoogleCalendarCredential :exec
-delete from google_calendar_credential where user_id = $1::uuid
+delete from google_calendar_credential
+where user_id = $1::uuid
 `
 
 func (q *Queries) DeleteGoogleCalendarCredential(ctx context.Context, userID pgtype.UUID) error {
@@ -21,7 +22,8 @@ func (q *Queries) DeleteGoogleCalendarCredential(ctx context.Context, userID pgt
 }
 
 const deleteGoogleCalendarEventsForUser = `-- name: DeleteGoogleCalendarEventsForUser :exec
-delete from google_calendar_event where user_id = $1::uuid
+delete from google_calendar_event
+where user_id = $1::uuid
 `
 
 // Run on disconnect — the stored google_event_id values are meaningless
@@ -34,7 +36,8 @@ func (q *Queries) DeleteGoogleCalendarEventsForUser(ctx context.Context, userID 
 }
 
 const getGoogleCalendarCredential = `-- name: GetGoogleCalendarCredential :one
-select id, user_id, access_token, refresh_token, token_expiry, calendar_id, connected_at, updated_at from google_calendar_credential where user_id = $1::uuid
+select id, user_id, access_token, refresh_token, token_expiry, calendar_id, connected_at, updated_at from google_calendar_credential
+where user_id = $1::uuid
 `
 
 func (q *Queries) GetGoogleCalendarCredential(ctx context.Context, userID pgtype.UUID) (GoogleCalendarCredential, error) {
@@ -54,7 +57,8 @@ func (q *Queries) GetGoogleCalendarCredential(ctx context.Context, userID pgtype
 }
 
 const getGoogleCalendarEvent = `-- name: GetGoogleCalendarEvent :one
-select job_group_id, user_id, google_event_id, pushed_at, updated_at from google_calendar_event where job_group_id = $1::uuid
+select job_group_id, user_id, google_event_id, pushed_at, updated_at from google_calendar_event
+where job_group_id = $1::uuid
 `
 
 func (q *Queries) GetGoogleCalendarEvent(ctx context.Context, jobGroupID pgtype.UUID) (GoogleCalendarEvent, error) {
@@ -78,12 +82,12 @@ select
     j.deadline_at,
     j.apply_url
 from user_job_state as ujs
-inner join job_group as jg on jg.id = ujs.job_group_id
-inner join job as j on j.id = jg.representative_job_id
-inner join company as c on c.id = j.company_id
+inner join job_group as jg on ujs.job_group_id = jg.id
+inner join job as j on jg.representative_job_id = j.id
+inner join company as c on j.company_id = c.id
 where ujs.user_id = $1::uuid
     and ujs.state not in ('dismissed', 'rejected', 'withdrawn', 'expired')
-    and j.deadline_at is not null
+    and j.deadline_at is not NULL
     and j.deadline_at > now()
 `
 
@@ -152,8 +156,16 @@ func (q *Queries) UpdateGoogleCalendarTokens(ctx context.Context, arg UpdateGoog
 
 const upsertGoogleCalendarCredential = `-- name: UpsertGoogleCalendarCredential :one
 
-insert into google_calendar_credential (user_id, access_token, refresh_token, token_expiry, calendar_id)
-values ($1::uuid, $2::text, $3::text, $4::timestamptz, $5::text)
+insert into google_calendar_credential (
+    user_id, access_token, refresh_token, token_expiry, calendar_id
+)
+values (
+    $1::uuid,
+    $2::text,
+    $3::text,
+    $4::timestamptz,
+    $5::text
+)
 on conflict (user_id) do update set
     access_token = excluded.access_token,
     -- Google's OAuth token endpoint only returns a refresh_token on the
@@ -162,7 +174,11 @@ on conflict (user_id) do update set
     -- empty refresh_token, and overwriting a real one with empty would
     -- silently break every future refresh. coalesce with the existing
     -- row's value rather than excluded's whenever the new one is empty.
-    refresh_token = case when excluded.refresh_token = '' then google_calendar_credential.refresh_token else excluded.refresh_token end,
+    refresh_token
+    = case
+        when excluded.refresh_token = '' then google_calendar_credential.refresh_token else
+            excluded.refresh_token
+    end,
     token_expiry = excluded.token_expiry,
     updated_at = now()
 returning id, user_id, access_token, refresh_token, token_expiry, calendar_id, connected_at, updated_at

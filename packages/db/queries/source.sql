@@ -72,7 +72,7 @@ for update skip locked;
 -- TTL, applied here via a column this table already had.
 update source
 set next_poll_at = sqlc.arg(claimed_until)::timestamptz
-where id = any(sqlc.arg(ids)::uuid[]);
+where id = any(sqlc.arg(ids)::uuid []);
 
 -- name: UpdateSourceAfterPoll :one
 -- Persists the outcome of one poll cycle. Every value here is computed by the
@@ -129,7 +129,8 @@ set
     total_successes = total_successes + case when sqlc.arg(success)::boolean then 1 else 0 end,
     total_jobs_found = total_jobs_found + sqlc.arg(jobs_found)::bigint,
     total_new_jobs = total_new_jobs + sqlc.arg(new_jobs)::bigint,
-    yield_ratio = yield_ratio * 0.99 + (case when sqlc.arg(new_jobs)::bigint > 0 then 1 else 0 end) * 0.01,
+    yield_ratio
+    = yield_ratio * 0.99 + (case when sqlc.arg(new_jobs)::bigint > 0 then 1 else 0 end) * 0.01,
     yield_computed_at = now(),
     updated_at = now()
 where id = sqlc.arg(id)::uuid
@@ -217,7 +218,7 @@ from source
 where status = 'pending_review'
     and shadow_reviewed_at is NULL
     and legal_posture in ('permitted', 'api_only')
-    and first_polled_at is not null
+    and first_polled_at is not NULL
     and first_polled_at <= now() - interval '48 hours'
 order by first_polled_at asc
 limit sqlc.arg(batch_limit)::int;

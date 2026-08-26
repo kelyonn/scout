@@ -6,4 +6,4 @@
 -- graduating-in-a-year user this was added for wants it on today and off
 -- once target_seniority itself widens past internship/new_grad.
 ALTER TABLE user_profile
-    ADD COLUMN seniority_filter_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ADD COLUMN seniority_filter_enabled BOOLEAN NOT NULL DEFAULT TRUE;

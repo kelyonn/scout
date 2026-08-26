@@ -3,8 +3,16 @@
 -- in this schema (ADR-015).
 
 -- name: UpsertGoogleCalendarCredential :one
-insert into google_calendar_credential (user_id, access_token, refresh_token, token_expiry, calendar_id)
-values (sqlc.arg(user_id)::uuid, sqlc.arg(access_token)::text, sqlc.arg(refresh_token)::text, sqlc.arg(token_expiry)::timestamptz, sqlc.arg(calendar_id)::text)
+insert into google_calendar_credential (
+    user_id, access_token, refresh_token, token_expiry, calendar_id
+)
+values (
+    sqlc.arg(user_id)::uuid,
+    sqlc.arg(access_token)::text,
+    sqlc.arg(refresh_token)::text,
+    sqlc.arg(token_expiry)::timestamptz,
+    sqlc.arg(calendar_id)::text
+)
 on conflict (user_id) do update set
     access_token = excluded.access_token,
     -- Google's OAuth token endpoint only returns a refresh_token on the
@@ -13,16 +21,22 @@ on conflict (user_id) do update set
     -- empty refresh_token, and overwriting a real one with empty would
     -- silently break every future refresh. coalesce with the existing
     -- row's value rather than excluded's whenever the new one is empty.
-    refresh_token = case when excluded.refresh_token = '' then google_calendar_credential.refresh_token else excluded.refresh_token end,
+    refresh_token
+    = case
+        when excluded.refresh_token = '' then google_calendar_credential.refresh_token else
+            excluded.refresh_token
+    end,
     token_expiry = excluded.token_expiry,
     updated_at = now()
 returning *;
 
 -- name: GetGoogleCalendarCredential :one
-select * from google_calendar_credential where user_id = sqlc.arg(user_id)::uuid;
+select * from google_calendar_credential
+where user_id = sqlc.arg(user_id)::uuid;
 
 -- name: DeleteGoogleCalendarCredential :exec
-delete from google_calendar_credential where user_id = sqlc.arg(user_id)::uuid;
+delete from google_calendar_credential
+where user_id = sqlc.arg(user_id)::uuid;
 
 -- name: UpdateGoogleCalendarTokens :exec
 -- Called after a refresh-token round trip, which never returns a new
@@ -43,14 +57,16 @@ on conflict (job_group_id) do update set
     updated_at = now();
 
 -- name: GetGoogleCalendarEvent :one
-select * from google_calendar_event where job_group_id = sqlc.arg(job_group_id)::uuid;
+select * from google_calendar_event
+where job_group_id = sqlc.arg(job_group_id)::uuid;
 
 -- name: DeleteGoogleCalendarEventsForUser :exec
 -- Run on disconnect — the stored google_event_id values are meaningless
 -- once the credential that could act on them is gone, and keeping them
 -- would make a future reconnect silently "update" events in whatever
 -- Google account gets connected next.
-delete from google_calendar_event where user_id = sqlc.arg(user_id)::uuid;
+delete from google_calendar_event
+where user_id = sqlc.arg(user_id)::uuid;
 
 -- name: SelectApplicationsWithDeadlines :many
 -- The push direction's source data: every tracked (saved and beyond)
@@ -66,10 +82,10 @@ select
     j.deadline_at,
     j.apply_url
 from user_job_state as ujs
-inner join job_group as jg on jg.id = ujs.job_group_id
-inner join job as j on j.id = jg.representative_job_id
-inner join company as c on c.id = j.company_id
+inner join job_group as jg on ujs.job_group_id = jg.id
+inner join job as j on jg.representative_job_id = j.id
+inner join company as c on j.company_id = c.id
 where ujs.user_id = sqlc.arg(user_id)::uuid
     and ujs.state not in ('dismissed', 'rejected', 'withdrawn', 'expired')
-    and j.deadline_at is not null
+    and j.deadline_at is not NULL
     and j.deadline_at > now();

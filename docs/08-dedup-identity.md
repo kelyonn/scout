@@ -168,6 +168,7 @@ WHERE company_id = :company_id            -- indexed
   AND role_family = :role_family          -- indexed
   AND posted_at > now() - interval '45 days'
   AND deleted_at IS NULL
+ORDER BY posted_at DESC                   -- deterministic truncation below
 LIMIT 200;
 ```
 

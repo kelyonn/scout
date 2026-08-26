@@ -17,10 +17,16 @@
 -- the catalog email ingestion is actually contributing.
 with new_company as (
     insert into company (slug, canonical_name, normalized_name, discovered_via)
-    values (sqlc.arg(slug)::citext, sqlc.arg(canonical_name)::text, sqlc.arg(normalized_name)::citext, 'email_alert')
+    values (
+        sqlc.arg(slug)::citext,
+        sqlc.arg(canonical_name)::text,
+        sqlc.arg(normalized_name)::citext,
+        'email_alert'
+    )
     on conflict (slug) do update set slug = excluded.slug
     returning id
 )
+
 select id from new_company;
 
 -- name: FindOrCreateEmailAlertSource :one
@@ -32,10 +38,14 @@ select id from new_company;
 with new_source as (
     insert into source (company_id, kind, url, url_hash, legal_posture, status, adapter_config)
     values (
-        sqlc.arg(company_id)::uuid, 'email_alert', sqlc.arg(url)::text, digest(sqlc.arg(url)::text, 'sha256'),
+        sqlc.arg(company_id)::uuid,
+        'email_alert',
+        sqlc.arg(url)::text,
+        digest(sqlc.arg(url)::text, 'sha256'),
         'email_only', 'active', sqlc.arg(adapter_config)::jsonb
     )
     on conflict (url_hash) do update set url = excluded.url
     returning id
 )
+
 select id from new_source;

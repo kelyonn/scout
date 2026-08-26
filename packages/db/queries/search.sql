@@ -36,17 +36,33 @@ select
     ts_rank(j.search_vector, websearch_to_tsquery('english', sqlc.arg(query)::text)) as rank
 from job_group as jg
 inner join job as j on jg.representative_job_id = j.id
-inner join company as c on c.id = j.company_id
-left join job_score as js on js.job_id = j.id
+inner join company as c on j.company_id = c.id
+left join job_score as js on j.id = js.job_id
     and js.user_id = sqlc.arg(user_id)::uuid
     and js.weight_version = sqlc.arg(weight_version)::text
-left join user_job_state as ujs on ujs.job_group_id = jg.id
+left join user_job_state as ujs on jg.id = ujs.job_group_id
     and ujs.user_id = sqlc.arg(user_id)::uuid
 where j.status = 'open'
     and j.is_software = TRUE
     and (
         j.search_vector @@ websearch_to_tsquery('english', sqlc.arg(query)::text)
         or c.canonical_name ilike '%' || sqlc.arg(query)::text || '%'
+    )
+    -- Same optional-filter shape as feed.sql's SelectJobFeed — a NULL
+    -- array means "no filter," not "match nothing" (sqlc.narg, not
+    -- sqlc.arg, so a caller that omits the param entirely gets NULL
+    -- rather than an empty-array failure).
+    and (
+        sqlc.narg(role_families)::text [] is NULL
+        or j.role_family = any(sqlc.narg(role_families)::text []::role_family [])
+    )
+    and (
+        sqlc.narg(seniorities)::text [] is NULL
+        or j.seniority = any(sqlc.narg(seniorities)::text []::seniority [])
+    )
+    and (
+        sqlc.narg(work_modes)::text [] is NULL
+        or j.work_mode = any(sqlc.narg(work_modes)::text []::work_mode [])
     )
 order by rank desc, coalesce(js.priority, 0) desc
 limit sqlc.arg(limit_)::int;

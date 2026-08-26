@@ -24,8 +24,8 @@ CREATE TYPE river_job_state AS ENUM (
 );
 
 CREATE FUNCTION river_job_state_in_bitmask(bitmask BIT, state river_job_state) RETURNS BOOLEAN
-    LANGUAGE SQL IMMUTABLE
-    AS $$
+LANGUAGE sql IMMUTABLE
+AS $$
     SELECT CASE state
         WHEN 'available' THEN get_bit(bitmask, 7)
         WHEN 'cancelled' THEN get_bit(bitmask, 6)
@@ -75,12 +75,14 @@ ALTER SEQUENCE river_job_id_seq OWNED BY river_job.id;
 CREATE INDEX river_job_args_index ON river_job USING gin (args);
 CREATE INDEX river_job_kind ON river_job USING btree (kind);
 CREATE INDEX river_job_metadata_index ON river_job USING gin (metadata);
-CREATE INDEX river_job_prioritized_fetching_index ON river_job USING btree (state, queue, priority, scheduled_at, id);
+CREATE INDEX river_job_prioritized_fetching_index ON river_job USING btree (
+    state, queue, priority, scheduled_at, id
+);
 CREATE INDEX river_job_state_and_finalized_at_index ON river_job USING btree (state, finalized_at)
 WHERE finalized_at IS NOT NULL;
 CREATE UNIQUE INDEX river_job_unique_idx ON river_job USING btree (unique_key)
 WHERE unique_key IS NOT NULL AND unique_states IS NOT NULL
-    AND river_job_state_in_bitmask(unique_states, state);
+AND river_job_state_in_bitmask(unique_states, state);
 
 CREATE UNLOGGED TABLE river_leader (
     elected_at  TIMESTAMPTZ NOT NULL,
@@ -121,7 +123,7 @@ CREATE TABLE river_queue (
     created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     metadata    JSONB NOT NULL DEFAULT '{}',
     paused_at   TIMESTAMPTZ,
-    updated_at  TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT current_timestamp
 );
 
 -- Records River's own internal migration versions (distinct from this
@@ -129,4 +131,4 @@ CREATE TABLE river_queue (
 -- to regenerate this file on a future River upgrade, never at runtime —
 -- knows this schema is already fully migrated.
 INSERT INTO river_migration (line, version) VALUES
-    ('main', 1), ('main', 2), ('main', 3), ('main', 4), ('main', 5), ('main', 6), ('main', 7);
+('main', 1), ('main', 2), ('main', 3), ('main', 4), ('main', 5), ('main', 6), ('main', 7);

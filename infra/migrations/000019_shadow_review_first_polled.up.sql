@@ -14,7 +14,7 @@
 -- poll (success or failure — an attempt is an attempt), set once and never
 -- again, via UpdateSourceAfterPoll's own coalesce.
 ALTER TABLE source
-    ADD COLUMN first_polled_at TIMESTAMPTZ;
+ADD COLUMN first_polled_at TIMESTAMPTZ;
 
 -- Same partial-predicate lesson 000015's own comment already states: an
 -- index whose predicate doesn't match the query's WHERE clause silently
@@ -33,16 +33,19 @@ WHERE status = 'pending_review' AND shadow_reviewed_at IS NULL AND first_polled_
 -- column, since some of these rows carry real curation notes above it
 -- (e.g. "Verified live ... via Phase M sweep") that must not be lost.
 UPDATE source
-SET shadow_reviewed_at = NULL,
-    notes = NULLIF(
+SET
+    shadow_reviewed_at = NULL,
+    notes = nullif(
         regexp_replace(
             notes,
-            E'\n?shadow review: 0 successful polls of 0 attempted in 48h — adapter or URL likely broken',
+            E'\n?shadow review: 0 successful polls of 0 attempted in 48h — '
+            || 'adapter or URL likely broken',
             '',
             'g'
         ),
         ''
     )
-WHERE status = 'pending_review'
+WHERE
+    status = 'pending_review'
     AND total_polls = 0
     AND notes LIKE '%shadow review: 0 successful polls of 0 attempted in 48h%';

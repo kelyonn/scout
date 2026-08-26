@@ -36,11 +36,11 @@ select
     ts_rank(j.search_vector, websearch_to_tsquery('english', $1::text)) as rank
 from job_group as jg
 inner join job as j on jg.representative_job_id = j.id
-inner join company as c on c.id = j.company_id
-left join job_score as js on js.job_id = j.id
+inner join company as c on j.company_id = c.id
+left join job_score as js on j.id = js.job_id
     and js.user_id = $2::uuid
     and js.weight_version = $3::text
-left join user_job_state as ujs on ujs.job_group_id = jg.id
+left join user_job_state as ujs on jg.id = ujs.job_group_id
     and ujs.user_id = $2::uuid
 where j.status = 'open'
     and j.is_software = TRUE
@@ -48,14 +48,33 @@ where j.status = 'open'
         j.search_vector @@ websearch_to_tsquery('english', $1::text)
         or c.canonical_name ilike '%' || $1::text || '%'
     )
+    -- Same optional-filter shape as feed.sql's SelectJobFeed — a NULL
+    -- array means "no filter," not "match nothing" (sqlc.narg, not
+    -- sqlc.arg, so a caller that omits the param entirely gets NULL
+    -- rather than an empty-array failure).
+    and (
+        $4::text [] is NULL
+        or j.role_family = any($4::text []::role_family [])
+    )
+    and (
+        $5::text [] is NULL
+        or j.seniority = any($5::text []::seniority [])
+    )
+    and (
+        $6::text [] is NULL
+        or j.work_mode = any($6::text []::work_mode [])
+    )
 order by rank desc, coalesce(js.priority, 0) desc
-limit $4::int
+limit $7::int
 `
 
 type SearchJobsParams struct {
 	Query         string      `db:"query" json:"query"`
 	UserID        pgtype.UUID `db:"user_id" json:"user_id"`
 	WeightVersion string      `db:"weight_version" json:"weight_version"`
+	RoleFamilies  []string    `db:"role_families" json:"role_families"`
+	Seniorities   []string    `db:"seniorities" json:"seniorities"`
+	WorkModes     []string    `db:"work_modes" json:"work_modes"`
 	Limit         int32       `db:"limit_" json:"limit_"`
 }
 
@@ -100,6 +119,9 @@ func (q *Queries) SearchJobs(ctx context.Context, arg SearchJobsParams) ([]Searc
 		arg.Query,
 		arg.UserID,
 		arg.WeightVersion,
+		arg.RoleFamilies,
+		arg.Seniorities,
+		arg.WorkModes,
 		arg.Limit,
 	)
 	if err != nil {
