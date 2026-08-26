@@ -9,7 +9,7 @@
       "location": { "city": "Bengaluru", "region": "Karnataka", "country": "in", "remote": false },
       "department": { "label": "Engineering" },
       "typeOfEmployment": { "label": "Internship" },
-      "postingUrl": "https://jobs.smartrecruiters.com/AcmeHQ/post-001-backend-engineering-intern"
+      "company": { "identifier": "AcmeHQ" }
     },
     {
       "id": "post-002",
@@ -19,7 +19,7 @@
       "location": { "city": "", "region": "", "country": "", "remote": true },
       "department": { "label": "Data" },
       "typeOfEmployment": { "label": "Full-time" },
-      "postingUrl": "https://jobs.smartrecruiters.com/AcmeHQ/post-002-remote-data-engineer"
+      "company": { "identifier": "AcmeHQ" }
     },
     {
       "id": "post-003",
@@ -29,7 +29,7 @@
       "location": { "city": "Pune", "region": "Maharashtra", "country": "in", "remote": false },
       "department": { "label": "Quality" },
       "typeOfEmployment": { "label": "Internship" },
-      "postingUrl": "https://jobs.smartrecruiters.com/AcmeHQ/post-003-qa-automation-intern"
+      "company": { "identifier": "AcmeHQ" }
     }
   ]
 }

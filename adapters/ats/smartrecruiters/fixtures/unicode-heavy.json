@@ -9,7 +9,7 @@
       "location": { "city": "São Paulo", "region": "São Paulo", "country": "br", "remote": false },
       "department": { "label": "Engenharia" },
       "typeOfEmployment": { "label": "Estágio" },
-      "postingUrl": "https://jobs.smartrecruiters.com/AcmeHQ/post-999-estagiario"
+      "company": { "identifier": "AcmeHQ" }
     }
   ]
 }
