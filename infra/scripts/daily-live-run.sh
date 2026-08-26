@@ -33,5 +33,14 @@ echo "$(date -Iseconds): collector is live"
 
 sleep "$DURATION_SECONDS"
 
-$COMPOSE stop collector
-echo "$(date -Iseconds): live window closed, collector stopped"
+# Full teardown, not just `stop collector` — this used to leave
+# postgres/redis/brain/notifier running indefinitely after every window
+# closed (brain in particular holds an embedding model resident in
+# memory and polls the queue every tick), a real, unbounded background
+# resource cost between runs that had nothing to do with "on demand."
+# `down` stops and removes the containers; the named volumes (postgres
+# data, the brain model cache) are untouched, so the next run starts
+# with a warm cache and no data loss — same guarantee `docker compose
+# down` without `-v` always gives.
+$COMPOSE down postgres redis collector brain notifier
+echo "$(date -Iseconds): live window closed, stack torn down"
