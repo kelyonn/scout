@@ -56,6 +56,7 @@ Posting B: {title_b} | {location_b} | {desc_b}"""
 class JobForDedup:
     id: str
     job_group_id: str
+    company_id: str
     title: str
     location_city: str | None
     description_stripped: str | None
@@ -66,7 +67,7 @@ def _fetch_job(conn: psycopg.Connection, job_id: str) -> JobForDedup | None:
     with conn.cursor() as cur:
         cur.execute(
             """
-            SELECT id, job_group_id, title, location_city, description_stripped, embedding_version
+            SELECT id, job_group_id, company_id, title, location_city, description_stripped, embedding_version
             FROM job
             WHERE id = %s AND deleted_at IS NULL
             """,
@@ -78,11 +79,30 @@ def _fetch_job(conn: psycopg.Connection, job_id: str) -> JobForDedup | None:
     return JobForDedup(
         id=str(row[0]),
         job_group_id=str(row[1]),
-        title=row[2],
-        location_city=row[3],
-        description_stripped=row[4],
-        embedding_version=row[5],
+        company_id=str(row[2]),
+        title=row[3],
+        location_city=row[4],
+        description_stripped=row[5],
+        embedding_version=row[6],
     )
+
+
+def _lock_company_dedup(conn: psycopg.Connection, company_id: str) -> None:
+    """Same transaction-scoped advisory lock apps/collector/internal/
+    dedup/stage2.go's AdvisoryLockCompanyDedup takes (packages/db/queries/
+    dedup.sql), and the identical hashtext('dedup:' || ...) key format —
+    Go and Python dedup a company's jobs on entirely separate schedules
+    (Stage 2 synchronously during ingestion, Stage 3 asynchronously once
+    embeddings are ready) and without this, nothing stops the two from
+    concurrently reading and writing the same job_group rows. AGENTS.md's
+    own "common mistakes" list calls this out by name; until now it was
+    only honored on the Go side.
+    """
+    with conn.cursor() as cur:
+        cur.execute(
+            "SELECT pg_advisory_xact_lock(hashtext('dedup:' || %s::uuid::text))",
+            (company_id,),
+        )
 
 
 def _cosine_similarity(
@@ -110,6 +130,7 @@ def _cosine_similarity(
 
 def _merge_job_groups(
     conn: psycopg.Connection,
+    company_id: str,
     job_id: str,
     group_id: str,
     matched_job_id: str,
@@ -125,6 +146,12 @@ def _merge_job_groups(
     enqueued and this handler running — same degrade-and-skip posture as
     _merge's own job/candidate-deleted check just above its call site.
     """
+    # Must be first: the lock has to cover the read below too, not just the
+    # writes, or a concurrent Stage 2 (Go) merge for this company could
+    # still interleave between this SELECT and the UPDATE/DELETE that acts
+    # on what it read.
+    _lock_company_dedup(conn, company_id)
+
     with conn.cursor() as cur:
         cur.execute(
             "SELECT id, first_seen_at, member_count FROM job_group WHERE id = %s",
@@ -300,8 +327,23 @@ class DedupStage3Consumer:
                 "dedup_stage3: job or candidate deleted before merge, skipping"
             )
             return
+        if job.company_id != candidate.company_id:
+            # Stage 2 (Go) only ever pairs candidates within the same
+            # company (docs/08 section 3.2's own WHERE company_id = ...) —
+            # this should be unreachable. Surfaced rather than silently
+            # locking on one company while touching another's job_group.
+            logger.error(
+                "dedup_stage3: %s (company %s) and %s (company %s) belong to "
+                "different companies, refusing to merge",
+                job_id,
+                job.company_id,
+                candidate_job_id,
+                candidate.company_id,
+            )
+            return
         merged = _merge_job_groups(
             self._conn,
+            job.company_id,
             job_id,
             job.job_group_id,
             candidate_job_id,
