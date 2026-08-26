@@ -1,0 +1,13 @@
+-- Adds ats_keka to source_kind (000002's own comment: "adding a value
+-- needs a migration, which is the correct friction"). adapters/ats/keka
+-- is the P5 item this unblocks — docs/05 section 2 rates Keka "Low
+-- effort," "widely used by Indian mid-market," and this is the concrete
+-- first piece of that: {tenant}.keka.com/careers/api/jobs/default/active,
+-- verified live 2026-08-24 against three real tenants (fynd, pennanttech,
+-- achiralabs) before writing the adapter.
+--
+-- ALTER TYPE ... ADD VALUE cannot run inside the same transaction as a
+-- later statement that uses the new value (a real Postgres restriction,
+-- not a style choice) — harmless here since this migration does nothing
+-- but add the value.
+ALTER TYPE source_kind ADD VALUE 'ats_keka';

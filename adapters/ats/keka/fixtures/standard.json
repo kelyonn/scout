@@ -1,0 +1,52 @@
+[
+  {
+    "id": 138476,
+    "title": "Backend Engineering Intern",
+    "description": "<p>Join our engineering team building the core platform.</p>",
+    "departmentName": "Engineering",
+    "jobLocations": [
+      { "id": 5679, "name": "Bengaluru", "city": "Bengaluru", "state": "KA", "countryCode": "IN", "countryName": "India" }
+    ],
+    "jobType": 2,
+    "experience": "0-1",
+    "jobNumber": "AcmeHQ628",
+    "salaryRange": { "currency": "INR", "salaryPeriod": 0, "cultureInfo": "en-IN" },
+    "salaryRangeFormat": "",
+    "publishedOn": "2026-08-20T12:57:54.91Z",
+    "publishedSinceDays": 3,
+    "skillNames": ["Go", "PostgreSQL"]
+  },
+  {
+    "id": 138186,
+    "title": "Senior Product Manager",
+    "description": "<p>Own the roadmap for our core commerce product.</p>",
+    "departmentName": "Product",
+    "jobLocations": [
+      { "id": 5680, "name": "Mumbai", "city": "Mumbai", "state": "MH", "countryCode": "IN", "countryName": "India" },
+      { "id": 5681, "name": "Bengaluru", "city": "Bengaluru", "state": "KA", "countryCode": "IN", "countryName": "India" }
+    ],
+    "jobType": 2,
+    "experience": "5+ years",
+    "jobNumber": "AcmeHQ629",
+    "salaryRange": { "currency": "INR", "salaryPeriod": 0, "cultureInfo": "en-IN" },
+    "salaryRangeFormat": "18,00,000 - 24,00,000 INR",
+    "publishedOn": "2026-08-15T09:12:00Z",
+    "publishedSinceDays": 8,
+    "skillNames": []
+  },
+  {
+    "id": 137763,
+    "title": "New Grad Software Engineer",
+    "description": "<p>Full-stack role for early-career engineers.</p>",
+    "departmentName": "Engineering",
+    "jobLocations": [],
+    "jobType": 2,
+    "experience": "0-1 yr",
+    "jobNumber": "AcmeHQ630",
+    "salaryRange": { "currency": "INR", "salaryPeriod": 0, "cultureInfo": "en-IN" },
+    "salaryRangeFormat": "",
+    "publishedOn": "2026-08-22T06:30:00.5Z",
+    "publishedSinceDays": 1,
+    "skillNames": ["React", "TypeScript"]
+  }
+]
