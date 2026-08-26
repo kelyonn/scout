@@ -158,11 +158,15 @@ func (s *Scheduler) WithConcurrency(n int) *Scheduler { s.concurrency = n; retur
 // the same reasoning WithBatchLimit's own comment gives for RunOnce.
 func (s *Scheduler) WithShadowBatchLimit(n int32) *Scheduler { s.shadowBatchLimit = n; return s }
 
-// Run blocks, calling RunOnce every tickInterval and ReviewShadowSources
-// every ShadowReviewInterval, until ctx is cancelled. A tick that errors is
-// logged and does not stop the loop — the scheduler's entire job is to keep
-// trying on a schedule, and a single bad tick (a transient DB blip) must not
-// be the thing that stops discovery instead of whatever caused the blip.
+// Run blocks, calling RunOnce every tickInterval until ctx is cancelled. A
+// tick that errors is logged and does not stop the loop — the scheduler's
+// entire job is to keep trying on a schedule, and a single bad tick (a
+// transient DB blip) must not be the thing that stops discovery instead of
+// whatever caused the blip.
+//
+// This is the loop that actually fetches, so it is the one apps/collector's
+// SCOUT_FIXTURES_ONLY gate turns off. Database-only upkeep lives in
+// RunMaintenance instead — see that method's comment.
 func (s *Scheduler) Run(ctx context.Context, tickInterval time.Duration) {
 	if tickInterval <= 0 {
 		tickInterval = DefaultTickInterval
@@ -170,20 +174,6 @@ func (s *Scheduler) Run(ctx context.Context, tickInterval time.Duration) {
 
 	ticker := time.NewTicker(tickInterval)
 	defer ticker.Stop()
-
-	shadowTicker := time.NewTicker(ShadowReviewInterval)
-	defer shadowTicker.Stop()
-
-	partitionTicker := time.NewTicker(PartitionMaintenanceInterval)
-	defer partitionTicker.Stop()
-
-	// Run once immediately, not just on the first tick: ADR-018 means this
-	// process often runs for a single on-demand window far shorter than
-	// PartitionMaintenanceInterval (or even ShadowReviewInterval), so a
-	// ticker-only schedule could go long stretches of real calendar time
-	// without ever actually firing. Partition health in particular must
-	// not depend on a session happening to stay up long enough.
-	s.runPartitionMaintenance(ctx)
 
 	for {
 		select {
@@ -198,18 +188,62 @@ func (s *Scheduler) Run(ctx context.Context, tickInterval time.Duration) {
 			if n > 0 {
 				s.log.Info("scheduler tick", "claimed", n)
 			}
+		}
+	}
+}
+
+// RunMaintenance blocks, running the scheduler's database-only upkeep —
+// shadow-source review every ShadowReviewInterval and raw_observation
+// partition maintenance every PartitionMaintenanceInterval — until ctx is
+// cancelled.
+//
+// Separate from Run, and deliberately so. Neither of these makes a single
+// outbound request: ReviewShadowSources reads counters this process already
+// wrote and writes a verdict, and MaintainRawObservationPartitions is pure
+// DDL. Both were previously inside Run, which meant apps/collector's
+// SCOUT_FIXTURES_ONLY gate — whose entire purpose is "do not fetch
+// anything" — also silently disabled them. That default is the steady
+// state for this project (.env sets SCOUT_FIXTURES_ONLY=true; only
+// infra/scripts/daily-live-run.sh flips it to false for a bounded window),
+// so in practice shadow review only ever got the ~30-60 minutes a day that
+// window runs. Measured on the real database: 1,568 sources sat
+// pending_review with their 48h window long closed and shadow_reviewed_at
+// still NULL, against 3 ever actually reviewed — the promotion pipeline
+// docs/05 section 13 describes was gated off by the fetch switch.
+func (s *Scheduler) RunMaintenance(ctx context.Context) {
+	shadowTicker := time.NewTicker(ShadowReviewInterval)
+	defer shadowTicker.Stop()
+
+	partitionTicker := time.NewTicker(PartitionMaintenanceInterval)
+	defer partitionTicker.Stop()
+
+	// Both run once immediately, not just on the first tick: ADR-018 means
+	// this process often runs for a single on-demand window far shorter
+	// than either interval, so a ticker-only schedule could go long
+	// stretches of real calendar time without ever actually firing.
+	s.runPartitionMaintenance(ctx)
+	s.runShadowReview(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
 		case <-shadowTicker.C:
-			n, err := s.ReviewShadowSources(ctx)
-			if err != nil {
-				s.log.Warn("shadow review failed", "err", err)
-				continue
-			}
-			if n > 0 {
-				s.log.Info("shadow review", "reviewed", n)
-			}
+			s.runShadowReview(ctx)
 		case <-partitionTicker.C:
 			s.runPartitionMaintenance(ctx)
 		}
+	}
+}
+
+func (s *Scheduler) runShadowReview(ctx context.Context) {
+	n, err := s.ReviewShadowSources(ctx)
+	if err != nil {
+		s.log.Warn("shadow review failed", "err", err)
+		return
+	}
+	if n > 0 {
+		s.log.Info("shadow review", "reviewed", n)
 	}
 }
 
