@@ -49,6 +49,14 @@ jobs:
     # expiry are exactly the kind of thing a mock quietly gets right while the
     # real client doesn't. Tests that can't reach SCOUT_TEST_REDIS_URL skip
     # instead of failing, so this service exists to make sure they don't.
+    #
+    # postgres exists for the same reason, and until now didn't: 20 test
+    # files (grep testPool\(t\)) need a real Postgres and skip silently
+    # without one, which is exactly what happened here — this job reported
+    # green while none of them ever ran. Same image/user/db as the
+    # `migrations` job below, which is also what SCOUT_TEST_DATABASE_URL
+    # points at and what apps/*'s own testPool() falls back to when the var
+    # is unset.
     services:
       redis:
         image: redis:7-alpine
@@ -59,14 +67,48 @@ jobs:
           --health-interval 5s
           --health-timeout 3s
           --health-retries 10
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: scout
+          POSTGRES_PASSWORD: scout_ci
+          POSTGRES_DB: scout
+        options: >-
+          --health-cmd "pg_isready -U scout -d scout"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
     env:
       SCOUT_TEST_REDIS_URL: redis://localhost:6379/1
+      SCOUT_TEST_DATABASE_URL: postgres://scout:scout_ci@localhost:5432/scout?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.25'
           cache: true
+      - name: apply migrations
+        env:
+          PGPASSWORD: scout_ci
+        run: |
+          set -euo pipefail
+          for f in infra/migrations/*.up.sql; do
+            psql -v ON_ERROR_STOP=1 -h localhost -U scout -d scout -f "$f"
+          done
+      # testPool()-backed tests need the sole app_user + active weight_version
+      # to exist (GetSoleUser, job_score's FK) — the same bootstrap `make seed`
+      # does locally. infra/seed/seed.sql itself is gitignored (real personal
+      # data, see .gitignore's own comment); the committed .example template
+      # is generic placeholder data, which is all a test run needs.
+      - name: seed sole user and weight_version
+        env:
+          PGPASSWORD: scout_ci
+        run: |
+          psql -v ON_ERROR_STOP=1 -h localhost -U scout -d scout \
+            -v "user_email=ci@scout.local" \
+            -f infra/seed/seed.sql.example
       # AGENTS.md: "Queries via sqlc — never string-concatenated SQL." That
       # rule only holds if the generated code actually reflects the current
       # schema and queries — this catches a migration or a queries.sql edit
@@ -85,11 +127,17 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
-          go-version: '1.23'
+          go-version: '1.25'
           cache: true
-      - uses: golangci/golangci-lint-action@v6
+      # .golangci.yml uses the v2 config schema — golangci-lint-action@v6's
+      # "latest" resolved a stale v1 binary (built with go1.24) that can't
+      # even parse a go.mod requiring go1.25, let alone this config. Pinned
+      # to the same v2 line verified locally rather than "latest" again, so
+      # a new golangci-lint major release doesn't silently break this the
+      # same way.
+      - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2
 
   migrations:
     name: migrations apply
@@ -197,8 +245,15 @@ jobs:
           version: 9.15.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
-      - run: pnpm run typecheck
+      # build before typecheck, not after: `tsc --noEmit` needs the ambient
+      # ".next/types" ClientProps/LayoutProps/PageProps declarations
+      # tsconfig.json's own "include" references — those are written by
+      # `next build` (or `next dev`), not present in a fresh checkout. Local
+      # runs of typecheck alone pass by accident once .next/types exists
+      # from an earlier dev/build in the same tree; a clean CI checkout has
+      # no such leftover, so typecheck-before-build failed on every push.
       - run: pnpm run build
+      - run: pnpm run typecheck
 
   evals:
     name: eval harness
