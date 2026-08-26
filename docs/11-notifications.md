@@ -188,32 +188,37 @@ case both transports queue and deliver on reconnect.
 
 ### 6.1 Telegram — instant
 
+No emoji, anywhere in this channel — a deliberate product decision (not an
+earlier draft's oversight), corrected here 2026-08-24 alongside the actual
+implementation (`apps/notifier/internal/deliver.renderMessage`):
+
 ```
-🎯 Bengaluru · Match 94
+Bengaluru match — 94
 
 Cloudflare
 Software Engineering Intern
 
-📍 Bengaluru (Hybrid)
-💰 ₹85,000/month · 82nd percentile
-🕐 Posted 12 minutes ago
-⏱ ~5 min to apply
+Bengaluru (Hybrid) - Software Engineering (Backend) - Internship
+Rs 85,000/month
+Posted 12 minutes ago
+Deadline: 5 days left
 
 Strong backend match — Go and distributed
 systems are your top two skills, and this
 is genuine edge infrastructure work.
 
-Skills you have: Go, Kubernetes, Linux, gRPC
-You're missing: Rust (nice-to-have)
-
-[  Apply  ]  [  Save  ]  [  Dismiss  ]
-[  Details  ]
+https://jobs.cloudflare.com/apply/...
 ```
 
-The inline buttons write directly to `user_job_state` through an HMAC-signed
-callback, so the user can triage from the lock screen without opening anything.
-This matters more than it sounds: the friction between "seeing a notification"
-and "acting on it" is where most job-search tools lose the user.
+Skills you have/are missing and inline action buttons (`[Apply] [Save]
+[Dismiss] [Details]`, writing directly to `user_job_state` through an
+HMAC-signed callback) are still not built — the callback handler this
+needs doesn't exist yet, and "why this matched you" already covers the
+skills gap in prose via `job_score.explanation` (docs/09 section 6/7)
+rather than a separate structured list. When the buttons do get built,
+the friction they remove matters more than it sounds: the gap between
+"seeing a notification" and "acting on it" is where most job-search tools
+lose the user.
 
 ### 6.2 Native push (FCM)
 
@@ -313,23 +318,25 @@ Top matches:
 
 ### 6.5 Daily digest — 08:00 IST
 
+Delivered over Telegram, same no-emoji rule as 6.1:
+
 ```
-☀️ Good morning · Thursday 6 August
+Good morning — Thursday 6 August
 
 Overnight: 3 new · This week: 47 new
 
 ━━ New while you slept ━━━━━━━━━━━━━
 
-🎯 Razorpay · Backend Intern · Bengaluru · 87
+Razorpay · Backend Intern · Bengaluru · 87
    ₹70k/mo · posted 02:14 · ~8 min to apply
 
-🎯 Vercel · Platform Intern · Remote · 84
+Vercel · Platform Intern · Remote · 84
    $2,000/mo · posted 04:41 · ~5 min to apply
 
 ━━ Closing soon ━━━━━━━━━━━━━━━━━━━━
 
-⏰ Stripe SWE Intern — 2 days left
-⏰ Figma Backend Intern — 4 days left
+Stripe SWE Intern — 2 days left
+Figma Backend Intern — 4 days left
 
 ━━ Your week ━━━━━━━━━━━━━━━━━━━━━━
 

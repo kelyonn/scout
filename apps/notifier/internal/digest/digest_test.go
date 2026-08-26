@@ -106,28 +106,52 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return nil
 }
 
+// testUser always creates a brand-new app_user rather than reusing
+// whatever sole row testPool's real local dev database already has.
+//
+// **This used to do exactly that** — `select id from app_user order by
+// created_at asc limit 1`, ADR-015's single-user GetSoleUser query,
+// reused here on the theory that a digest test needs *a* real user and
+// the sole one is right there. It is not safe: every one of this file's
+// tests ends with cleanupDigestNotifications, which deletes real
+// `notification`/`notification_delivery` rows for whatever userID it was
+// given — the real sole user's real notification history, on a real dev
+// database, on every `go test ./...` run that doesn't set
+// SCOUT_TEST_DATABASE_URL. Confirmed live 2026-08-24: a full night's
+// testing had silently deleted the one real digest notification this
+// project had ever actually delivered, discovered only because a later
+// request to "resend" it found zero rows. apps/notifier/internal/deliver
+// already carries this exact fix, under the name freshTestUser, with a
+// longer version of this same comment — this is that fix, applied here
+// too. ON DELETE CASCADE (notification_channel/notification -> app_user)
+// makes cleanup a single delete, same as that package's version.
 func testUser(t *testing.T, pool *pgxpool.Pool) pgtype.UUID {
 	t.Helper()
 	ctx := context.Background()
+	email := fmt.Sprintf("digest-test-%d@scout.local", time.Now().UnixNano())
 	var id pgtype.UUID
-	if err := pool.QueryRow(ctx, `select id from app_user order by created_at asc limit 1`).Scan(&id); err == nil {
-		return id
-	}
 	err := pool.QueryRow(ctx, `
-		insert into app_user (email, display_name) values ('digest-test@scout.local', 'Digest Test')
+		insert into app_user (email, display_name) values ($1::text, 'Digest Test (isolated)')
 		returning id
-	`).Scan(&id)
+	`, email).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert test user: %v", err)
 	}
-	_, _ = pool.Exec(ctx, `insert into user_profile (user_id) values ($1::uuid) on conflict do nothing`, id)
+	if _, err := pool.Exec(ctx, `insert into user_profile (user_id) values ($1::uuid)`, id); err != nil {
+		t.Fatalf("insert test user_profile: %v", err)
+	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `delete from app_user where id = $1::uuid`, id) })
 	return id
 }
 
 // insertTelegramChannel mirrors apps/notifier/internal/deliver's own
-// helper of the same name — snapshot-and-restore rather than delete, since
-// testUser can return a real app_user row from a dev database that
-// already has a real linked Telegram channel.
+// helper of the same name — snapshot-and-restore rather than a blind
+// insert-then-delete-by-id, kept even though every caller here now
+// passes an always-fresh testUser id (never already linked): it is what
+// makes this helper safe to call with a real, already-linked user too,
+// and there is no upside to a second, narrower version that would break
+// the moment anyone reused it that way, same reasoning as
+// apps/notifier/internal/deliver's own copy of this comment.
 func insertTelegramChannel(t *testing.T, pool *pgxpool.Pool, userID pgtype.UUID, chatID int64) {
 	t.Helper()
 	ctx := context.Background()

@@ -18,6 +18,7 @@ import (
 	"log/slog"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -42,6 +43,27 @@ const (
 )
 
 const deliveryBatchLimit = 200
+
+// maxDeliveryAttempts bounds the retry budget a failed send gets before it
+// becomes permanently 'failed' — must match the literal `5` in
+// packages/db/queries/notification.sql's GetUndeliveredNotifications
+// (see that query's own comment on why it isn't parameterized).
+const maxDeliveryAttempts = 5
+
+// retryBackoff is how long to wait before re-attempting a send that has
+// already failed `attempt` times. Exponential (2, 4, 8, 16 minutes),
+// capped at 30 — long enough that a real Telegram outage doesn't burn
+// through the attempt budget in under an hour, short enough that fixing a
+// config problem (docs/11 section 11) is visible again within the hour
+// without restarting the notifier.
+func retryBackoff(attempt int16) time.Duration {
+	const maxBackoff = 30 * time.Minute
+	d := time.Duration(1<<uint(attempt)) * time.Minute //nolint:gosec // attempt is bounded by maxDeliveryAttempts (5)
+	if d > maxBackoff {
+		return maxBackoff
+	}
+	return d
+}
 
 // Deliverer sends queued notifications over Telegram, subject to quiet
 // hours and budgets.
@@ -215,7 +237,10 @@ func (d *Deliverer) withinBudget(
 // send renders and delivers one notification, recording the outcome
 // either way — a failed send still gets a notification_delivery row
 // (status='failed'), which is what makes it show up in channel-health
-// monitoring rather than silently retrying forever.
+// monitoring. Unlike before 000020, that row is not necessarily terminal:
+// while n.PriorAttempts + 1 stays under maxDeliveryAttempts, it carries a
+// next_attempt_at that makes GetUndeliveredNotifications offer this
+// notification again once backoff elapses — see that query's own comment.
 func (d *Deliverer) send(
 	ctx context.Context, q *db.Queries, n db.GetUndeliveredNotificationsRow, channelID pgtype.UUID, chatID int64, now time.Time,
 ) bool {
@@ -226,10 +251,11 @@ func (d *Deliverer) send(
 	}
 
 	msgID, sendErr := d.telegram.SendMessage(ctx, chatID, text)
-	params := db.InsertNotificationDeliveryParams{
+	attempt := n.PriorAttempts + 1
+	params := db.UpsertNotificationDeliveryParams{
 		NotificationID: n.ID,
 		ChannelID:      channelID,
-		Attempts:       1,
+		Attempts:       attempt,
 	}
 	// docs/16-observability.md section 3.3, the primary SLO. Measured from
 	// notification.created_at (when trigger evaluation fired) rather than
@@ -245,6 +271,9 @@ func (d *Deliverer) send(
 		errMsg := sendErr.Error()
 		params.Status = "failed"
 		params.Error = &errMsg
+		if attempt < maxDeliveryAttempts {
+			params.NextAttemptAt = pgtype.Timestamptz{Time: now.Add(retryBackoff(attempt)), Valid: true}
+		}
 		metrics.NotificationTotal.WithLabelValues(string(n.Trigger), "failed").Inc()
 		metrics.NotificationLatency.WithLabelValues(string(n.Trigger), "telegram").Observe(latency.Seconds())
 	} else {
@@ -257,7 +286,7 @@ func (d *Deliverer) send(
 		metrics.NotificationLatency.WithLabelValues(string(n.Trigger), "telegram").Observe(latency.Seconds())
 	}
 
-	if _, err := q.InsertNotificationDelivery(ctx, params); err != nil {
+	if _, err := q.UpsertNotificationDelivery(ctx, params); err != nil {
 		d.log.Warn("record notification_delivery failed", "notification_id", n.ID.String(), "err", err)
 	}
 	return sendErr == nil
@@ -284,16 +313,20 @@ func (d *Deliverer) sendBatch(
 	msgID, sendErr := d.telegram.SendMessage(ctx, chatID, text)
 
 	for _, n := range ns {
-		params := db.InsertNotificationDeliveryParams{
+		attempt := n.PriorAttempts + 1
+		params := db.UpsertNotificationDeliveryParams{
 			NotificationID: n.ID,
 			ChannelID:      channelID,
-			Attempts:       1,
+			Attempts:       attempt,
 		}
 		latency := now.Sub(n.CreatedAt.Time)
 		if sendErr != nil {
 			errMsg := sendErr.Error()
 			params.Status = "failed"
 			params.Error = &errMsg
+			if attempt < maxDeliveryAttempts {
+				params.NextAttemptAt = pgtype.Timestamptz{Time: now.Add(retryBackoff(attempt)), Valid: true}
+			}
 			metrics.NotificationTotal.WithLabelValues(string(n.Trigger), "failed").Inc()
 		} else {
 			latencyMs := int32(latency.Milliseconds()) //nolint:gosec // notification age in ms fits comfortably in int32
@@ -305,7 +338,7 @@ func (d *Deliverer) sendBatch(
 		}
 		metrics.NotificationLatency.WithLabelValues(string(n.Trigger), "telegram").Observe(latency.Seconds())
 
-		if _, err := q.InsertNotificationDelivery(ctx, params); err != nil {
+		if _, err := q.UpsertNotificationDelivery(ctx, params); err != nil {
 			d.log.Warn("record notification_delivery failed", "notification_id", n.ID.String(), "err", err)
 		}
 	}
@@ -330,7 +363,7 @@ func renderBatchMessage(ns []db.GetUndeliveredNotificationsRow) (string, error) 
 		return pi > pj
 	})
 
-	lines := []string{fmt.Sprintf("🎓 %d new-grad match%s", len(sorted), pluralSuffix(len(sorted)))}
+	lines := []string{fmt.Sprintf("%d new-grad match%s", len(sorted), pluralSuffix(len(sorted)))}
 	for _, n := range sorted {
 		var p trigger.Payload
 		if err := json.Unmarshal(n.Payload, &p); err != nil {
@@ -340,20 +373,181 @@ func renderBatchMessage(ns []db.GetUndeliveredNotificationsRow) (string, error) 
 		if n.PriorityAtSend != nil {
 			priority = *n.PriorityAtSend
 		}
-		line := fmt.Sprintf("• %s", p.Title)
+		lines = append(lines, "") // blank line between entries
+
+		line := p.Title
 		if p.CompanyName != "" {
-			line = fmt.Sprintf("• %s — %s", p.CompanyName, p.Title)
+			line = fmt.Sprintf("%s — %s", p.CompanyName, p.Title)
 		}
 		line += fmt.Sprintf(" (%d)", priority)
-		if p.LocationCity != "" {
-			line += fmt.Sprintf(" · %s", p.LocationCity)
-		}
 		lines = append(lines, line)
+
+		if detail := detailLine(p); detail != "" {
+			lines = append(lines, detail)
+		}
+		if p.CompNormalizedINRMonth != nil {
+			lines = append(lines, fmt.Sprintf("Rs %s/month", formatThousands(*p.CompNormalizedINRMonth)))
+		}
 		if p.ApplyURL != "" {
 			lines = append(lines, p.ApplyURL)
 		}
 	}
 	return strings.Join(lines, "\n"), nil
+}
+
+// detailLine joins location/work mode/role family/seniority into one
+// compact line — location_city and work_mode by themselves (docs/07
+// section 6: a Tier 3 remote job has no location_city at all), role
+// family and seniority whenever classification resolved them, skipped
+// individually rather than the whole line dropped for one missing part.
+func detailLine(p trigger.Payload) string {
+	parts := make([]string, 0, 4)
+	switch {
+	case p.LocationCity != "" && p.WorkMode != "" && p.WorkMode != "unknown":
+		parts = append(parts, fmt.Sprintf("%s (%s)", p.LocationCity, formatWorkMode(p.WorkMode)))
+	case p.LocationCity != "":
+		parts = append(parts, p.LocationCity)
+	case p.WorkMode != "" && p.WorkMode != "unknown":
+		parts = append(parts, formatWorkMode(p.WorkMode))
+	}
+	if role := formatRoleFamily(p.RoleFamily); role != "" {
+		parts = append(parts, role)
+	}
+	if seniority := formatSeniority(p.Seniority); seniority != "" {
+		parts = append(parts, seniority)
+	}
+	return strings.Join(parts, " - ")
+}
+
+// formatWorkMode renders work_mode's raw enum value ("onsite", "hybrid",
+// "remote", "unknown") for display — "unknown" is deliberately never
+// passed through, same admit-unknown-elsewhere/hide-unknown-here split
+// AGENTS.md documents for the paid signal, but inverted: paid='unknown'
+// must still be admitted into the feed, while a message line with nothing
+// to say about work mode should just omit it rather than print "Unknown."
+func formatWorkMode(mode string) string {
+	switch mode {
+	case "onsite":
+		return "On-site"
+	case "hybrid":
+		return "Hybrid"
+	case "remote":
+		return "Remote"
+	default:
+		return ""
+	}
+}
+
+// formatSeniority turns seniority's snake_case enum value into a display
+// label ("new_grad" -> "New grad"). "unknown" renders empty, same
+// reasoning as formatWorkMode.
+func formatSeniority(seniority string) string {
+	if seniority == "" || seniority == "unknown" {
+		return ""
+	}
+	words := strings.Split(seniority, "_")
+	for i, w := range words {
+		if w == "" {
+			continue
+		}
+		words[i] = strings.ToUpper(w[:1]) + w[1:]
+	}
+	return strings.Join(words, " ")
+}
+
+// formatRoleFamily turns role_family's dotted enum value ("swe.infra.devops",
+// "advocacy.solutions") into a display label. The first segment names the
+// broad family (only two exist today: "swe" and "advocacy" — see docs/07
+// section 3's taxonomy); ".general"/".other" carry no more specific
+// information than the family itself, so they're dropped rather than
+// shown as a redundant "General"/"Other" suffix.
+func formatRoleFamily(roleFamily string) string {
+	segments := strings.Split(roleFamily, ".")
+	if len(segments) == 0 || segments[0] == "" {
+		return ""
+	}
+	family := segments[0]
+	switch family {
+	case "swe":
+		family = "Software Engineering"
+	case "advocacy":
+		family = "Advocacy"
+	default:
+		family = strings.ToUpper(family[:1]) + family[1:]
+	}
+	specifics := make([]string, 0, len(segments)-1)
+	for _, s := range segments[1:] {
+		if s == "" || s == "general" || s == "other" {
+			continue
+		}
+		specifics = append(specifics, strings.ToUpper(s[:1])+s[1:])
+	}
+	if len(specifics) == 0 {
+		return family
+	}
+	return family + " (" + strings.Join(specifics, "/") + ")"
+}
+
+// formatFreshness renders how long ago a job was posted, coarsening to
+// the largest sensible unit — "posted 12 minutes ago" is worth stating
+// precisely, "posted 9 days ago" is not worth stating in hours.
+func formatFreshness(postedAt *time.Time, now time.Time) string {
+	if postedAt == nil {
+		return ""
+	}
+	age := now.Sub(*postedAt)
+	switch {
+	case age < 0:
+		return ""
+	case age < time.Hour:
+		mins := int(age.Minutes())
+		if mins < 1 {
+			mins = 1
+		}
+		return fmt.Sprintf("Posted %d minute%s ago", mins, sSuffix(mins))
+	case age < 24*time.Hour:
+		hours := int(age.Hours())
+		return fmt.Sprintf("Posted %d hour%s ago", hours, sSuffix(hours))
+	default:
+		days := int(age.Hours() / 24)
+		return fmt.Sprintf("Posted %d day%s ago", days, sSuffix(days))
+	}
+}
+
+// sSuffix is the regular "-s" plural pluralSuffix isn't: that helper
+// exists for "match"/"matches" specifically (an "-es" plural) and would
+// render "2 minutees ago" if reused here.
+func sSuffix(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
+}
+
+// formatThousands renders 85000 as "85,000" — display formatting only, on
+// a value this system already computed (comp_normalized_inr_month), not
+// the Indian-numbering parse path (packages/normalize handles parsing "8
+// LPA"/"1,00,000" from source text). A small local copy rather than an
+// import from apps/collector/internal/scoring: that package is
+// collector-internal by its own path, and duplicating one formatting
+// function is cheaper than adding a cross-service dependency for it.
+func formatThousands(v int64) string {
+	s := strconv.FormatInt(v, 10)
+	neg := strings.HasPrefix(s, "-")
+	if neg {
+		s = s[1:]
+	}
+	var out []byte
+	for i, c := range []byte(s) {
+		if i > 0 && (len(s)-i)%3 == 0 {
+			out = append(out, ',')
+		}
+		out = append(out, c)
+	}
+	if neg {
+		return "-" + string(out)
+	}
+	return string(out)
 }
 
 func pluralSuffix(n int) string {
@@ -363,10 +557,17 @@ func pluralSuffix(n int) string {
 	return "es"
 }
 
-// renderMessage implements a plain-text reduction of docs/11 section 6.1's
-// Telegram format — the full version (skills matched/missing, time-to-apply
-// estimate, inline action buttons) needs data and a callback handler this
-// pass doesn't build.
+// renderMessage implements docs/11 section 6.1's Telegram format in plain
+// text — no emojis (a deliberate, explicit product decision, not an
+// oversight: docs/11's own mockup used them and has been corrected to
+// match), and no inline action buttons (those need an HMAC-signed
+// callback handler this pass doesn't build). Everything else docs/11
+// asks for — location/work mode, role and seniority, compensation,
+// freshness, and a real "why this matched you" sentence — is included:
+// trigger.Payload carries job_score.explanation and the classification
+// fields SelectUnnotifiedJobGroups already had on hand (2026-08-24; see
+// that struct's own comment). time-to-apply estimate is still not
+// computed anywhere and stays out.
 func renderMessage(n db.GetUndeliveredNotificationsRow, now time.Time) (string, error) {
 	var p trigger.Payload
 	if err := json.Unmarshal(n.Payload, &p); err != nil {
@@ -377,27 +578,57 @@ func renderMessage(n db.GetUndeliveredNotificationsRow, now time.Time) (string, 
 		return renderDeadlineMessage(p, now), nil
 	}
 
-	icon := "🎯"
 	label := "Match"
 	if n.Trigger == "bengaluru_match" {
-		label = "Bengaluru"
+		label = "Bengaluru match"
 	}
 	priority := int16(0)
 	if n.PriorityAtSend != nil {
 		priority = *n.PriorityAtSend
 	}
 
-	msg := fmt.Sprintf("%s %s %d\n\n%s", icon, label, priority, p.Title)
-	if p.LocationCity != "" {
-		msg += fmt.Sprintf("\n📍 %s", p.LocationCity)
+	lines := []string{fmt.Sprintf("%s — %d", label, priority), ""}
+	if p.CompanyName != "" {
+		lines = append(lines, p.CompanyName)
+	}
+	lines = append(lines, p.Title)
+
+	if detail := detailLine(p); detail != "" {
+		lines = append(lines, "", detail)
 	}
 	if p.CompNormalizedINRMonth != nil {
-		msg += fmt.Sprintf("\n💰 ₹%d/month", *p.CompNormalizedINRMonth)
+		lines = append(lines, fmt.Sprintf("Rs %s/month", formatThousands(*p.CompNormalizedINRMonth)))
+	}
+	if fresh := formatFreshness(p.PostedAt, now); fresh != "" {
+		lines = append(lines, fresh)
+	}
+	if p.DeadlineAt != nil {
+		lines = append(lines, deadlineLine(*p.DeadlineAt, now))
+	}
+
+	if p.Explanation != "" {
+		lines = append(lines, "", p.Explanation)
 	}
 	if p.ApplyURL != "" {
-		msg += fmt.Sprintf("\n\n%s", p.ApplyURL)
+		lines = append(lines, "", p.ApplyURL)
 	}
-	return msg, nil
+	return strings.Join(lines, "\n"), nil
+}
+
+// deadlineLine is renderMessage's own deadline countdown — same
+// ceiling-not-floor day count renderDeadlineMessage and
+// apps/notifier/internal/digest's "Closing soon" section both use, so
+// the same job reads the same "N days left" everywhere it can appear.
+func deadlineLine(deadlineAt time.Time, now time.Time) string {
+	daysLeft := int(math.Ceil(deadlineAt.Sub(now).Hours() / 24))
+	switch {
+	case daysLeft <= 0:
+		return "Deadline: today"
+	case daysLeft == 1:
+		return "Deadline: tomorrow"
+	default:
+		return fmt.Sprintf("Deadline: %d days left", daysLeft)
+	}
 }
 
 // renderDeadlineMessage is deadline_t72h/deadline_t24h's own format — no
@@ -406,7 +637,11 @@ func renderMessage(n db.GetUndeliveredNotificationsRow, now time.Time) (string, 
 // ceiling-not-floor day count apps/notifier/internal/digest's own
 // "Closing soon" section uses (a deadline 20 hours away reads as "1 day
 // left," not "0" — truncating would understate urgency for exactly the
-// case this message exists to flag).
+// case this message exists to flag). SelectDeadlineReminderCandidates
+// doesn't join role_family/seniority/explanation the way
+// SelectUnnotifiedJobGroups does (a much smaller, already-tracked-jobs
+// query — see that query's own comment), so this stays shorter than
+// renderMessage by necessity, not by choice.
 func renderDeadlineMessage(p trigger.Payload, now time.Time) string {
 	label := "Closing soon"
 	if p.DeadlineAt != nil {
@@ -421,22 +656,22 @@ func renderDeadlineMessage(p trigger.Payload, now time.Time) string {
 		}
 	}
 
-	title := p.Title
+	lines := []string{label, ""}
 	if p.CompanyName != "" {
-		title = fmt.Sprintf("%s — %s", p.CompanyName, p.Title)
+		lines = append(lines, p.CompanyName)
 	}
+	lines = append(lines, p.Title)
 
-	msg := fmt.Sprintf("⏰ %s\n\n%s", label, title)
 	if p.LocationCity != "" {
-		msg += fmt.Sprintf("\n📍 %s", p.LocationCity)
+		lines = append(lines, p.LocationCity)
 	}
 	if p.CompNormalizedINRMonth != nil {
-		msg += fmt.Sprintf("\n💰 ₹%d/month", *p.CompNormalizedINRMonth)
+		lines = append(lines, fmt.Sprintf("Rs %s/month", formatThousands(*p.CompNormalizedINRMonth)))
 	}
 	if p.ApplyURL != "" {
-		msg += fmt.Sprintf("\n\n%s", p.ApplyURL)
+		lines = append(lines, "", p.ApplyURL)
 	}
-	return msg
+	return strings.Join(lines, "\n")
 }
 
 func chatIDFromConfig(raw []byte) (int64, error) {

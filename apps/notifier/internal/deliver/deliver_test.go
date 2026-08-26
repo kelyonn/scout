@@ -77,10 +77,119 @@ func TestRenderDeadlineMessage(t *testing.T) {
 			if !strings.Contains(msg, c.wantSub) {
 				t.Errorf("renderDeadlineMessage = %q, want it to contain %q", msg, c.wantSub)
 			}
-			if !strings.Contains(msg, "Acme — Backend Intern") {
-				t.Errorf("renderDeadlineMessage = %q, want company — title", msg)
+			if !strings.Contains(msg, "Acme\nBackend Intern") {
+				t.Errorf("renderDeadlineMessage = %q, want company then title on their own lines", msg)
 			}
 		})
+	}
+}
+
+// TestRenderMessage_IncludesEnrichedFields is the regression test for the
+// 2026-08-24 message-content pass: role family, seniority, work mode,
+// freshness, and job_score.explanation are all now threaded through
+// trigger.Payload and must actually show up in the rendered Telegram
+// text, not just exist on the struct.
+func TestRenderMessage_IncludesEnrichedFields(t *testing.T) {
+	postedAt := time.Date(2026, 8, 11, 11, 30, 0, 0, time.UTC) // 30 min before `now` below
+	p := trigger.Payload{
+		Title:                  "Backend Engineering Intern",
+		CompanyName:            "Acme",
+		ApplyURL:               "https://example.test/apply",
+		LocationCity:           "Bengaluru",
+		WorkMode:               "hybrid",
+		RoleFamily:             "swe.backend",
+		Seniority:              "internship",
+		CompNormalizedINRMonth: int64Ptr(85000),
+		PostedAt:               &postedAt,
+		Explanation:            "Strong backend match — Go and distributed systems are your top skills.",
+	}
+	payload, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	priority := int16(94)
+	n := db.GetUndeliveredNotificationsRow{
+		Trigger: "bengaluru_match", Payload: payload, PriorityAtSend: &priority,
+		CreatedAt: pgtype.Timestamptz{Time: postedAt, Valid: true},
+	}
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+
+	msg, err := renderMessage(n, now)
+	if err != nil {
+		t.Fatalf("renderMessage: %v", err)
+	}
+
+	for _, want := range []string{
+		"Bengaluru match — 94",
+		"Acme",
+		"Backend Engineering Intern",
+		"Bengaluru (Hybrid)",
+		"Software Engineering (Backend)",
+		"Internship",
+		"Rs 85,000/month",
+		"Posted 30 minutes ago",
+		"Strong backend match",
+		"https://example.test/apply",
+	} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("renderMessage missing %q\nfull message:\n%s", want, msg)
+		}
+	}
+}
+
+// TestNotifierMessages_ContainNoEmoji is the direct regression test for an
+// explicit product decision: no emoji in any Telegram-bound text, anywhere
+// — docs/11's own mockup used them and has been corrected to match. Covers
+// every render path this package owns.
+func TestNotifierMessages_ContainNoEmoji(t *testing.T) {
+	postedAt := time.Date(2026, 8, 11, 11, 0, 0, 0, time.UTC)
+	deadline := postedAt.Add(48 * time.Hour)
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+
+	p := trigger.Payload{
+		Title: "Backend Engineering Intern", CompanyName: "Acme", ApplyURL: "https://example.test/apply",
+		LocationCity: "Bengaluru", WorkMode: "hybrid", RoleFamily: "swe.backend", Seniority: "internship",
+		CompNormalizedINRMonth: int64Ptr(85000), PostedAt: &postedAt, DeadlineAt: &deadline,
+		Explanation: "Strong match on your top skills.",
+	}
+	payload, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	priority := int16(94)
+	n := db.GetUndeliveredNotificationsRow{
+		Trigger: "bengaluru_match", Payload: payload, PriorityAtSend: &priority,
+		CreatedAt: pgtype.Timestamptz{Time: postedAt, Valid: true},
+	}
+
+	msg, err := renderMessage(n, now)
+	if err != nil {
+		t.Fatalf("renderMessage: %v", err)
+	}
+	assertNoEmoji(t, "renderMessage", msg)
+	assertNoEmoji(t, "renderDeadlineMessage", renderDeadlineMessage(p, now))
+
+	batchMsg, err := renderBatchMessage([]db.GetUndeliveredNotificationsRow{n})
+	if err != nil {
+		t.Fatalf("renderBatchMessage: %v", err)
+	}
+	assertNoEmoji(t, "renderBatchMessage", batchMsg)
+}
+
+func int64Ptr(v int64) *int64 { return &v }
+
+// assertNoEmoji checks the common emoji Unicode blocks this codebase's
+// own message templates used before 2026-08-24 (misc symbols/pictographs,
+// dingbats, transport/map symbols) — not exhaustive of every emoji ever
+// defined, but exhaustive of the ranges this file is capable of
+// regressing into.
+func assertNoEmoji(t *testing.T, label, s string) {
+	t.Helper()
+	for _, r := range s {
+		if (r >= 0x1F300 && r <= 0x1FAFF) || (r >= 0x2600 && r <= 0x27BF) {
+			t.Errorf("%s contains emoji rune %U in output:\n%s", label, r, s)
+			return
+		}
 	}
 }
 
@@ -267,6 +376,23 @@ func fakeTelegramServerCounting(t *testing.T) (*telegram.Client, *int32) {
 	return telegram.NewWithBaseURL("test-token", srv.URL), &calls
 }
 
+// fakeTelegramServerFailing always returns Telegram's own error envelope
+// shape — same "Bad Request: chat not found" a real bad chat_id produces
+// (see infra/migrations/000020's own comment for where that exact string
+// was captured live) — for exercising the retry path deliberately, rather
+// than depending on a real misconfigured chat_id.
+func fakeTelegramServerFailing(t *testing.T) *telegram.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":          false,
+			"description": "Bad Request: chat not found",
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return telegram.NewWithBaseURL("test-token", srv.URL)
+}
+
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
 // deterministicDaytimeIST is a fixed, comfortably-outside-quiet-hours
@@ -293,6 +419,24 @@ func countDeliveries(t *testing.T, pool *pgxpool.Pool, notificationID pgtype.UUI
 		t.Fatalf("count deliveries: %v", err)
 	}
 	return n
+}
+
+// deliveryState reads back the one notification_delivery row a test
+// expects for notificationID — status, attempts, and next_attempt_at are
+// exactly what infra/migrations/000020's retry logic writes.
+func deliveryState(t *testing.T, pool *pgxpool.Pool, notificationID pgtype.UUID) (status string, attempts int16, nextAttemptAt *time.Time) {
+	t.Helper()
+	var na pgtype.Timestamptz
+	err := pool.QueryRow(context.Background(), `
+		select status, attempts, next_attempt_at from notification_delivery where notification_id = $1::uuid
+	`, notificationID).Scan(&status, &attempts, &na)
+	if err != nil {
+		t.Fatalf("read delivery state: %v", err)
+	}
+	if na.Valid {
+		nextAttemptAt = &na.Time
+	}
+	return status, attempts, nextAttemptAt
 }
 
 func TestRun_DeliversOutsideQuietHours(t *testing.T) {
@@ -478,5 +622,202 @@ func TestRun_HourlyBudgetQueuesOverflow(t *testing.T) {
 	}
 	if countDeliveries(t, pool, notifID) != 0 {
 		t.Error("a budget-held notification must not get a delivery row")
+	}
+}
+
+// TestRun_FailedDeliveryStaysQueuedForRetry reproduces the real bug fixed
+// by infra/migrations/000020: before it, a single failed Telegram send
+// (e.g. a bad chat_id — see that migration's own comment for the real
+// "Bad Request: chat not found" this project hit live) permanently
+// excluded the notification from GetUndeliveredNotifications, with no
+// code path that ever revisited it. This asserts the failed attempt is
+// recorded with a future next_attempt_at rather than being terminal.
+func TestRun_FailedDeliveryStaysQueuedForRetry(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	insertTelegramChannel(t, pool, userID, 555)
+	tg := fakeTelegramServerFailing(t)
+
+	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
+
+	d := New(pool, tg, testLogger())
+	now := deterministicDaytimeIST()
+	d.now = func() time.Time { return now }
+
+	sent, queued, err := d.Run(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if sent != 0 || queued != 1 {
+		t.Fatalf("sent=%d queued=%d, want sent=0 queued=1 — a failed send is still queued, not dropped", sent, queued)
+	}
+
+	status, attempts, nextAttemptAt := deliveryState(t, pool, notifID)
+	if status != "failed" || attempts != 1 {
+		t.Fatalf("status=%q attempts=%d, want failed/1", status, attempts)
+	}
+	if nextAttemptAt == nil || !nextAttemptAt.After(now) {
+		t.Fatal("expected next_attempt_at set in the future — a failed send with attempts left must schedule a retry")
+	}
+}
+
+// TestRun_FailedDeliveryNotRetriedBeforeBackoffElapses confirms
+// GetUndeliveredNotifications' next_attempt_at <= now() clause actually
+// holds a retry back — without it, the retry fix would just hammer
+// Telegram every 30s tick instead of respecting retryBackoff. That clause
+// runs against Postgres's own real clock, not Deliverer's injected d.now
+// (same pattern TestRun_BatchedNotificationNotYetDueStaysQueued's own
+// comment documents for scheduled_for), so next_attempt_at is set directly
+// relative to the real wall clock here rather than through d.now.
+func TestRun_FailedDeliveryNotRetriedBeforeBackoffElapses(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	insertTelegramChannel(t, pool, userID, 555)
+
+	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
+
+	failing := New(pool, fakeTelegramServerFailing(t), testLogger())
+	failing.now = deterministicDaytimeIST
+	if _, _, err := failing.Run(context.Background(), userID); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	// Force the backoff window relative to Postgres's real clock — the
+	// deterministic Go-level clock above is 2026-08-11, always in the
+	// past by the time these tests run, so left alone the SQL clause
+	// would already consider it retryable regardless of this test's intent.
+	if _, err := pool.Exec(context.Background(), `
+		update notification_delivery set next_attempt_at = now() + interval '1 hour' where notification_id = $1::uuid
+	`, notifID); err != nil {
+		t.Fatalf("push next_attempt_at into the future: %v", err)
+	}
+
+	_, workingTG := fakeTelegramServer(t)
+	retry := New(pool, workingTG, testLogger())
+	retry.now = deterministicDaytimeIST
+
+	sent, queued, err := retry.Run(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("retry Run: %v", err)
+	}
+	if sent != 0 || queued != 0 {
+		t.Fatalf("sent=%d queued=%d, want sent=0 queued=0 — still inside backoff, must not be offered yet", sent, queued)
+	}
+	status, attempts, _ := deliveryState(t, pool, notifID)
+	if status != "failed" || attempts != 1 {
+		t.Fatalf("status=%q attempts=%d, want unchanged failed/1 while backoff hasn't elapsed", status, attempts)
+	}
+}
+
+// TestRun_FailedDeliveryRetriedAfterBackoffElapses is
+// TestRun_FailedDeliveryNotRetriedBeforeBackoffElapses' counterpart: once
+// next_attempt_at is in the past, the same notification is offered again
+// and a working channel now delivers it — attempts increments on the same
+// notification_delivery row (via UpsertNotificationDelivery's ON CONFLICT)
+// rather than creating a second one, so notification_delivery's own
+// (notification_id, channel_id) unique constraint stays intact.
+func TestRun_FailedDeliveryRetriedAfterBackoffElapses(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	insertTelegramChannel(t, pool, userID, 555)
+
+	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
+
+	failing := New(pool, fakeTelegramServerFailing(t), testLogger())
+	failing.now = deterministicDaytimeIST
+	if _, _, err := failing.Run(context.Background(), userID); err != nil {
+		t.Fatalf("first Run: %v", err)
+	}
+	// See TestRun_FailedDeliveryNotRetriedBeforeBackoffElapses: the SQL
+	// clause compares against Postgres's real clock, and this row's
+	// naturally-computed next_attempt_at (relative to the 2026-08-11
+	// deterministic Go clock) is already in the past by the time these
+	// tests actually run — asserting that directly here rather than
+	// leaving it implicit.
+	status, _, nextAttemptAt := deliveryState(t, pool, notifID)
+	if status != "failed" || nextAttemptAt == nil || nextAttemptAt.After(time.Now()) {
+		t.Fatalf("precondition: expected a failed delivery with next_attempt_at already in the past, got status=%q next_attempt_at=%v", status, nextAttemptAt)
+	}
+
+	_, workingTG := fakeTelegramServer(t)
+	retry := New(pool, workingTG, testLogger())
+	retry.now = func() time.Time { return deterministicDaytimeIST().Add(time.Hour) }
+
+	sent, queued, err := retry.Run(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("retry Run: %v", err)
+	}
+	if sent != 1 || queued != 0 {
+		t.Fatalf("sent=%d queued=%d, want sent=1 queued=0 once backoff has elapsed", sent, queued)
+	}
+	if countDeliveries(t, pool, notifID) != 1 {
+		t.Fatal("retry must update the existing notification_delivery row, not insert a second one")
+	}
+	newStatus, attempts, newNextAttemptAt := deliveryState(t, pool, notifID)
+	if newStatus != "sent" || attempts != 2 {
+		t.Fatalf("status=%q attempts=%d, want sent/2 after a successful retry", newStatus, attempts)
+	}
+	if newNextAttemptAt != nil {
+		t.Error("a successfully delivered notification must not carry a next_attempt_at")
+	}
+}
+
+// TestRun_FailedDeliveryStopsRetryingAfterMaxAttempts confirms the retry
+// budget is bounded: once attempts reaches maxDeliveryAttempts, the
+// notification stops being offered at all, even with time advanced well
+// past any backoff — the one case where "permanently failed" is still the
+// correct terminal state (a genuinely broken channel, not a transient
+// blip), same as this codebase's behavior before 000020.
+func TestRun_FailedDeliveryStopsRetryingAfterMaxAttempts(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	channelID := insertTelegramChannel(t, pool, userID, 555)
+
+	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
+	// Seed a delivery row already one attempt short of the cap, with
+	// backoff already elapsed — exactly what maxDeliveryAttempts-1 real
+	// failed retries would leave behind.
+	now := deterministicDaytimeIST()
+	past := now.Add(-time.Hour)
+	_, err := pool.Exec(context.Background(), `
+		insert into notification_delivery (notification_id, channel_id, status, attempts, next_attempt_at)
+		values ($1::uuid, $2::uuid, 'failed', $3::smallint, $4::timestamptz)
+	`, notifID, channelID, maxDeliveryAttempts-1, past)
+	if err != nil {
+		t.Fatalf("seed near-exhausted delivery: %v", err)
+	}
+
+	d := New(pool, fakeTelegramServerFailing(t), testLogger())
+	d.now = func() time.Time { return now }
+
+	sent, queued, err := d.Run(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	// This tick still attempts and fails — Run's own "queued" bucket
+	// covers both "will retry later" and "just exhausted its budget";
+	// distinguishing those two is what the next Run call (below) is for.
+	if sent != 0 || queued != 1 {
+		t.Fatalf("sent=%d queued=%d, want sent=0 queued=1 — this is the exhausting attempt itself", sent, queued)
+	}
+	status, attempts, nextAttemptAt := deliveryState(t, pool, notifID)
+	if status != "failed" || attempts != maxDeliveryAttempts {
+		t.Fatalf("status=%q attempts=%d, want failed/%d", status, attempts, maxDeliveryAttempts)
+	}
+	if nextAttemptAt != nil {
+		t.Error("a delivery that has exhausted its attempt budget must not schedule another retry")
+	}
+
+	// One more Run, far in the future, must not touch it again.
+	d.now = func() time.Time { return now.Add(24 * time.Hour) }
+	sent, queued, err = d.Run(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("second Run: %v", err)
+	}
+	if sent != 0 || queued != 0 {
+		t.Fatalf("sent=%d queued=%d, want sent=0 queued=0 — exhausted deliveries must never be offered again", sent, queued)
+	}
+	_, finalAttempts, _ := deliveryState(t, pool, notifID)
+	if finalAttempts != maxDeliveryAttempts {
+		t.Fatalf("attempts=%d, want unchanged at %d — must not have retried again", finalAttempts, maxDeliveryAttempts)
 	}
 }

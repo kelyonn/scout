@@ -114,7 +114,14 @@ func (g *Generator) Run(ctx context.Context, userID pgtype.UUID, weightVersion s
 	}
 
 	msgID, sendErr := g.telegram.SendMessage(ctx, chatID, text)
-	delivery := db.InsertNotificationDeliveryParams{NotificationID: notifID, ChannelID: channel.ID, Attempts: 1}
+	// UpsertNotificationDelivery (000020) — this call site never actually
+	// conflicts today (notifID is always freshly inserted above), so this
+	// is a plain insert in practice. See this function's own note above
+	// DigestAlreadySentSince's call: a failed digest send is not retried
+	// until tomorrow's window, unlike apps/notifier/internal/deliver's
+	// instant/batched path — a related but distinct gap, deliberately not
+	// closed here (see HANDOFF.md).
+	delivery := db.UpsertNotificationDeliveryParams{NotificationID: notifID, ChannelID: channel.ID, Attempts: 1}
 	if sendErr != nil {
 		errMsg := sendErr.Error()
 		delivery.Status = "failed"
@@ -127,7 +134,7 @@ func (g *Generator) Run(ctx context.Context, userID pgtype.UUID, weightVersion s
 		delivery.LatencyMs = &latencyMs
 		delivery.ProviderMsgID = &msgID
 	}
-	if _, dbErr := q.InsertNotificationDelivery(ctx, delivery); dbErr != nil {
+	if _, dbErr := q.UpsertNotificationDelivery(ctx, delivery); dbErr != nil {
 		g.log.Warn("digest: record notification_delivery failed", "err", dbErr)
 	}
 
@@ -231,13 +238,13 @@ func (g *Generator) gather(ctx context.Context, q *db.Queries, userID pgtype.UUI
 func render(nowIST time.Time, d data) string {
 	var b strings.Builder
 
-	fmt.Fprintf(&b, "☀️ Good morning · %s\n\n", nowIST.Format("Monday 2 January"))
+	fmt.Fprintf(&b, "Good morning — %s\n\n", nowIST.Format("Monday 2 January"))
 	fmt.Fprintf(&b, "Overnight: %d new · This week: %d new\n", d.OvernightCount, d.WeekCount)
 
 	if len(d.OvernightTop) > 0 {
 		b.WriteString("\n━━ New while you slept ━━━━━━━━━━━━━\n\n")
 		for _, j := range d.OvernightTop {
-			fmt.Fprintf(&b, "🎯 %s · %s", j.Company, j.Title)
+			fmt.Fprintf(&b, "%s · %s", j.Company, j.Title)
 			if j.LocationCity != "" {
 				fmt.Fprintf(&b, " · %s", j.LocationCity)
 			}
@@ -268,7 +275,7 @@ func render(nowIST time.Time, d data) string {
 			if daysLeft == 1 {
 				plural = ""
 			}
-			fmt.Fprintf(&b, "⏰ %s %s — %d day%s left\n", j.Company, j.Title, daysLeft, plural)
+			fmt.Fprintf(&b, "%s %s — %d day%s left\n", j.Company, j.Title, daysLeft, plural)
 		}
 	}
 

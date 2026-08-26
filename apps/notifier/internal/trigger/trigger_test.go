@@ -50,31 +50,40 @@ func testPool(t *testing.T) *pgxpool.Pool {
 	return nil
 }
 
-// testUser ensures a usable app_user + user_profile exist and returns the
-// user's id — reuses the sole seeded user if `make seed` already ran,
-// otherwise creates one, mirroring
-// apps/collector/internal/scheduler.ensureSeeded's reasoning.
+// testUser always creates a brand-new app_user rather than reusing
+// whatever sole row testPool's real local dev database already has.
+//
+// **This used to reuse the real sole user** (`select id from app_user
+// order by created_at asc limit 1`, ADR-015's own GetSoleUser query) —
+// this package's tests call Evaluator.Run directly, the real production
+// InsertNotification path, against that id. Test fixtures (job_group and
+// everything above it) do get cleaned up via cascade, which is what kept
+// this from being as destructive as apps/notifier/internal/digest's own
+// version of this bug (fixed 2026-08-24, see that package's longer
+// version of this comment for what it actually did), but it still meant
+// every test run wrote and deleted real rows against the real user's
+// live data — budget-counting queries (CountDeliveriesSince and friends)
+// briefly seeing test-fabricated notifications is exactly the shared-row
+// flakiness class apps/notifier/internal/deliver's freshTestUser exists
+// to rule out, applied here too rather than left as a smaller version of
+// the same risk. ON DELETE CASCADE (notification_channel/notification ->
+// app_user) makes cleanup a single delete.
 func testUser(t *testing.T, pool *pgxpool.Pool) pgtype.UUID {
 	t.Helper()
 	ctx := context.Background()
-
+	email := fmt.Sprintf("trigger-test-%d@scout.local", time.Now().UnixNano())
 	var id pgtype.UUID
-	err := pool.QueryRow(ctx, `select id from app_user order by created_at asc limit 1`).Scan(&id)
-	if err == nil {
-		return id
-	}
-
-	err = pool.QueryRow(ctx, `
-		insert into app_user (email, display_name) values ('trigger-test@scout.local', 'Trigger Test')
+	err := pool.QueryRow(ctx, `
+		insert into app_user (email, display_name) values ($1::text, 'Trigger Test (isolated)')
 		returning id
-	`).Scan(&id)
+	`, email).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert test user: %v", err)
 	}
-	_, err = pool.Exec(ctx, `insert into user_profile (user_id) values ($1::uuid) on conflict do nothing`, id)
-	if err != nil {
+	if _, err := pool.Exec(ctx, `insert into user_profile (user_id) values ($1::uuid)`, id); err != nil {
 		t.Fatalf("insert test user_profile: %v", err)
 	}
+	t.Cleanup(func() { _, _ = pool.Exec(context.Background(), `delete from app_user where id = $1::uuid`, id) })
 	return id
 }
 
