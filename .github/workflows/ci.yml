@@ -207,20 +207,63 @@ jobs:
   python:
     name: python lint and test
     runs-on: ubuntu-latest
-    # apps/brain's and packages/riverpy's own tests already skip anything
-    # needing a real Postgres or Ollama (see e.g.
-    # apps/brain/tests/test_summarize.py's _conn_string()) rather than
-    # fail, so this job runs green even without either service — it
-    # exists to catch what doesn't need them: ruff, mypy --strict, import
-    # errors, and every unit test that doesn't touch I/O (including
-    # scout_brain.llm's cascade/rate-limiter tests, which are the bulk of
-    # what ADR-016's cascade needs covered).
+    # apps/brain's and packages/riverpy's own tests skip anything needing a
+    # real Postgres or Ollama without one (see e.g.
+    # apps/brain/tests/test_summarize.py's _conn_string()) — until this
+    # service existed, 17 of apps/brain's tests never actually ran in CI,
+    # including test_dedup_stage3.py's real merge/adjudication logic, the
+    # single most precision-sensitive path in the whole project (AGENTS.md
+    # rule 4). Verified locally against a real Postgres + Ollama before
+    # wiring this up: 63 of 64 pass for real.
+    #
+    # The one that doesn't —
+    # test_classify_tier2.py::test_handle_promotes_advocacy_role_with_real_technical_evidence
+    # — is expected to fail at this tier for the same reason evals' own
+    # classify_role suite does (a 3B local model versus the hosted models
+    # Tier 2 is designed around, see evals/README.md's "Honest current
+    # state"), not a broken test. This job is allowed to be red for that
+    # one, specific, already-measured reason.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: scout
+          POSTGRES_PASSWORD: scout_ci
+          POSTGRES_DB: scout
+        options: >-
+          --health-cmd "pg_isready -U scout -d scout"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+        ports:
+          - 5432:5432
+    env:
+      SCOUT_TEST_DATABASE_URL: postgres://scout:scout_ci@localhost:5432/scout?sslmode=disable
+      SCOUT_TEST_OLLAMA_HOST: http://localhost:11434
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
       - uses: astral-sh/setup-uv@v3
+      - name: apply migrations
+        env:
+          PGPASSWORD: scout_ci
+        run: |
+          set -euo pipefail
+          for f in infra/migrations/*.up.sql; do
+            psql -v ON_ERROR_STOP=1 -h localhost -U scout -d scout -f "$f"
+          done
+      - name: install and start ollama
+        run: |
+          set -euo pipefail
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          for _ in $(seq 1 30); do
+            curl -fsS http://localhost:11434/ >/dev/null 2>&1 && break
+            sleep 1
+          done
+          ollama pull qwen2.5:3b-instruct
       - run: make lint-py
       - run: cd apps/brain && uv run pytest
       - run: cd packages/riverpy && uv run pytest
