@@ -57,3 +57,9 @@ apps/api/internal/resume/fixtures/real_resume_sample.pdf
 # Real resume text for `make seed-resume` (same rule as above). See
 # infra/seed/resume.sql.example for the template.
 infra/seed/resume.sql
+
+# Real university/degree/graduation-year/skills for `make seed` (same rule
+# as above — this held real personal data hardcoded and committed until it
+# was scrubbed from history; see infra/seed/seed.sql.example for the
+# template new checkouts should copy from).
+infra/seed/seed.sql
