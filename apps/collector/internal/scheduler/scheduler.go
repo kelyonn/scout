@@ -102,6 +102,14 @@ type Scheduler struct {
 	// shadowBatchLimit bounds one ReviewShadowSources pass, same reasoning
 	// as batchLimit for RunOnce.
 	shadowBatchLimit int32
+	// now is MaintainRawObservationPartitions's clock — overridable for
+	// tests, same pattern as apps/notifier/internal/digest's Generator.now,
+	// for the same reason that file's own comment gives: a partition-window
+	// decision computed against the real wall clock instead of an injected
+	// one is a bug that only shows up when the calendar happens to cross a
+	// boundary mid-test, not something a fixed test date should ever depend
+	// on catching by luck.
+	now func() time.Time
 }
 
 // Gate is the subset of *politeness.Gate the scheduler needs.
@@ -126,8 +134,13 @@ func New(pool *pgxpool.Pool, gate Gate, fetcher Fetcher, log *slog.Logger) *Sche
 		batchLimit:       DefaultBatchLimit,
 		concurrency:      DefaultConcurrency,
 		shadowBatchLimit: shadowReviewBatchLimit,
+		now:              time.Now,
 	}
 }
+
+// WithNow overrides the clock MaintainRawObservationPartitions uses —
+// test-only, the same reasoning as WithShadowBatchLimit's own comment.
+func (s *Scheduler) WithNow(now func() time.Time) *Scheduler { s.now = now; return s }
 
 // WithQueue enables enqueueing embed jobs for apps/brain to consume. Without
 // it, new jobs are written exactly as WithPipeline alone already does, just
@@ -161,6 +174,17 @@ func (s *Scheduler) Run(ctx context.Context, tickInterval time.Duration) {
 	shadowTicker := time.NewTicker(ShadowReviewInterval)
 	defer shadowTicker.Stop()
 
+	partitionTicker := time.NewTicker(PartitionMaintenanceInterval)
+	defer partitionTicker.Stop()
+
+	// Run once immediately, not just on the first tick: ADR-018 means this
+	// process often runs for a single on-demand window far shorter than
+	// PartitionMaintenanceInterval (or even ShadowReviewInterval), so a
+	// ticker-only schedule could go long stretches of real calendar time
+	// without ever actually firing. Partition health in particular must
+	// not depend on a session happening to stay up long enough.
+	s.runPartitionMaintenance(ctx)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -183,7 +207,20 @@ func (s *Scheduler) Run(ctx context.Context, tickInterval time.Duration) {
 			if n > 0 {
 				s.log.Info("shadow review", "reviewed", n)
 			}
+		case <-partitionTicker.C:
+			s.runPartitionMaintenance(ctx)
 		}
+	}
+}
+
+func (s *Scheduler) runPartitionMaintenance(ctx context.Context) {
+	created, dropped, err := s.MaintainRawObservationPartitions(ctx)
+	if err != nil {
+		s.log.Warn("partition maintenance failed", "err", err)
+		return
+	}
+	if created > 0 || dropped > 0 {
+		s.log.Info("partition maintenance", "created", created, "dropped", dropped)
 	}
 }
 

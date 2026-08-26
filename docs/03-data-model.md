@@ -866,9 +866,17 @@ transactionally where Postgres permits.
 6. **Backfills are River jobs, not migrations.** A migration adds the column; a
    job populates it. This keeps deploys fast and backfills resumable.
 
-**Partition maintenance** runs as a nightly job: create partitions three months
-ahead, detach and drop partitions older than six months after verifying the
-snapshot archive.
+**Partition maintenance**: create partitions three months ahead, detach and
+drop partitions older than six months. Implemented in
+`apps/collector/internal/scheduler/partitions.go`
+(`Scheduler.MaintainRawObservationPartitions`), run once at collector startup
+and every `PartitionMaintenanceInterval` (6h) after that — not strictly
+nightly, since ADR-018's on-demand sessions are often shorter than 24h and a
+ticker-only schedule could go long stretches without ever actually firing.
+The "after verifying the snapshot archive" language in earlier drafts of this
+section predates ADR-017: `raw_observation` is Bulk-class there, covered only
+by the nightly whole-database dump, not backed up per-partition — see that
+function's own comment for the full reasoning.
 
 ---
 
