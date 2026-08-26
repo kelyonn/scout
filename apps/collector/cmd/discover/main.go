@@ -102,7 +102,24 @@ func run(log *slog.Logger) error {
 
 	httpClient := &http.Client{Timeout: 20 * time.Second}
 
+	// india_candidates.go goes first and is never itself truncated —
+	// small enough (a couple hundred entries) that skipping any of it
+	// defeats the point of curating it, and it needs to survive the cap
+	// below even when the three unfiltered global lists alone already
+	// exceed maxNewCandidatesPerRun (confirmed live 2026-08-24: a run
+	// with India candidates appended *after* the global ones truncated
+	// every single one of them out before assessment ever started).
 	var candidates []discovery.Candidate
+	indiaNew := 0
+	for _, cand := range indiaCandidates {
+		if existing[cand.Slug] {
+			continue
+		}
+		candidates = append(candidates, cand)
+		indiaNew++
+	}
+	log.Info("discover: india candidate list", "total", len(indiaCandidates), "new", indiaNew)
+
 	for kind, url := range candidateListURLs {
 		slugs, fetchErr := discovery.FetchSlugList(ctx, httpClient, url)
 		if fetchErr != nil {
