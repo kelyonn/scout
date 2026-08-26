@@ -227,6 +227,12 @@ GET  /api/v1/search/suggest?q=cloudf
 ranked lists with Reciprocal Rank Fusion — see
 [ADR-004](adr/ADR-004-search-strategy.md).
 
+`role_family`, `seniority`, and `work_mode` are accepted as repeatable filter
+params, same enum values and repeat convention as 4.1's job feed. Unlike the
+feed, search does not accept `location_tier` or `min_priority` — narrower on
+purpose, since ranking here is driven by the query's own relevance rank, not
+priority.
+
 ### 4.3 Realtime
 
 ```http

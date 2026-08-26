@@ -28,6 +28,8 @@ export function fetchJobs(params: {
   minPriority?: number;
   seniority?: string[];
   roleFamily?: string[];
+  workMode?: string[];
+  locationTier?: string[];
   companyId?: string;
   cursor?: string;
   limit?: number;
@@ -39,6 +41,8 @@ export function fetchJobs(params: {
   if (params.companyId) qs.set("company_id", params.companyId);
   for (const s of params.seniority ?? []) qs.append("seniority", s);
   for (const r of params.roleFamily ?? []) qs.append("role_family", r);
+  for (const w of params.workMode ?? []) qs.append("work_mode", w);
+  for (const t of params.locationTier ?? []) qs.append("location_tier", t);
   return getJSON<JobFeedResponse>(`/api/jobs?${qs.toString()}`);
 }
 
@@ -134,8 +138,14 @@ export function fetchApplications(states?: ApplicationState[]): Promise<Applicat
   return getJSON<ApplicationsResponse>(`/api/applications${suffix}`);
 }
 
-export function searchJobs(query: string): Promise<SearchResponse> {
+export function searchJobs(
+  query: string,
+  filters?: { seniority?: string[]; roleFamily?: string[]; workMode?: string[] },
+): Promise<SearchResponse> {
   const qs = new URLSearchParams({ q: query });
+  for (const s of filters?.seniority ?? []) qs.append("seniority", s);
+  for (const r of filters?.roleFamily ?? []) qs.append("role_family", r);
+  for (const w of filters?.workMode ?? []) qs.append("work_mode", w);
   return getJSON<SearchResponse>(`/api/search?${qs.toString()}`);
 }
 
