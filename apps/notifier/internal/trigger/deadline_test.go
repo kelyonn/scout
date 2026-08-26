@@ -71,6 +71,7 @@ func countDeadlineNotifications(t *testing.T, pool *pgxpool.Pool, jobGroupID pgt
 // reminder should exist.
 func TestDeadlineSweeper_FiresT72hOnlyOutsideT24hWindow(t *testing.T) {
 	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
 	userID := testUser(t, pool)
 	companyID := insertTestCompany(t, pool)
 	sourceID := insertTestSource(t, pool, companyID)
@@ -110,6 +111,7 @@ func TestDeadlineSweeper_FiresT72hOnlyOutsideT24hWindow(t *testing.T) {
 // into the other).
 func TestDeadlineSweeper_FiresBothWindowsInsideT24h(t *testing.T) {
 	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
 	userID := testUser(t, pool)
 	companyID := insertTestCompany(t, pool)
 	sourceID := insertTestSource(t, pool, companyID)
@@ -140,6 +142,7 @@ func TestDeadlineSweeper_FiresBothWindowsInsideT24h(t *testing.T) {
 // bookkeeping in DeadlineSweeper itself.
 func TestDeadlineSweeper_RepeatedSweepDoesNotDuplicate(t *testing.T) {
 	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
 	userID := testUser(t, pool)
 	companyID := insertTestCompany(t, pool)
 	sourceID := insertTestSource(t, pool, companyID)
@@ -172,6 +175,7 @@ func TestDeadlineSweeper_RepeatedSweepDoesNotDuplicate(t *testing.T) {
 // dismissed job's approaching deadline is not something to remind about.
 func TestDeadlineSweeper_ExcludesTerminalStates(t *testing.T) {
 	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
 	userID := testUser(t, pool)
 	companyID := insertTestCompany(t, pool)
 	sourceID := insertTestSource(t, pool, companyID)
@@ -197,6 +201,7 @@ func TestDeadlineSweeper_ExcludesTerminalStates(t *testing.T) {
 // Evaluator.
 func TestDeadlineSweeper_SuppressNotifications(t *testing.T) {
 	pool := testPool(t)
+	insertTestWeightVersion(t, pool)
 	userID := testUser(t, pool)
 	companyID := insertTestCompany(t, pool)
 	sourceID := insertTestSource(t, pool, companyID)
