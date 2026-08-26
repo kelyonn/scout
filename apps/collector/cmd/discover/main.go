@@ -35,6 +35,7 @@ import (
 	padapter "github.com/kelyon/scout/packages/adapter"
 	"github.com/kelyon/scout/packages/fetch"
 	"github.com/kelyon/scout/packages/logging"
+	"github.com/kelyon/scout/packages/ssrf"
 )
 
 // candidateListURLs are Feashliaa/job-board-aggregator's own per-platform
@@ -100,7 +101,16 @@ func run(log *slog.Logger) error {
 	}
 	assessor := discovery.NewAssessor(fetcher, adapters)
 
-	httpClient := &http.Client{Timeout: 20 * time.Second}
+	// SSRF-guarded even though this isn't a registered `source` row and so
+	// can't go through PolitenessGate.Allow() the way every actual
+	// job-board fetch must (candidateListURLs are fixed, hardcoded
+	// constants, not source.url values) — the same posture
+	// apps/collector/internal/robots's own checker takes for the same
+	// reason: an ungated http.Client is still an ungated http.Client.
+	httpClient := &http.Client{
+		Timeout:   20 * time.Second,
+		Transport: &http.Transport{DialContext: ssrf.DialContext},
+	}
 
 	// india_candidates.go goes first and is never itself truncated —
 	// small enough (a couple hundred entries) that skipping any of it
