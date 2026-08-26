@@ -267,3 +267,65 @@ func TestReviewShadowSources(t *testing.T) {
 	// rows in the shared local dev database — real seeded sources — and
 	// promote or flag them as a side effect of this test running.
 }
+
+// TestRunMaintenanceReviewsShadowSourcesImmediately is the regression test
+// for the gap that made ReviewShadowSources effectively dead code in normal
+// operation: it lived inside Scheduler.Run, which apps/collector disables
+// whenever SCOUT_FIXTURES_ONLY=true — the steady-state default in this
+// project's own .env. Shadow review makes no outbound request at all, so it
+// has no business being switched off by the fetch gate, and RunMaintenance
+// is the loop it lives in now.
+//
+// Asserts the immediate first pass specifically, not just that the loop
+// eventually ticks: ShadowReviewInterval is 15 minutes and an on-demand
+// ADR-018 session is routinely shorter than that, so "runs on the first
+// tick" would still mean "never runs in practice."
+func TestRunMaintenanceReviewsShadowSourcesImmediately(t *testing.T) {
+	pool := testPool(t)
+	deepPast := time.Now().Add(-30 * 24 * time.Hour)
+	healthy := insertShadowTestSource(t, pool, shadowTestSourceOpts{
+		createdAt:      deepPast,
+		firstPolledAt:  &deepPast,
+		totalPolls:     20,
+		totalSuccesses: 20,
+		totalJobsFound: 12,
+		yieldRatio:     0.6,
+	})
+
+	// WithShadowBatchLimit(1) keeps this scoped to its own fixture against
+	// the shared dev database, the same reasoning TestReviewShadowSources
+	// and insertTestSource already use.
+	s := New(pool, nil, nil, testLogger()).WithShadowBatchLimit(1)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		s.RunMaintenance(ctx)
+		close(done)
+	}()
+
+	// Poll for the promotion rather than sleeping a fixed interval: the
+	// immediate pass happens within milliseconds, and a fixed sleep would
+	// either be flaky or slow.
+	deadline := time.Now().Add(2 * time.Second)
+	var promoted bool
+	for time.Now().Before(deadline) {
+		if row := getTestSource(t, pool, healthy); row.Status == "active" {
+			promoted = true
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if !promoted {
+		t.Error("RunMaintenance did not review a due shadow source on its immediate first pass")
+	}
+
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("RunMaintenance did not return after its context was cancelled")
+	}
+}

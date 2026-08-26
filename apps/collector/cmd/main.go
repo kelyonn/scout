@@ -173,8 +173,20 @@ func run(log *slog.Logger) error {
 	// tests, not by running the live scheduler against them), so the only
 	// correct behavior today is not to start the scheduler at all, not to
 	// start it and trust nothing due happens to be seeded.
+	// Shadow-source review and raw_observation partition upkeep are pure
+	// database work — zero outbound requests — so they run regardless of
+	// SCOUT_FIXTURES_ONLY, which exists to stop fetching and nothing else.
+	// They used to live inside sched.Run and were therefore switched off
+	// with it; see Scheduler.RunMaintenance's own comment for what that
+	// actually cost on the real database.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		sched.RunMaintenance(ctx)
+	}()
+
 	if os.Getenv("SCOUT_FIXTURES_ONLY") == "true" {
-		log.Warn("scheduler disabled: SCOUT_FIXTURES_ONLY=true")
+		log.Warn("scheduler disabled: SCOUT_FIXTURES_ONLY=true (maintenance still runs)")
 	} else {
 		wg.Add(1)
 		go func() {
