@@ -138,10 +138,19 @@ func doSearch(t *testing.T, h *Handler, rawQuery string) *httptest.ResponseRecor
 func TestSearch_MatchesOnTitle(t *testing.T) {
 	pool := testPool(t)
 	h := New(pool, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})))
-	groupID := insertSearchableJob(t, pool, "Distributed Systems Backend Intern",
+	// A fabricated, unique keyword rather than ordinary English words
+	// ("distributed systems") — against this project's real accumulated
+	// corpus (tens of thousands of jobs, see HANDOFF.md), a common phrase
+	// like that has real matches with real, computed job_score.priority
+	// that legitimately outrank this fixture's priority-0 default, pushing
+	// it past the default result limit even though the match itself is
+	// correct. TestSearch_FiltersByFacet's own comment already names this
+	// exact flakiness; this fixes it the same way that test avoids it.
+	keyword := "Zqxdistint" + fmt.Sprintf("%08x", slugCounter.Add(1))
+	groupID := insertSearchableJob(t, pool, keyword+" Distributed Systems Backend Intern",
 		"Work on Kafka-based event pipelines and Go microservices.")
 
-	w := doSearch(t, h, "q=distributed+systems")
+	w := doSearch(t, h, "q="+keyword)
 	if w.Code != 200 {
 		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
 	}
