@@ -267,6 +267,58 @@ on conflict (user_id, kind) where kind in ('telegram', 'email', 'discord')
 do update set config = excluded.config, enabled = TRUE, verified_at = now()
 returning *;
 
+-- name: UpsertNativePushChannel :one
+-- ADR-012's device registration write path — POST /v1/push/register-device.
+-- notification_channel_device_idx (000009) is the write side this targets:
+-- one row per (user_id, device_token) regardless of kind, so re-registering
+-- the same physical device (an FCM token refresh, or the app reopened)
+-- updates the existing row in place rather than accumulating a duplicate
+-- channel per device. config is an empty JSON object — native_push has
+-- nothing to put there (no chat_id/subscription blob the way
+-- telegram/web_push do), but the column is NOT NULL with no default.
+insert into notification_channel (
+    user_id, kind, config, enabled, verified_at,
+    platform, device_token, device_label, app_version, token_refreshed_at
+)
+values (
+    sqlc.arg(user_id)::uuid, 'native_push', '{}'::jsonb, TRUE, now(),
+    sqlc.arg(platform)::device_platform, sqlc.arg(device_token)::text,
+    sqlc.narg(device_label)::text, sqlc.narg(app_version)::text, now()
+)
+on conflict (user_id, device_token) where kind = 'native_push'
+do update set
+    enabled = TRUE,
+    platform = excluded.platform,
+    device_label = excluded.device_label,
+    app_version = excluded.app_version,
+    token_refreshed_at = now()
+returning *;
+
+-- name: GetEnabledChannels :many
+-- The deliverer's fan-out point (ADR-012): every enabled channel for a
+-- user, not just Telegram — one row per registered device plus at most one
+-- Telegram/email/discord row each, per notification_channel's own unique
+-- indexes. Ordered by kind so the caller's own grouping (one native_push
+-- send per device, still one Telegram send total) is deterministic across
+-- runs, which matters for tests asserting on delivery order.
+select *
+from notification_channel
+where user_id = sqlc.arg(user_id)::uuid
+    and enabled = TRUE
+order by kind, id;
+
+-- name: DisableChannel :exec
+-- docs/17 section 10's chaos test: "Return UNREGISTERED for every push
+-- token... tokens retired, user told on other channels, no silent loss."
+-- The deliverer calls this the moment FCM reports a device token as
+-- permanently invalid (fcm.TokenInvalidError) — enabled = FALSE rather
+-- than a delete, so the row (and its device_label/app_version history)
+-- stays visible for "why did my phone stop getting pushes" debugging
+-- instead of silently vanishing.
+update notification_channel
+set enabled = FALSE
+where id = sqlc.arg(id)::uuid;
+
 -- name: UpsertNotificationDelivery :one
 -- Was InsertNotificationDelivery — plain insert, no conflict handling,
 -- because before 000020 a notification could only ever reach this call
