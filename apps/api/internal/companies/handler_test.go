@@ -143,12 +143,22 @@ func TestList_OnlyReturnsCompaniesWithAtLeastOneOpenJob(t *testing.T) {
 	pool := testPool(t)
 	h := testHandler(pool)
 
-	withOpen := "Open Co " + slug(t)
-	withClosed := "Closed Co " + slug(t)
+	// A shared, unique token scopes the request's own q= filter to just
+	// these two fixtures — against this project's real accumulated corpus
+	// (~1,429 companies, see HANDOFF.md), the unfiltered default listing
+	// ranks by open_job_count/quality_score, and a fresh single-job
+	// fixture with no quality_score routinely sorts past the default page
+	// before it ever reaches these companies. The q= filter narrows the
+	// WHERE clause to just these two; the `having count(...) > 0` this
+	// test actually exercises still runs unfiltered by q, so it still
+	// proves what the test name says.
+	token := slug(t)
+	withOpen := "Open Co " + token
+	withClosed := "Closed Co " + token
 	insertCompanyWithJob(t, pool, withOpen, "open")
 	insertCompanyWithJob(t, pool, withClosed, "closed")
 
-	r := httptest.NewRequestWithContext(context.Background(), "GET", "/v1/companies", nil)
+	r := httptest.NewRequestWithContext(context.Background(), "GET", "/v1/companies?q="+token, nil)
 	w := httptest.NewRecorder()
 	h.List(w, r)
 
