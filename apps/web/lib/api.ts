@@ -8,6 +8,8 @@ import type {
   GoogleCalendarSyncResult,
   JobDetail,
   JobFeedResponse,
+  RegisterDeviceRequest,
+  RegisterDeviceResponse,
   ResumeStatus,
   ResumeUploadResponse,
   SearchResponse,
@@ -162,4 +164,17 @@ export async function uploadResume(file: File): Promise<ResumeUploadResponse> {
     throw new Error(`${res.status}: ${body}`);
   }
   return res.json() as Promise<ResumeUploadResponse>;
+}
+
+export async function registerDevice(req: RegisterDeviceRequest): Promise<RegisterDeviceResponse> {
+  const res = await fetch("/api/push/register-device", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`${res.status}: ${body}`);
+  }
+  return res.json() as Promise<RegisterDeviceResponse>;
 }

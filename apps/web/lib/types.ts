@@ -289,3 +289,17 @@ export interface ResumeUploadResponse {
   embedding_queued: boolean;
   resume_updated_at: string;
 }
+
+// Mirrors apps/api/internal/push/handler.go's registerDeviceRequest and
+// its {"channel_id": "..."} response — ADR-012's device registration,
+// called only from inside apps/mobile's own WebView (lib/capacitor.ts).
+export interface RegisterDeviceRequest {
+  platform: "android" | "ios";
+  device_token: string;
+  device_label?: string;
+  app_version?: string;
+}
+
+export interface RegisterDeviceResponse {
+  channel_id: string;
+}
