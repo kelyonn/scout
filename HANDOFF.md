@@ -1034,24 +1034,38 @@ sites in a browser, not by reading Zoho's docs.
 - golangci-lint, sqlfluff, and `go test ./... -count=1` against a real
   local Postgres all clean for everything this adapter touched.
 
-**Found in the process, not fixed (out of scope for this adapter,
-flagged as a separate task instead)**: `go test ./...` against this
-project's real local dev Postgres — not a fresh CI database — surfaces two
-pre-existing failures unrelated to anything above:
+**Found in the process, and fixed**: `go test ./...` against this
+project's real local dev Postgres — not a fresh CI database — surfaced two
+pre-existing failures unrelated to the adapter above:
 `TestList_OnlyReturnsCompaniesWithAtLeastOneOpenJob`
 (`apps/api/internal/companies`) and `TestSearch_MatchesOnTitle`
-(`apps/api/internal/search`). Both insert a uniquely-named fixture row and
-assert it appears in a *default, paginated* response; against this
+(`apps/api/internal/search`). Both inserted a uniquely-named fixture row and
+asserted it appears in a *default, paginated* response; against this
 project's real accumulated data (~1,429 companies, ~46,000 jobs) the fresh
-row doesn't rank into the default page, so the assertion fails even though
-the feature works. `TestList_QueryFiltersByName`, right next to the first
-failing test, already shows the fix shape (scope the query to the fixture
-instead of relying on the unfiltered default) — not applied here since it
-touches unrelated test files.
+row didn't rank into the default page, so the assertion failed even though
+the feature worked. `TestList_QueryFiltersByName` and
+`TestSearch_FiltersByFacet` (the latter's own comment already names
+`TestSearch_MatchesOnTitle`'s flakiness) show the same fix shape used
+elsewhere in these same files — scope the query to the fixture instead of
+relying on the unfiltered default — applied here too: a shared token scopes
+the companies request to just its own two fixtures, and a fabricated
+keyword replaces "distributed systems" in the search fixture's title so no
+real job can outrank it. Both pass now, and the full suite is green
+end to end.
 
-Everything in this Zoho Recruit update — the adapter, migration 000022,
-`packages/db/gen`, the doc updates, and the three seeded sources — is
-uncommitted in the working tree as of this writing. The
-partition-maintenance/discover-SSRF/dedup-lock/CI-seed fixes earlier in this
-same dated update were already committed (and are not yet pushed) before
-this adapter work began.
+Also confirmed: `sqlfluff` initially appeared to fail broadly across many
+pre-existing query files unrelated to this session (`LT01`, whitespace
+before `[`) — this local machine's `sqlfluff` resolved to 4.3.0, not the
+CI-pinned `3.5.0` (the same class of local-tool-version mismatch this file
+has caught before). Re-checked against an isolated venv with the exact
+pinned version: clean, both for migrations and for `packages/db/queries`.
+Not a real regression, just a reminder that a bare `sqlfluff` on PATH isn't
+authoritative here.
+
+Everything above — the Zoho Recruit adapter (migration 000022,
+`packages/db/gen`, the doc updates, three seeded sources), the two test
+fixes, and this file's own updates — is committed to `main` as three
+separate commits. Nothing has been pushed to GitHub yet; the
+partition-maintenance/discover-SSRF/dedup-lock/CI-seed fixes earlier in
+this same dated update were already committed before this adapter work
+began and are in the same unpushed state.
