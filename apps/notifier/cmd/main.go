@@ -34,6 +34,7 @@ import (
 
 	"github.com/kelyon/scout/apps/notifier/internal/deliver"
 	"github.com/kelyon/scout/apps/notifier/internal/digest"
+	"github.com/kelyon/scout/apps/notifier/internal/fcm"
 	"github.com/kelyon/scout/apps/notifier/internal/telegram"
 	"github.com/kelyon/scout/apps/notifier/internal/trigger"
 	"github.com/kelyon/scout/packages/logging"
@@ -127,9 +128,28 @@ func run(log *slog.Logger) error {
 	}
 	tg := telegram.New(token)
 
+	// Unlike the Telegram token above, an unconfigured FCM project is not
+	// fatal — ADR-012's native push is additive to Telegram, not a
+	// replacement, and the notifier must keep working for every day
+	// before a Firebase project and Android build actually exist. A
+	// malformed (but non-empty) service account degrades the same way,
+	// logged rather than refused, matching heartbeat.Pinger's own
+	// "disabled" posture elsewhere in this codebase.
+	fcmClient, err := fcm.New(context.Background(),
+		os.Getenv("SCOUT_FCM_PROJECT_ID"), os.Getenv("SCOUT_FCM_SERVICE_ACCOUNT_JSON"))
+	if err != nil {
+		log.Warn("fcm disabled: could not parse SCOUT_FCM_SERVICE_ACCOUNT_JSON", "err", err)
+		fcmClient = &fcm.Client{}
+	}
+	if fcmClient.Enabled() {
+		log.Info("native push armed", "transport", "fcm")
+	} else {
+		log.Warn("native push disabled: SCOUT_FCM_PROJECT_ID/SCOUT_FCM_SERVICE_ACCOUNT_JSON not fully set")
+	}
+
 	eval := trigger.New(pool, log)
 	deadlines := trigger.NewDeadlineSweeper(pool, log)
-	deliverer := deliver.New(pool, tg, log)
+	deliverer := deliver.New(pool, tg, fcmClient, log)
 	digester := digest.New(pool, tg, log)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

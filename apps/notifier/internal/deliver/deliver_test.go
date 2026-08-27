@@ -18,6 +18,7 @@ import (
 
 	db "github.com/kelyon/scout/packages/db/gen"
 
+	"github.com/kelyon/scout/apps/notifier/internal/fcm"
 	"github.com/kelyon/scout/apps/notifier/internal/telegram"
 	"github.com/kelyon/scout/apps/notifier/internal/trigger"
 )
@@ -174,9 +175,103 @@ func TestNotifierMessages_ContainNoEmoji(t *testing.T) {
 		t.Fatalf("renderBatchMessage: %v", err)
 	}
 	assertNoEmoji(t, "renderBatchMessage", batchMsg)
+
+	// docs/11 section 6.2's own mockup still has an emoji in its title —
+	// unlike sections 6.1/6.5, nothing had built native push yet to expose
+	// the same "docs mockup vs. actual rendered string" gap the 2026-08-24
+	// Telegram fix closed. Guarded here the same way, so that doc's mockup
+	// gets corrected to match rather than the reverse.
+	push, err := renderPushNotification(n, now)
+	if err != nil {
+		t.Fatalf("renderPushNotification: %v", err)
+	}
+	assertNoEmoji(t, "renderPushNotification title", push.Title)
+	assertNoEmoji(t, "renderPushNotification body", push.Body)
 }
 
 func int64Ptr(v int64) *int64 { return &v }
+
+func TestRenderPushNotification(t *testing.T) {
+	postedAt := time.Date(2026, 8, 11, 11, 30, 0, 0, time.UTC)
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	groupID := pgtype.UUID{Bytes: [16]byte{1, 2, 3}, Valid: true}
+
+	p := trigger.Payload{
+		Title: "Backend Engineering Intern", CompanyName: "Acme",
+		CompNormalizedINRMonth: int64Ptr(85000), PostedAt: &postedAt,
+		Explanation: "Strong backend match.",
+	}
+	payload, err := json.Marshal(p)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	priority := int16(94)
+	n := db.GetUndeliveredNotificationsRow{
+		Trigger: "bengaluru_match", Urgency: "instant", Payload: payload,
+		PriorityAtSend: &priority, JobGroupID: groupID,
+		CreatedAt: pgtype.Timestamptz{Time: postedAt, Valid: true},
+	}
+
+	push, err := renderPushNotification(n, now)
+	if err != nil {
+		t.Fatalf("renderPushNotification: %v", err)
+	}
+	if push.Title != "Acme · Backend Engineering Intern" {
+		t.Errorf("Title = %q", push.Title)
+	}
+	if !strings.Contains(push.Body, "Match 94") {
+		t.Errorf("Body = %q, want it to contain the priority", push.Body)
+	}
+	if !strings.Contains(push.Body, "Strong backend match.") {
+		t.Errorf("Body = %q, want the explanation appended", push.Body)
+	}
+	if push.ChannelID != "opportunities" {
+		t.Errorf("ChannelID = %q, want opportunities for a match trigger", push.ChannelID)
+	}
+	if !push.HighPriority {
+		t.Error("HighPriority = false, want true for an instant-urgency notification")
+	}
+	if push.CollapseKey != "job-"+groupID.String() {
+		t.Errorf("CollapseKey = %q", push.CollapseKey)
+	}
+	if push.Data["deep_link"] != "scout://job/"+groupID.String() {
+		t.Errorf("Data[deep_link] = %q", push.Data["deep_link"])
+	}
+}
+
+func TestRenderPushNotification_DeadlineTriggerUsesDeadlinesChannel(t *testing.T) {
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	p := trigger.Payload{Title: "Backend Intern", CompanyName: "Acme"}
+	payload, _ := json.Marshal(p)
+	n := db.GetUndeliveredNotificationsRow{
+		Trigger: "deadline_t24h", Urgency: "instant", Payload: payload,
+		CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+	}
+	push, err := renderPushNotification(n, now)
+	if err != nil {
+		t.Fatalf("renderPushNotification: %v", err)
+	}
+	if push.ChannelID != "deadlines" {
+		t.Errorf("ChannelID = %q, want deadlines", push.ChannelID)
+	}
+}
+
+func TestRenderPushNotification_BatchedIsNotHighPriority(t *testing.T) {
+	now := time.Date(2026, 8, 11, 12, 0, 0, 0, time.UTC)
+	p := trigger.Payload{Title: "Backend Intern", CompanyName: "Acme"}
+	payload, _ := json.Marshal(p)
+	n := db.GetUndeliveredNotificationsRow{
+		Trigger: "newgrad_match", Urgency: "batched", Payload: payload,
+		CreatedAt: pgtype.Timestamptz{Time: now, Valid: true},
+	}
+	push, err := renderPushNotification(n, now)
+	if err != nil {
+		t.Fatalf("renderPushNotification: %v", err)
+	}
+	if push.HighPriority {
+		t.Error("HighPriority = true, want false for a BATCHED notification — docs/11 6.2's own rule")
+	}
+}
 
 // assertNoEmoji checks the common emoji Unicode blocks this codebase's
 // own message templates used before 2026-08-24 (misc symbols/pictographs,
@@ -395,6 +490,75 @@ func fakeTelegramServerFailing(t *testing.T) *telegram.Client {
 
 func testLogger() *slog.Logger { return slog.New(slog.NewTextHandler(io.Discard, nil)) }
 
+// insertNativePushChannel registers one device — the write side of
+// UpsertNativePushChannel's own contract, done directly here rather than
+// via that query so a test can insert a channel row without depending on
+// the API endpoint that normally calls it.
+func insertNativePushChannel(t *testing.T, pool *pgxpool.Pool, userID pgtype.UUID, deviceToken string) pgtype.UUID {
+	t.Helper()
+	var id pgtype.UUID
+	err := pool.QueryRow(context.Background(), `
+		insert into notification_channel (user_id, kind, config, enabled, verified_at, platform, device_token, token_refreshed_at)
+		values ($1::uuid, 'native_push', '{}'::jsonb, TRUE, now(), 'android', $2, now())
+		returning id
+	`, userID, deviceToken).Scan(&id)
+	if err != nil {
+		t.Fatalf("insert native_push channel: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = pool.Exec(context.Background(), `delete from notification_channel where id = $1::uuid`, id)
+	})
+	return id
+}
+
+// fakeFCMServer mirrors fakeTelegramServer for FCM — a project id of
+// "test-project" is arbitrary and only needs to match what the Deliverer
+// under test was built with.
+func fakeFCMServer(t *testing.T) *fcm.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"name": "projects/test-project/messages/fake-id"})
+	}))
+	t.Cleanup(srv.Close)
+	return fcm.NewWithBaseURL("test-project", srv.URL, srv.Client())
+}
+
+// fakeFCMServerCounting is fakeFCMServer plus a request counter.
+func fakeFCMServerCounting(t *testing.T) (*fcm.Client, *int32) {
+	t.Helper()
+	var calls int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		_ = json.NewEncoder(w).Encode(map[string]any{"name": "projects/test-project/messages/fake-id"})
+	}))
+	t.Cleanup(srv.Close)
+	return fcm.NewWithBaseURL("test-project", srv.URL, srv.Client()), &calls
+}
+
+// fakeFCMServerUnregistered always reports the device token as permanently
+// invalid — docs/17 section 10's chaos test, exercised the same way
+// fakeTelegramServerFailing exercises Telegram's own retry path.
+func fakeFCMServerUnregistered(t *testing.T) *fcm.Client {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error": map[string]any{"status": "UNREGISTERED", "message": "Requested entity was not found."},
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return fcm.NewWithBaseURL("test-project", srv.URL, srv.Client())
+}
+
+func channelEnabled(t *testing.T, pool *pgxpool.Pool, channelID pgtype.UUID) bool {
+	t.Helper()
+	var enabled bool
+	if err := pool.QueryRow(context.Background(), `select enabled from notification_channel where id = $1::uuid`, channelID).Scan(&enabled); err != nil {
+		t.Fatalf("query channel enabled: %v", err)
+	}
+	return enabled
+}
+
 // deterministicDaytimeIST is a fixed, comfortably-outside-quiet-hours
 // timestamp for tests that need d.now to land somewhere real and daytime
 // without depending on the actual wall clock — using time.Now() here was a
@@ -439,6 +603,181 @@ func deliveryState(t *testing.T, pool *pgxpool.Pool, notificationID pgtype.UUID)
 	return status, attempts, nextAttemptAt
 }
 
+// deliveryStateForChannel is deliveryState scoped to one channel — needed
+// once a notification can have more than one notification_delivery row
+// (Telegram plus N devices), where deliveryState's own unscoped query would
+// return whichever row Postgres happens to return first.
+func deliveryStateForChannel(t *testing.T, pool *pgxpool.Pool, notificationID, channelID pgtype.UUID) (status string, attempts int16) {
+	t.Helper()
+	err := pool.QueryRow(context.Background(), `
+		select status, attempts from notification_delivery where notification_id = $1::uuid and channel_id = $2::uuid
+	`, notificationID, channelID).Scan(&status, &attempts)
+	if err != nil {
+		t.Fatalf("read delivery state for channel: %v", err)
+	}
+	return status, attempts
+}
+
+func TestRun_DeliversToRegisteredDeviceAlongsideTelegram(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	insertTelegramChannel(t, pool, userID, 555)
+	deviceChannelID := insertNativePushChannel(t, pool, userID, "device-token-1")
+
+	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
+
+	_, tg := fakeTelegramServer(t)
+	d := New(pool, tg, fakeFCMServer(t), testLogger())
+	d.now = deterministicDaytimeIST
+
+	sent, queued, err := d.Run(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if sent != 1 || queued != 0 {
+		t.Fatalf("sent=%d queued=%d, want sent=1 queued=0", sent, queued)
+	}
+
+	status, attempts := deliveryStateForChannel(t, pool, notifID, deviceChannelID)
+	if status != "sent" || attempts != 1 {
+		t.Errorf("device delivery status=%q attempts=%d, want sent/1", status, attempts)
+	}
+}
+
+func TestRun_MultipleDevicesEachGetTheirOwnDelivery(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	insertTelegramChannel(t, pool, userID, 555)
+	device1 := insertNativePushChannel(t, pool, userID, "device-token-1")
+	device2 := insertNativePushChannel(t, pool, userID, "device-token-2")
+
+	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
+
+	_, tg := fakeTelegramServer(t)
+	fcmClient, calls := fakeFCMServerCounting(t)
+	d := New(pool, tg, fcmClient, testLogger())
+	d.now = deterministicDaytimeIST
+
+	if _, _, err := d.Run(context.Background(), userID); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if *calls != 2 {
+		t.Fatalf("fcm calls = %d, want 2 — one per registered device", *calls)
+	}
+	for _, ch := range []pgtype.UUID{device1, device2} {
+		status, _ := deliveryStateForChannel(t, pool, notifID, ch)
+		if status != "sent" {
+			t.Errorf("device %s status = %q, want sent", ch.String(), status)
+		}
+	}
+}
+
+// TestRun_PushFailureDoesNotAffectTelegramOutcome is the chaos-test
+// requirement docs/17 section 10 states directly for the channel pair one
+// level up ("Block one primary channel, Telegram still delivers"): a
+// failing FCM client must not change Run's own sent/queued accounting,
+// which reflects the Telegram attempt only.
+func TestRun_PushFailureDoesNotAffectTelegramOutcome(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	insertTelegramChannel(t, pool, userID, 555)
+	deviceChannelID := insertNativePushChannel(t, pool, userID, "device-token-1")
+
+	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
+
+	_, tg := fakeTelegramServer(t)
+	d := New(pool, tg, fakeFCMServerUnregistered(t), testLogger())
+	d.now = deterministicDaytimeIST
+
+	sent, queued, err := d.Run(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if sent != 1 || queued != 0 {
+		t.Fatalf("sent=%d queued=%d, want sent=1 queued=0 — Telegram succeeded regardless of the push failure", sent, queued)
+	}
+
+	status, _ := deliveryStateForChannel(t, pool, notifID, deviceChannelID)
+	if status != "failed" {
+		t.Errorf("device delivery status = %q, want failed", status)
+	}
+}
+
+// TestRun_UnregisteredTokenDisablesChannel is docs/17 section 10's own
+// chaos test: "Return UNREGISTERED for every push token... tokens
+// retired... no silent loss."
+func TestRun_UnregisteredTokenDisablesChannel(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	insertTelegramChannel(t, pool, userID, 555)
+	deviceChannelID := insertNativePushChannel(t, pool, userID, "stale-token")
+
+	insertTestNotification(t, pool, userID, "high_score", 90)
+
+	_, tg := fakeTelegramServer(t)
+	d := New(pool, tg, fakeFCMServerUnregistered(t), testLogger())
+	d.now = deterministicDaytimeIST
+
+	if _, _, err := d.Run(context.Background(), userID); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if channelEnabled(t, pool, deviceChannelID) {
+		t.Error("channel must be disabled after FCM reports the token as UNREGISTERED")
+	}
+}
+
+// TestRun_NoDevicesIsANoOpForPush confirms a Telegram-only user (the
+// common case until the app actually ships) sees no behavior change from
+// native push existing in the code at all.
+func TestRun_NoDevicesIsANoOpForPush(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	insertTelegramChannel(t, pool, userID, 555)
+	insertTestNotification(t, pool, userID, "high_score", 90)
+
+	_, tg := fakeTelegramServer(t)
+	d := New(pool, tg, fakeFCMServer(t), testLogger())
+	d.now = deterministicDaytimeIST
+
+	sent, queued, err := d.Run(context.Background(), userID)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if sent != 1 || queued != 0 {
+		t.Fatalf("sent=%d queued=%d, want sent=1 queued=0", sent, queued)
+	}
+}
+
+// TestRun_DisabledFCMClientIsANoOp confirms the pre-Firebase-project state
+// (fcm.Client{}, unconfigured — exactly what apps/notifier/cmd/main.go
+// constructs when SCOUT_FCM_PROJECT_ID/SCOUT_FCM_SERVICE_ACCOUNT_JSON are
+// unset) never attempts a send, rather than erroring per device.
+func TestRun_DisabledFCMClientIsANoOp(t *testing.T) {
+	pool := testPool(t)
+	userID := freshTestUser(t, pool)
+	insertTelegramChannel(t, pool, userID, 555)
+	deviceChannelID := insertNativePushChannel(t, pool, userID, "device-token-1")
+	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
+
+	_, tg := fakeTelegramServer(t)
+	d := New(pool, tg, &fcm.Client{}, testLogger())
+	d.now = deterministicDaytimeIST
+
+	if _, _, err := d.Run(context.Background(), userID); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	var count int
+	if err := pool.QueryRow(context.Background(), `
+		select count(*) from notification_delivery where notification_id = $1::uuid and channel_id = $2::uuid
+	`, notifID, deviceChannelID).Scan(&count); err != nil {
+		t.Fatalf("count device deliveries: %v", err)
+	}
+	if count != 0 {
+		t.Errorf("device delivery rows = %d, want 0 — a disabled fcm client must not attempt or record anything", count)
+	}
+}
+
 func TestRun_DeliversOutsideQuietHours(t *testing.T) {
 	pool := testPool(t)
 	userID := freshTestUser(t, pool)
@@ -447,7 +786,7 @@ func TestRun_DeliversOutsideQuietHours(t *testing.T) {
 
 	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
 
-	d := New(pool, tg, testLogger())
+	d := New(pool, tg, nil, testLogger())
 	d.now = func() time.Time {
 		loc, _ := time.LoadLocation("Asia/Kolkata")
 		return time.Date(2026, 8, 11, 12, 0, 0, 0, loc) // well outside quiet hours
@@ -473,7 +812,7 @@ func TestRun_QueuesDuringQuietHours(t *testing.T) {
 
 	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
 
-	d := New(pool, tg, testLogger())
+	d := New(pool, tg, nil, testLogger())
 	d.now = func() time.Time {
 		loc, _ := time.LoadLocation("Asia/Kolkata")
 		return time.Date(2026, 8, 11, 3, 0, 0, 0, loc) // 03:00 IST, inside default quiet hours
@@ -499,7 +838,7 @@ func TestRun_BengaluruOverrideBreaksThroughQuietHours(t *testing.T) {
 
 	notifID := insertTestNotification(t, pool, userID, "bengaluru_match", 94)
 
-	d := New(pool, tg, testLogger())
+	d := New(pool, tg, nil, testLogger())
 	d.now = func() time.Time {
 		loc, _ := time.LoadLocation("Asia/Kolkata")
 		return time.Date(2026, 8, 11, 3, 0, 0, 0, loc)
@@ -533,7 +872,7 @@ func TestRun_BatchesMultipleNewgradMatchesIntoOneMessage(t *testing.T) {
 	n1 := insertTestBatchedNotification(t, pool, userID, 85, due, "Backend Intern", "Acme")
 	n2 := insertTestBatchedNotification(t, pool, userID, 81, due, "Platform Intern", "Beta Co")
 
-	d := New(pool, tg, testLogger())
+	d := New(pool, tg, nil, testLogger())
 	d.now = func() time.Time { return now }
 
 	sent, queued, err := d.Run(context.Background(), userID)
@@ -571,7 +910,7 @@ func TestRun_BatchedNotificationNotYetDueStaysQueued(t *testing.T) {
 	notDue := now.Add(45 * time.Minute)
 	notifID := insertTestBatchedNotification(t, pool, userID, 85, notDue, "Backend Intern", "Acme")
 
-	d := New(pool, tg, testLogger())
+	d := New(pool, tg, nil, testLogger())
 	d.now = func() time.Time { return now }
 
 	sent, queued, err := d.Run(context.Background(), userID)
@@ -610,7 +949,7 @@ func TestRun_HourlyBudgetQueuesOverflow(t *testing.T) {
 
 	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
 
-	d := New(pool, tg, testLogger())
+	d := New(pool, tg, nil, testLogger())
 	d.now = func() time.Time { return now }
 
 	sent, queued, err := d.Run(context.Background(), userID)
@@ -640,7 +979,7 @@ func TestRun_FailedDeliveryStaysQueuedForRetry(t *testing.T) {
 
 	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
 
-	d := New(pool, tg, testLogger())
+	d := New(pool, tg, nil, testLogger())
 	now := deterministicDaytimeIST()
 	d.now = func() time.Time { return now }
 
@@ -676,7 +1015,7 @@ func TestRun_FailedDeliveryNotRetriedBeforeBackoffElapses(t *testing.T) {
 
 	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
 
-	failing := New(pool, fakeTelegramServerFailing(t), testLogger())
+	failing := New(pool, fakeTelegramServerFailing(t), nil, testLogger())
 	failing.now = deterministicDaytimeIST
 	if _, _, err := failing.Run(context.Background(), userID); err != nil {
 		t.Fatalf("first Run: %v", err)
@@ -692,7 +1031,7 @@ func TestRun_FailedDeliveryNotRetriedBeforeBackoffElapses(t *testing.T) {
 	}
 
 	_, workingTG := fakeTelegramServer(t)
-	retry := New(pool, workingTG, testLogger())
+	retry := New(pool, workingTG, nil, testLogger())
 	retry.now = deterministicDaytimeIST
 
 	sent, queued, err := retry.Run(context.Background(), userID)
@@ -722,7 +1061,7 @@ func TestRun_FailedDeliveryRetriedAfterBackoffElapses(t *testing.T) {
 
 	notifID := insertTestNotification(t, pool, userID, "high_score", 90)
 
-	failing := New(pool, fakeTelegramServerFailing(t), testLogger())
+	failing := New(pool, fakeTelegramServerFailing(t), nil, testLogger())
 	failing.now = deterministicDaytimeIST
 	if _, _, err := failing.Run(context.Background(), userID); err != nil {
 		t.Fatalf("first Run: %v", err)
@@ -739,7 +1078,7 @@ func TestRun_FailedDeliveryRetriedAfterBackoffElapses(t *testing.T) {
 	}
 
 	_, workingTG := fakeTelegramServer(t)
-	retry := New(pool, workingTG, testLogger())
+	retry := New(pool, workingTG, nil, testLogger())
 	retry.now = func() time.Time { return deterministicDaytimeIST().Add(time.Hour) }
 
 	sent, queued, err := retry.Run(context.Background(), userID)
@@ -786,7 +1125,7 @@ func TestRun_FailedDeliveryStopsRetryingAfterMaxAttempts(t *testing.T) {
 		t.Fatalf("seed near-exhausted delivery: %v", err)
 	}
 
-	d := New(pool, fakeTelegramServerFailing(t), testLogger())
+	d := New(pool, fakeTelegramServerFailing(t), nil, testLogger())
 	d.now = func() time.Time { return now }
 
 	sent, queued, err := d.Run(context.Background(), userID)

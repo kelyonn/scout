@@ -224,7 +224,7 @@ lose the user.
 
 ```
 ┌────────────────────────────────────────────┐
-│ 🔍 Scout                            now    │
+│ Scout                                now    │
 │ Cloudflare · SWE Intern · Bengaluru        │
 │ Match 94 · ₹85k/mo · posted 12 min ago     │
 │ Go and distributed systems match your      │
