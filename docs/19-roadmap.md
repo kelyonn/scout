@@ -434,6 +434,29 @@ category.
 **Risk:** WebView scroll performance disappoints. **Measure on the real phone in
 the first two days, not at the end.** Fallback is a native feed list only.
 
+**Backend half started 2026-08-27** — see [`HANDOFF.md`](../HANDOFF.md) for
+the full writeup. Built and tested: the FCM HTTP v1 client
+(`apps/notifier/internal/fcm`), the deliverer's fan-out to every registered
+device alongside Telegram (`apps/notifier/internal/deliver`, additive —
+Telegram's own path is untouched), stale-token retirement on `UNREGISTERED`
+(docs/17 §10's chaos test), and the device registration endpoint
+(`POST /v1/push/register-device`, `apps/api/internal/push`). The schema
+side (`notification_channel`'s `native_push` kind, `platform`/
+`device_token` columns) already existed since P1 — this is the first code
+that actually uses it.
+
+**Not started: the Capacitor shell itself** (`apps/mobile` is still the P4
+placeholder README from 2026-08-07) — no Android SDK is installed in this
+environment, so `apps/mobile`'s actual native project, the WebView
+wrapper, the push/local-notification/badge/browser plugin wiring, and any
+device- or emulator-verified behavior all remain open. Also open: the P0
+Android signing keystore (never generated — same open item P0's own
+section already lists) and a real Firebase project (`SCOUT_FCM_PROJECT_ID`
+/ `SCOUT_FCM_SERVICE_ACCOUNT_JSON`, both new in `.env.example`, are unset
+today) — the backend gracefully degrades to Telegram-only without either,
+by design, but none of this milestone's exit criteria can be checked until
+both exist and a real device is involved.
+
 ---
 
 ## P5 — Coverage and learning (ongoing)
