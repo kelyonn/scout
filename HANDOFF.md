@@ -5,18 +5,23 @@ describes what actually exists right now — the roadmap describes what's
 intended. When they disagree, this file is more current and the roadmap's
 checkboxes should be trusted less than the prose here.
 
-**Last updated:** 2026-08-27 — see that date's own update at the bottom of
-this file for what's new: a real, previously-nonexistent `raw_observation`
-partition-maintenance job, a `discover`-tool SSRF gap and a Stage-3 dedup
-advisory-lock gap both closed, and the second P5 ATS adapter —
-**Zoho Recruit** — built and verified live against three real tenants,
-including the first concrete `services_it` company (SID Global Solutions)
-toward this file's own long-flagged IT-consultancy coverage gap. Everything
-before that, through the 2026-08-26 update, was pushed to GitHub already.
-The partition-maintenance/discover-SSRF/dedup-lock fixes are committed
-locally to `main` but not yet pushed; the Zoho Recruit work is uncommitted
-in the working tree as of this writing (see that section's own closing
-note).
+**Last updated:** 2026-08-27 — see that date's two updates at the bottom of
+this file for what's new. First: a real, previously-nonexistent
+`raw_observation` partition-maintenance job, a `discover`-tool SSRF gap and
+a Stage-3 dedup advisory-lock gap both closed, and the second P5 ATS
+adapter — **Zoho Recruit** — built and verified live against three real
+tenants, including the first concrete `services_it` company (SID Global
+Solutions). Second, later the same day: a live end-to-end pass over the
+whole running stack (real fetching, real Postgres, a real browser, not new
+test code) found and fixed a serious compensation-parsing bug that had been
+fabricating wrong salaries for roughly a third of all jobs with description
+text — nine distinct false-positive classes closed, 16 new tests, and the
+existing bad data corrected via five backfill passes against the real local
+database. Everything before that, through the 2026-08-26 update, was
+pushed to GitHub already. The partition-maintenance/discover-SSRF/
+dedup-lock fixes and the Zoho Recruit adapter are committed locally to
+`main` but not yet pushed; the compensation-parser fix is uncommitted in
+the working tree as of this writing (see that section's own closing note).
 
 ---
 
@@ -1069,3 +1074,158 @@ separate commits. Nothing has been pushed to GitHub yet; the
 partition-maintenance/discover-SSRF/dedup-lock/CI-seed fixes earlier in
 this same dated update were already committed before this adapter work
 began and are in the same unpushed state.
+
+---
+
+**Update, 2026-08-27 (same day, continued): a live end-to-end pass over the
+whole running stack — not new test code, the actual system with real
+fetching, real Postgres, and a real browser — found and fixed a serious,
+widespread compensation-parsing bug, plus a scheduling-priority backlog
+observation and a Docker/host-sleep false alarm worth recording so nobody
+chases either again.**
+
+**`apps/collector/internal/normalize.ParseCompensation` was fabricating
+wrong salaries for roughly a third of all jobs with description text**,
+found by literally opening the Opportunities page and reading a real job
+card: a Waymo posting with no stated compensation at all showed "₹167/mo."
+`compensation.go` had no test file before today despite existing since
+2026-08-11. Root cause and fix, in the order each was found (each layer
+exposed the next):
+
+1. **Every capture group in both regexes was optional**, so a bare number
+   with no currency symbol, no lakh/crore/k suffix, and no period word
+   matched exactly as confidently as a real salary — Waymo's "₹167/mo" was
+   literally the "2009" in "Since its start... in 2009, Waymo has focused."
+   Fixed: `hasCompensationSignal`/`hasLocalCompensationSignal` require at
+   least one real local marker before a match is even considered.
+2. **A period word alone (no `/` or "per") isn't proof of a rate** — "6
+   Month FTC" (a contract length) matched the bare "6" as ₹6/year the same
+   way "$50,000/month" would. Fixed: the `/|per` separator is now its own
+   capture group, and a period only counts when it came with one.
+3. **A real currency symbol next to a real number still isn't proof of a
+   salary** — "we've raised $50M in Series B funding" and "$170,000,000 in
+   annual recurring revenue" both matched, producing $500M/year and
+   $170M/hour figures nothing else could explain. Fixed two ways:
+   `parseIndianNumber` now recognizes m/mn/million/b/bn/billion suffixes
+   purely to reject them (no individual salary at this platform's target
+   seniority is ever quoted that way), and `plausibleCompensation` adds a
+   generous annualized ceiling (₹5 crore/USD $5M) as defense in depth for
+   whatever still gets through without an M/B suffix.
+4. **The "12-15 LPA" shared-suffix fix (below) itself caused a real
+   regression**: "loan offerings ranging from ₹50,000 to ₹5 Lakh" (a
+   fintech's own product description, nothing to do with the job)
+   borrowed "Lakh" onto the already-complete, comma-grouped "50,000" and
+   produced ₹5,000,000,000. Fixed: a number is only eligible to borrow the
+   other side's suffix when it has no comma grouping of its own.
+5. **`ParseCompensation` only ever looked at the *first* regex match in the
+   text.** A number appearing before the real compensation figure — "We do
+   monthly 1:1s... This Staff role pays $180,000 per year" ("1:1s" contains
+   a digit) — failed the signal gate and made the whole function give up
+   instead of continuing to the real figure afterward. Fixed:
+   `tryRangeMatches`/`trySingleValueMatches` now iterate every match in
+   order and take the first one that actually passes.
+6. **A malformed range can have `lo > hi`** — an upstream HTML-stripping
+   artifact turned "$150,000 to $187,500" into "$15000,000 to $187500"
+   earlier in the same real description, and a plausibility check on the
+   high end alone would have accepted the self-contradictory result since
+   187,500 alone looks like an ordinary salary. Fixed: `lo > hi` is now
+   rejected outright, and both ends are checked against the ceiling, not
+   just the high one. (Fix 5's all-matches scan is what then let the
+   correctly-formatted restatement later in the same description win
+   instead.)
+7. **The range separator class never included an em dash (—, U+2014)** —
+   real, common in professionally-formatted postings ("Base Compensation
+   Range $150,000 — $187,500 USD") — only a hyphen, en dash, or literal
+   "to". Without it the range never matched at all and fell through to
+   each end being scored as its own lone figure. Fixed: added to the
+   separator class.
+8. Also fixed, same audit: `parseRangeMatch`'s shared-suffix borrowing
+   itself ("12-15 LPA" parsing as lo=12/hi=1,500,000 instead of both in
+   lakhs) — this is fix 4's own prerequisite, listed here for completeness
+   since it's what fix 4's regression test guards.
+
+**16 new tests** in `apps/collector/internal/normalize/compensation_test.go`
+(the file didn't exist before today), each reproducing one of the above
+against the literal real text that triggered it. `golangci-lint`,
+`sqlfluff` (N/A, no SQL touched), and the full `go test ./... -count=1`
+suite are clean.
+
+**The existing bad data was corrected too, not just the code going
+forward** — five backfill passes (a throwaway Go binary re-running the
+current `ParseCompensation` against every job's real `description_text`
+and overwriting `comp_*`/`paid`, deleted after the last pass, same
+disposable-tool convention as every other one-time verification binary in
+this project) against the real local dev database, one after each new
+false-positive class was found and fixed: the first pass alone corrected
+22,296 of 61,580 jobs (36%) with a description; two more classes found
+*during* that same backfill (the LPA-range regression, the em-dash gap)
+needed their own follow-up passes. Final distribution is sane across every
+currency/period bucket — no value anywhere near the hundreds-of-millions
+figures the bug was producing before.
+
+**Known, accepted follow-on gap, not fixed tonight**: `job_score.explanation`
+— the cached "why this matches" sentence `apps/collector/internal/
+scoring.Explain` writes at score time — still shows the old, wrong
+compensation figure for jobs scored before this fix (confirmed live: the
+same Waymo job's card still reads "₹167/month, 72nd percentile" after its
+own `job.comp_min` was correctly nulled). Fixing this needs a real rescore
+pass through the proper path AGENTS.md rule 3 and docs/17 §8.2 require
+(`suppress_notifications`, the same guarantee a weight-version rescore
+already has to provide) — a distinctly larger and more sensitive operation
+than correcting `job.comp_*` directly, and out of scope for tonight. It
+self-heals the normal way: a real weight-version bump already triggers a
+full rescore, and any job whose content is re-observed with a changed
+content_hash gets rescored on its own next poll.
+
+**Also investigated and ruled out, so nobody chases either again:**
+- **A ~47-minute-plus gap between collector scheduler ticks, and the
+  container going `unhealthy`** looked at first like a real hang — a
+  `SIGQUIT` goroutine dump showed the heartbeat goroutine genuinely alive
+  and cycling normally (a fresh `[select, 1 minutes]` state), and 0 process
+  restarts confirms it was the same continuous process throughout. The
+  actual cause: this machine went to sleep for a real stretch during this
+  session (Docker Desktop's Linux VM suspends with it), so wall-clock time
+  jumped on wake while the process's own sense of elapsed time didn't —
+  exactly [ADR-018](docs/adr/ADR-018-laptop-only-hosting.md)'s own
+  documented "closing the laptop lid" caveat, not a new defect. The
+  container was manually restarted after the diagnostic `SIGQUIT` (which
+  itself kills the process) rather than relying on `restart: unless-stopped`,
+  which did not fire on its own within the time checked.
+- **~1,897 `pending_review` sources (including this session's own 5
+  newly-seeded ones) still sat at 0 polls** even after real collector
+  uptime — not a bug, a real, large, already-documented backlog (HANDOFF's
+  own 2026-08-24 entry: "2,057 of 3,436 newly-discovered `pending_review`
+  sources still hadn't been polled once"). `SelectDueSources`'s `order by
+  priority_tier asc, next_poll_at asc` deliberately gives never-yet-reviewed
+  sources (tier 3, the schema default) priority over already-vetted but
+  low-yield `active` ones (tier 5, what `decideShadowPromotion` assigns for
+  the lowest yield bucket) — intentional, so the 48h shadow-review window
+  actually completes in bounded time rather than being starved by a much
+  larger population of low-priority active sources trickling in on their
+  own interval. Confirmed the 5 sources this session seeded do get polled
+  correctly once actually reached (manually brought to the front of the
+  queue for verification: all 5 polled successfully, zero errors).
+- **Speechify showing "1,181 open roles" and two Cloudflare
+  "Research Engineer Intern (Fall 2026)" postings both saved** looked like
+  dedup or classification bugs. Both are real: Speechify genuinely posts
+  the same ~5 SWE roles across 200+ cities (a real, if unusual, broad
+  geographic hiring pattern), each with its own genuine, distinct
+  Greenhouse URL — Stage 1 dedup correctly does not merge genuinely
+  different URLs (AGENTS.md's own "bias dedup toward under-merging"), and
+  `is_software` classification on the 1,181 is correct (a separate 110
+  "Go-to-Market" postings from the same company are correctly classified
+  `is_software = false` and excluded). The two saved Cloudflare postings
+  are two genuinely different Greenhouse job ids, same shape as Speechify's
+  — not a save-button or state bug.
+- **Google Calendar showing "not configured on this deployment"** despite
+  an earlier `grep` of `.env` appearing to show real values — the grep
+  pattern (`sed 's/=.*/=<set>/'`) masked the fact both
+  `SCOUT_GOOGLE_CLIENT_ID`/`SCOUT_GOOGLE_CLIENT_SECRET` are actually empty
+  locally. The app's own `enabled: false` response is correct; this was a
+  flaw in how the check was done, not in Scout.
+
+Everything in this update — `compensation.go`, the new
+`compensation_test.go`, and the corrected data (already live in the local
+dev database via the backfill passes, no migration needed since these are
+computed columns re-derived from `description_text`) — is uncommitted in
+the working tree as of this writing.
