@@ -1,0 +1,16 @@
+-- Adds ats_zohorecruit to source_kind (000002's own comment: "adding a
+-- value needs a migration, which is the correct friction").
+-- adapters/ats/zohorecruit is the second P5 ATS adapter (after Keka,
+-- 000021) — docs/05 section 2 rates Zoho Recruit "Low effort," "common at
+-- Indian SMBs." The real shape, verified live 2026-08-27 against two real
+-- tenants (increff.zohorecruit.com, educohire.zohorecruit.com), is not the
+-- "public JSON" docs/05 originally guessed: the career-site listing page
+-- (`{tenant}.zohorecruit.com/jobs/Careers`) is HTML, with the job array
+-- embedded as HTML-entity-encoded JSON inside a single
+-- `<input id="jobs" value="...">`, not a separate JSON endpoint.
+--
+-- ALTER TYPE ... ADD VALUE cannot run inside the same transaction as a
+-- later statement that uses the new value (a real Postgres restriction,
+-- not a style choice) — harmless here since this migration does nothing
+-- but add the value.
+ALTER TYPE source_kind ADD VALUE 'ats_zohorecruit';

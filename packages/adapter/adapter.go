@@ -50,6 +50,11 @@ const SourceKindWorkday SourceKind = "ats_workday"
 // section 2 rates Keka "Low effort," "widely used by Indian mid-market."
 const SourceKindKeka SourceKind = "ats_keka"
 
+// SourceKindZohoRecruit is the source_kind enum value for Zoho Recruit
+// boards — docs/05 section 2 rates Zoho Recruit "Low effort," "common at
+// Indian SMBs."
+const SourceKindZohoRecruit SourceKind = "ats_zohorecruit"
+
 // FetchHints carries the previous poll's conditional-request validators,
 // mirroring fetch.Request's own fields — an adapter's Fetch translates
 // these into the fetch.Request it actually sends.
