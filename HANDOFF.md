@@ -5,8 +5,8 @@ describes what actually exists right now — the roadmap describes what's
 intended. When they disagree, this file is more current and the roadmap's
 checkboxes should be trusted less than the prose here.
 
-**Last updated:** 2026-08-27 — see that date's two updates at the bottom of
-this file for what's new. First: a real, previously-nonexistent
+**Last updated:** 2026-08-27 — see that date's three updates at the bottom
+of this file for what's new. First: a real, previously-nonexistent
 `raw_observation` partition-maintenance job, a `discover`-tool SSRF gap and
 a Stage-3 dedup advisory-lock gap both closed, and the second P5 ATS
 adapter — **Zoho Recruit** — built and verified live against three real
@@ -17,11 +17,12 @@ test code) found and fixed a serious compensation-parsing bug that had been
 fabricating wrong salaries for roughly a third of all jobs with description
 text — nine distinct false-positive classes closed, 16 new tests, and the
 existing bad data corrected via five backfill passes against the real local
-database. Everything before that, through the 2026-08-26 update, was
-pushed to GitHub already. The partition-maintenance/discover-SSRF/
-dedup-lock fixes and the Zoho Recruit adapter are committed locally to
-`main` but not yet pushed; the compensation-parser fix is uncommitted in
-the working tree as of this writing (see that section's own closing note).
+database. Third, later still: **P4 started** — the native-push backend
+(FCM client, the deliverer's device fan-out, the registration endpoint) is
+built and tested; the Capacitor shell itself is not, since this
+environment has no Android SDK and no Firebase project exists yet.
+Everything through this update is committed to `main`; see each update's
+own closing note for push status.
 
 ---
 
@@ -1227,5 +1228,87 @@ content_hash gets rescored on its own next poll.
 Everything in this update — `compensation.go`, the new
 `compensation_test.go`, and the corrected data (already live in the local
 dev database via the backfill passes, no migration needed since these are
-computed columns re-derived from `description_text`) — is uncommitted in
-the working tree as of this writing.
+computed columns re-derived from `description_text`) — is committed and
+pushed to `origin/main`.
+
+---
+
+**Update, 2026-08-27 (later the same day): P4 started — the backend half
+of native push (ADR-012) is built and tested; the Capacitor shell itself
+is not.**
+
+After the live end-to-end pass above, the full local stack was torn down
+(`docker compose down` — collector/brain/notifier first, then everything,
+per this project's own "bounded window, not indefinite" convention) and
+work began on P4.
+
+**Built and tested**, none of it needing a Firebase project or Android SDK
+to verify (both genuinely absent from this environment — see below):
+
+- **`apps/notifier/internal/fcm`** — an FCM HTTP v1 client. The legacy
+  server-key API docs/11 originally assumed is deprecated; HTTP v1 needs a
+  service-account OAuth2 token instead, via `golang.org/x/oauth2/google`
+  (already a dependency — `apps/api/internal/googlecalendar` uses the same
+  module for its own three-legged flow, so this added no new supply-chain
+  surface). An empty project id or service account degrades to "disabled"
+  the same way `telegram.Client`/`heartbeat.Pinger` already do. An
+  `UNREGISTERED`/`NOT_FOUND` response comes back as a typed
+  `*TokenInvalidError` — docs/17 §10's own chaos-test requirement
+  ("tokens retired... no silent loss"). 8 tests, an `httptest.Server`
+  standing in for both Google's token endpoint and FCM itself.
+- **`apps/notifier/internal/deliver`'s fan-out** — `Deliverer.Run` now
+  also sends to every enabled `native_push` channel (`GetEnabledChannels`,
+  new query) alongside the existing single Telegram channel, recording its
+  own `notification_delivery` row per device. Deliberately **additive, not
+  a rewrite**: Telegram's own path (`GetTelegramChannel`, `send`,
+  `sendBatch`) is untouched, so its existing ~30 tests needed only a
+  signature-argument fix, not a behavior change — verified by running them
+  before and after. A push failure never affects Telegram's own
+  sent/queued accounting (docs/17 §10: "block one channel, the other still
+  delivers"), and an `UNREGISTERED` token calls the new `DisableChannel`
+  query rather than retrying forever. Native push does not group BATCHED
+  notifications into one message the way Telegram's `sendBatch` does —
+  Android's own per-channel grouping (docs/11 §6.2's four channel ids)
+  already gives an equivalent collapsed view, so this is a documented
+  simplification, not a silent gap. 9 new tests, including one confirming
+  a disabled `fcm.Client{}` (today's actual production state) attempts and
+  records nothing.
+- **`POST /v1/push/register-device`** (`apps/api/internal/push`) — the
+  Capacitor shell's own registration call, writing straight to
+  `notification_channel` via the new `UpsertNativePushChannel` query
+  (upserts on `(user_id, device_token)`, so a token refresh updates in
+  place). Needs no FCM credentials at all — registration is pure Postgres,
+  only *sending* needs Firebase. 6 tests against a real Postgres.
+- `docs/11-notifications.md` §6.2's own mockup had an emoji Telegram's
+  sections 6.1/6.5 were already corrected to drop (2026-08-24) — fixed to
+  match, since native push is now the third channel that emoji policy
+  actually applies to.
+- `.env.example` and `infra/compose/local.yml` gained
+  `SCOUT_FCM_PROJECT_ID`/`SCOUT_FCM_SERVICE_ACCOUNT_JSON`, both-empty a
+  valid disabled state, same convention as every other optional
+  integration in this file. `infra/compose/production.yml` needed no
+  change — its `notifier` service already forwards the whole env file
+  generically rather than listing vars individually.
+
+**Not started: the Capacitor shell itself.** `apps/mobile` is still
+exactly the placeholder README from 2026-08-07 ("Not implemented yet.
+Scheduled for M3."). This machine has no Android SDK (`ANDROID_HOME`
+unset, no `sdkmanager`) and no Firebase project exists yet, so:
+- The actual native project (`npx cap init` / `npx cap add android`), the
+  WebView pointed at the deployed `apps/web`, and the
+  push/local-notification/app/badge/browser plugin wiring per ADR-012's
+  own architecture diagram are all unbuilt.
+- The P0 exit criterion "Android signing keystore generated and backed up
+  offline" is still open — it was open before this session too (P0's own
+  section already lists it), and nothing here changed that.
+- None of P4's own exit criteria (installed on a real phone, FCM actions
+  from the lock screen, no Web Push double-buzz, WebView scroll
+  performance) can be checked without a real device and a real Firebase
+  project — this is the same "repo side done, environment needs the user"
+  shape ADR-018 already established for P0's Oracle Cloud gap.
+
+Full `go build ./...`, `go test ./... -count=1` (real Postgres/Redis),
+`golangci-lint run ./...`, and `sqlfluff` (CI-pinned 3.5.0, not this
+machine's 4.3.0 — see the earlier update on why that distinction matters)
+are all clean. Committed to `main` in two commits (the query/schema-side
+plumbing, then the fcm/deliver/push code) and pushed.
