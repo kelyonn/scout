@@ -5,24 +5,26 @@ describes what actually exists right now — the roadmap describes what's
 intended. When they disagree, this file is more current and the roadmap's
 checkboxes should be trusted less than the prose here.
 
-**Last updated:** 2026-08-27 — see that date's three updates at the bottom
-of this file for what's new. First: a real, previously-nonexistent
-`raw_observation` partition-maintenance job, a `discover`-tool SSRF gap and
-a Stage-3 dedup advisory-lock gap both closed, and the second P5 ATS
-adapter — **Zoho Recruit** — built and verified live against three real
-tenants, including the first concrete `services_it` company (SID Global
-Solutions). Second, later the same day: a live end-to-end pass over the
-whole running stack (real fetching, real Postgres, a real browser, not new
-test code) found and fixed a serious compensation-parsing bug that had been
-fabricating wrong salaries for roughly a third of all jobs with description
-text — nine distinct false-positive classes closed, 16 new tests, and the
-existing bad data corrected via five backfill passes against the real local
-database. Third, later still: **P4 started** — the native-push backend
-(FCM client, the deliverer's device fan-out, the registration endpoint) is
-built and tested; the Capacitor shell itself is not, since this
-environment has no Android SDK and no Firebase project exists yet.
-Everything through this update is committed to `main`; see each update's
-own closing note for push status.
+**Last updated:** 2026-08-28 — **P4's Capacitor shell is real and running**:
+Android Studio and a full headless SDK installed from scratch
+(`android-commandlinetools`), `apps/mobile`'s actual native project
+generated and built (`BUILD SUCCESSFUL`, a real unsigned APK), and
+verified on a real emulator — the actual deployed Next.js login screen
+rendering pixel-correct inside the shell, the real JS bundle executing
+with zero errors per `logcat`. The one genuinely open question (how a
+physical phone reaches the server, given ADR-012 assumed Tailscale and
+ADR-018 later removed it) is documented, not resolved — needs the user.
+See that date's own update at the bottom for the full writeup.
+
+The day before (2026-08-27, three updates, still at the bottom): a real
+`raw_observation` partition-maintenance job, a `discover`-tool SSRF gap
+and a Stage-3 dedup advisory-lock gap closed; the second P5 ATS adapter
+(**Zoho Recruit**) built and verified live; a live end-to-end pass that
+found and fixed a serious compensation-parsing bug fabricating wrong
+salaries for roughly a third of all jobs with description text; and P4's
+native-push **backend** (FCM client, the deliverer's device fan-out, the
+registration endpoint) built and tested. Everything through this update is
+committed to `main` and pushed.
 
 ---
 
@@ -1312,3 +1314,104 @@ Full `go build ./...`, `go test ./... -count=1` (real Postgres/Redis),
 machine's 4.3.0 — see the earlier update on why that distinction matters)
 are all clean. Committed to `main` in two commits (the query/schema-side
 plumbing, then the fcm/deliver/push code) and pushed.
+
+---
+
+**Update, 2026-08-28: Android Studio and the SDK installed, and the
+Capacitor shell is real and actually running — not scaffolding, a
+verified app.**
+
+**Android Studio + SDK, from scratch.** `brew install --cask
+android-studio` (the IDE itself), then, separately and more usefully,
+`brew install --cask android-commandlinetools` — a full headless SDK setup
+that needs no GUI wizard: `platform-tools`, `platforms;android-34`,
+`platforms;android-35`, `build-tools;34.0.0`, `build-tools;35.0.0`, all
+licenses accepted via `sdkmanager`. `ANDROID_HOME`/`ANDROID_SDK_ROOT` and
+`PATH` added to `~/.zshrc`, verified in a fresh shell (`adb --version`).
+Java 21 (already installed) satisfies the toolchain requirement.
+
+**`apps/mobile` — the actual Capacitor project, not a config sketch.**
+`npx cap add android` generated a real Gradle project; `package.json`
+carries all six of ADR-012's plugins, verified against the real npm
+registry first (`@capacitor/badge` — the name ADR-012's own architecture
+diagram uses — **does not exist**; the real package is
+`@capawesome/capacitor-badge`, found by checking `npm view` before writing
+it into a manifest nobody would have been able to install). The biometric
+plugin is `@aparajita/capacitor-biometric-auth` (updated 2026-02-09), not
+`capacitor-native-biometric` (last published 2023-06-14, almost certainly
+stale against Capacitor 8).
+
+**The native bridge lives in `apps/web`, not `apps/mobile` — a real
+architectural point, not a filing choice.** `capacitor.config.ts`'s
+`server.url` means the WebView loads the *deployed* Next.js app; anything
+bundled in `apps/mobile/www` is only ever an offline fallback. So any
+JavaScript that calls a Capacitor plugin — registering for push, reading
+`appUrlOpen` for deep links, setting the badge — has to be part of the page
+actually being loaded, which is `apps/web`. Built:
+`apps/web/lib/capacitor.ts` (`initNativeBridge`, a no-op outside
+`Capacitor.isNativePlatform()`; `PushNotifications.register()` → POSTs the
+real FCM token to the P4-backend's own `/api/push/register-device` proxy
+route, new today; `App.addListener("appUrlOpen", ...)` plus
+`getLaunchUrl()` for the cold-start case, mapping
+`scout://job/{id}` → `/opportunities/{id}`; `setBadgeCount`), wired into
+`app/providers.tsx` via one `useEffect`. `pnpm run lint`/`typecheck`/
+`build` all clean.
+
+**Verified live, not just built — a real Gradle build, a real emulator, a
+real running app:**
+1. `./gradlew assembleDebug` — **BUILD SUCCESSFUL in 1m 58s**, 276 tasks,
+   a real unsigned `app-debug.apk`. First real proof the whole toolchain
+   (Java 21, Gradle 8.14.3, the SDK, all six plugins) actually fits
+   together, not just that each piece installed.
+2. A real AVD (`avdmanager create avd`, Android 15/`google_apis`/
+   `arm64-v8a` — `avdmanager`'s own `--device` flag failed on a missing
+   `devices.xml` this minimal SDK install doesn't ship; created without a
+   hardware profile instead, which works fine), booted headless
+   (`-no-window -no-audio`), confirmed via `adb wait-for-device` +
+   `sys.boot_completed`.
+3. `adb install` the real APK, `adb shell am start`, confirmed resumed via
+   `dumpsys activity activities` (not just "the intent was sent").
+4. **A real screenshot** (`adb shell screencap`) of the actual login
+   screen — pixel-identical to the desktop browser — after pointing
+   `apps/web`'s own dev server (`preview_start`) at the emulator's
+   `10.0.2.2` host-loopback alias and reloading. Before the dev server was
+   up, the same shell correctly showed Chrome's own "webpage not
+   available... ERR_CONNECTION_REFUSED" — proof the failure mode is right,
+   not just the happy path.
+5. **`logcat` confirms the real JS bundle executed inside the shell**:
+   `Capacitor/Console: File: http://10.0.2.2:3000/_next/static/chunks/...
+   Download the React DevTools...` — the actual Next.js/React bundle,
+   loaded and running, not a static mock. Zero fatal exceptions, zero
+   crashes, anywhere in the session's logs. `Capacitor/AppPlugin` and
+   `Capacitor/BrowserPlugin` both fired real lifecycle events
+   (`appStateChange`, `browserFinished`) on launch.
+
+**Found and fixed along the way**: my first `.gitignore` for
+`apps/mobile` ignored the entire `android/` directory, treating it like
+`packages/db/gen` — fully regenerable, safe to exclude. That's wrong for
+Capacitor: `cap sync` never touches `MainActivity.java`,
+`AndroidManifest.xml`, or the launcher icons — those are real, hand-edited
+source a developer is expected to commit, and `cap add android` writes its
+*own* `android/.gitignore` scoped correctly to just the build-artifact
+subset (`build/`, `.gradle/`, `local.properties`). Caught before committing
+anything, by checking what Capacitor's own generated `.gitignore` actually
+excludes rather than assuming.
+
+**Genuinely open, not glossed over**: how a real physical phone reaches
+the server at all. ADR-012 (2026-08-07) assumed Tailscale; ADR-018
+(2026-08-19) removed Tailscale and confined everything to `localhost`;
+neither ADR was ever updated to account for the other, and this is the
+first work to actually run into the gap in practice rather than just
+noting it exists. `capacitor.config.ts` and `apps/mobile/README.md` both
+carry the full writeup and the two real options (LAN IP + loosen
+localhost-only binding, or Tailscale scoped to just the phone), neither
+decided — this needs the user, not more code. Also still open: the P0
+Android signing keystore (unsigned debug build only), a real Firebase
+project (FCM itself is unverified — registration and the shell both
+degrade gracefully without one, but nothing has actually sent a push
+yet), and the biometric/local-notification plugins are installed but not
+wired into any UI.
+
+Emulator torn down (`adb emu kill`) after verification — same "don't
+leave things running past the task that needed them" discipline as every
+other teardown this project does.
