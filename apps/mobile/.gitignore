@@ -1,0 +1,16 @@
+node_modules/
+
+# android/ itself is NOT ignored here, unlike packages/db/gen — Capacitor's
+# native project is a normal committed source tree (MainActivity,
+# AndroidManifest.xml, icons/, build.gradle), not fully regenerable
+# boilerplate. `npx cap add android` writes its own android/.gitignore
+# for exactly the build-artifact subset (android/app/build/, .gradle/,
+# local.properties) that genuinely is throwaway — that's the right level
+# to ignore at, not the whole directory.
+
+# Never commit the real Firebase config — it names the real project and
+# is meaningless (and safe to regenerate) without the matching service
+# account already gitignored in packages/db and infra/seed's own way.
+google-services.json
+
+*.log
