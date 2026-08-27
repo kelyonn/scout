@@ -24,37 +24,61 @@ build succeeded").
 
 **Not yet done**: FCM push end-to-end (no Firebase project exists — see
 below), the biometric-unlock and local-notification plugins are installed
-but not wired into any UI, and the real-device connectivity question below
-is unresolved.
+but not wired into any UI, and the Tailscale setup below needs root on this
+machine to finish — see its own "what's left" list.
 
-## The one real open question: how does a phone reach the server?
+## How a phone reaches the server: Tailscale, decided 2026-08-28
 
 [ADR-012](../../docs/adr/ADR-012-native-app-shell.md) (2026-08-07) assumed
 Tailscale gave the phone a MagicDNS name to reach the laptop by.
 [ADR-018](../../docs/adr/ADR-018-laptop-only-hosting.md) (2026-08-19, twelve
 days later) removed Tailscale entirely: "the web dashboard is reached at
-`localhost` while the stack is running." Nobody has reconciled the two — a
-physically separate phone cannot reach another device's `localhost` by
-definition, so as written, ADR-012's own architecture doesn't work for a
-real phone under ADR-018's hosting model.
+`localhost` while the stack is running," without revisiting what that means
+for a physically separate phone. **Decided: Tailscale, re-added scoped to
+just the phone↔laptop leg** — not a reversal of ADR-018, whose actual
+reasoning (no remote host, no Oracle A1, no dead-man's switch, no public
+ingress) all still holds; a tailnet between the same person's own two
+devices needs none of that. Rejected the alternative (same-Wi-Fi + LAN IP,
+binding `apps/api`/`apps/web` to `0.0.0.0`) because it widens reachability
+to anything on the same Wi-Fi gated only by `SCOUT_AUTH_TOKEN`, and stops
+working the moment the phone leaves the house — Tailscale's own device
+identity is a second, independent gate, and keeps working anywhere.
 
-`capacitor.config.ts`'s `SCOUT_MOBILE_SERVER_URL` defaults to `10.0.2.2` —
-the Android emulator's own always-on alias for the host machine's
-`localhost`, which is why the emulator verification above worked with zero
-network changes. It is **not** a real answer for a physical phone. Two real
-options exist, neither decided:
+`infra/compose/local.yml`'s `api`/`web` services now bind
+`SCOUT_HOST_BIND_ADDR` (`.env.example`, defaults to `127.0.0.1` —
+ADR-018's own posture, unchanged until this is actually set) instead of a
+hardcoded `127.0.0.1`.
 
-- **Same Wi-Fi + LAN IP.** Bind `apps/api`/`apps/web` to `0.0.0.0` instead
-  of localhost-only, point `SCOUT_MOBILE_SERVER_URL` at the laptop's LAN
-  IP. A real, deliberate loosening of ADR-018's "this process only ever
-  binds to localhost" security posture — not a toggle to flip without
-  thinking about it, since it means anything else on the same Wi-Fi can
-  also reach the API (still gated by `SCOUT_AUTH_TOKEN`, but a materially
-  larger attack surface than "not reachable at all").
-- **Tailscale, scoped to just the phone.** Doesn't require reversing all of
-  ADR-018 — a tailnet between the user's own laptop and phone needs no
-  Oracle host, no remote host at all. Point `SCOUT_MOBILE_SERVER_URL` at the
-  MagicDNS name.
+**What's left, and why it's not done**: starting the Tailscale daemon
+needs root — a hard, unavoidable requirement for creating a network
+interface on any Unix system, the same category as the Xcode/system-setup
+fixes elsewhere in this project that need the user's own password. This
+setup got as far as `brew install tailscale` (the CLI binary only, no
+sudo needed); everything past that needs you, in order:
+
+```bash
+sudo brew services start tailscale   # or: sudo tailscaled &
+sudo tailscale up                    # opens a browser — log into your Tailscale account
+tailscale ip -4                      # prints this laptop's tailnet IP — stable across reboots
+```
+
+Then:
+
+1. Set `SCOUT_HOST_BIND_ADDR` in the **repo root's** `.env` to that IP,
+   `docker compose down && make live-run` (or `make dev`) to rebind.
+2. Install Tailscale on the phone (Play Store), log into the **same**
+   account — a phone not on the tailnet can't reach that IP regardless of
+   what's configured.
+3. Set `SCOUT_MOBILE_SERVER_URL=http://<that IP>:3000` before syncing (see
+   Building, below) — `apps/mobile`'s own env, separate from the repo
+   root's.
+
+Optional hardening once the above works: `tailscale cert` for a real HTTPS
+cert on the MagicDNS name, so `capacitor.config.ts`'s `cleartext` flag can
+go back to `false`. Not required — Tailscale's own WireGuard tunnel already
+encrypts the connection end-to-end regardless of whether the app-level
+transport is HTTP or HTTPS, so this is about `androidScheme`/mixed-content
+policy correctness, not a real exposure.
 
 ## Building
 
