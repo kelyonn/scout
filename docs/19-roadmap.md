@@ -434,28 +434,52 @@ category.
 **Risk:** WebView scroll performance disappoints. **Measure on the real phone in
 the first two days, not at the end.** Fallback is a native feed list only.
 
-**Backend half started 2026-08-27** — see [`HANDOFF.md`](../HANDOFF.md) for
-the full writeup. Built and tested: the FCM HTTP v1 client
-(`apps/notifier/internal/fcm`), the deliverer's fan-out to every registered
-device alongside Telegram (`apps/notifier/internal/deliver`, additive —
-Telegram's own path is untouched), stale-token retirement on `UNREGISTERED`
-(docs/17 §10's chaos test), and the device registration endpoint
-(`POST /v1/push/register-device`, `apps/api/internal/push`). The schema
-side (`notification_channel`'s `native_push` kind, `platform`/
-`device_token` columns) already existed since P1 — this is the first code
-that actually uses it.
+**Backend built 2026-08-27, shell built and running 2026-08-28** — see
+[`HANDOFF.md`](../HANDOFF.md) for the full writeup on both days. Backend:
+the FCM HTTP v1 client (`apps/notifier/internal/fcm`), the deliverer's
+fan-out to every registered device alongside Telegram
+(`apps/notifier/internal/deliver`, additive — Telegram's own path is
+untouched), stale-token retirement on `UNREGISTERED` (docs/17 §10's chaos
+test), and the device registration endpoint
+(`POST /v1/push/register-device`, `apps/api/internal/push`).
 
-**Not started: the Capacitor shell itself** (`apps/mobile` is still the P4
-placeholder README from 2026-08-07) — no Android SDK is installed in this
-environment, so `apps/mobile`'s actual native project, the WebView
-wrapper, the push/local-notification/badge/browser plugin wiring, and any
-device- or emulator-verified behavior all remain open. Also open: the P0
-Android signing keystore (never generated — same open item P0's own
-section already lists) and a real Firebase project (`SCOUT_FCM_PROJECT_ID`
-/ `SCOUT_FCM_SERVICE_ACCOUNT_JSON`, both new in `.env.example`, are unset
-today) — the backend gracefully degrades to Telegram-only without either,
-by design, but none of this milestone's exit criteria can be checked until
-both exist and a real device is involved.
+**The Capacitor shell itself is now real, not a placeholder.**
+`apps/mobile` has an actual Android project (`npx cap add android`) with
+all six ADR-012 plugins installed, plus the native-bridge integration in
+`apps/web/lib/capacitor.ts` (push registration, deep links via
+`@capacitor/app`'s `appUrlOpen`, badge count) — that code has to live in
+`apps/web`, not `apps/mobile`, because `server.url` means the WebView
+loads the deployed web app, not `apps/mobile`'s own bundled assets. Built
+*and run*: a real unsigned debug APK, installed on a real (emulated)
+Android 15 device via this repo's own new `android-commandlinetools`
+setup, with the actual deployed Next.js login screen rendering
+pixel-correct inside it and the JS bundle executing with zero errors
+(confirmed via `Capacitor/Console` logcat output, not just "the build
+succeeded").
+
+**Still open:**
+- **How a real phone reaches the server at all** — capacitor.config.ts's
+  own long comment has the full writeup: ADR-012 assumed Tailscale,
+  ADR-018 removed it twelve days later and confined everything to
+  `localhost`, and nobody has reconciled the two. The emulator verification
+  above worked via Android's `10.0.2.2` host-loopback alias, which is not
+  a real answer for a physical device. Two real options are named in
+  `apps/mobile/README.md`, neither decided.
+- The P0 Android signing keystore (never generated — same open item P0's
+  own section already lists; today's APK is unsigned debug-only).
+- A real Firebase project (`SCOUT_FCM_PROJECT_ID`/
+  `SCOUT_FCM_SERVICE_ACCOUNT_JSON` for the notifier, `google-services.json`
+  for the app) — the backend and the shell both gracefully degrade without
+  one, by design, but FCM delivery itself is entirely unverified until it
+  exists.
+- The biometric-auth and local-notification plugins are installed but not
+  wired into any UI yet.
+- None of this milestone's own exit criteria (installed on the actual
+  phone, lock-screen actions, no Web Push double-buzz, real-device scroll
+  performance) can be checked until the connectivity question above is
+  resolved and a real device is involved — everything above was verified
+  on an emulator, which is a real, meaningful proof of the architecture
+  but not a substitute for the real thing.
 
 ---
 
