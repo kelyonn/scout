@@ -69,6 +69,14 @@ type Querier interface {
 	// scoped to job_group_id, and a digest has none) — safe here because the
 	// notifier is a single sequential loop, never concurrent with itself.
 	DigestAlreadySentSince(ctx context.Context, arg DigestAlreadySentSinceParams) (bool, error)
+	// docs/17 section 10's chaos test: "Return UNREGISTERED for every push
+	// token... tokens retired, user told on other channels, no silent loss."
+	// The deliverer calls this the moment FCM reports a device token as
+	// permanently invalid (fcm.TokenInvalidError) — enabled = FALSE rather
+	// than a delete, so the row (and its device_label/app_version history)
+	// stays visible for "why did my phone stop getting pushes" debugging
+	// instead of silently vanishing.
+	DisableChannel(ctx context.Context, id pgtype.UUID) error
 	FindJobByATSID(ctx context.Context, arg FindJobByATSIDParams) (FindJobByATSIDRow, error)
 	// Job and job_group queries. See docs/08-dedup-identity.md section 3.1
 	// (Stage 1, exact-match dedup) and infra/migrations/000006_job.up.sql.
@@ -130,6 +138,13 @@ type Querier interface {
 	// packages/taxonomy/companies.yaml's well_known flag (competition_estimate's
 	// brand-recognition proxy) — that registry is keyed by slug, not UUID.
 	GetCompanySlug(ctx context.Context, id pgtype.UUID) (string, error)
+	// The deliverer's fan-out point (ADR-012): every enabled channel for a
+	// user, not just Telegram — one row per registered device plus at most one
+	// Telegram/email/discord row each, per notification_channel's own unique
+	// indexes. Ordered by kind so the caller's own grouping (one native_push
+	// send per device, still one Telegram send total) is deterministic across
+	// runs, which matters for tests asserting on delivery order.
+	GetEnabledChannels(ctx context.Context, userID pgtype.UUID) ([]NotificationChannel, error)
 	GetGoogleCalendarCredential(ctx context.Context, userID pgtype.UUID) (GoogleCalendarCredential, error)
 	GetGoogleCalendarEvent(ctx context.Context, jobGroupID pgtype.UUID) (GoogleCalendarEvent, error)
 	GetJobByID(ctx context.Context, id pgtype.UUID) (GetJobByIDRow, error)
@@ -610,6 +625,15 @@ type Querier interface {
 	// in this schema (ADR-015).
 	UpsertGoogleCalendarCredential(ctx context.Context, arg UpsertGoogleCalendarCredentialParams) (GoogleCalendarCredential, error)
 	UpsertGoogleCalendarEvent(ctx context.Context, arg UpsertGoogleCalendarEventParams) error
+	// ADR-012's device registration write path — POST /v1/push/register-device.
+	// notification_channel_device_idx (000009) is the write side this targets:
+	// one row per (user_id, device_token) regardless of kind, so re-registering
+	// the same physical device (an FCM token refresh, or the app reopened)
+	// updates the existing row in place rather than accumulating a duplicate
+	// channel per device. config is an empty JSON object — native_push has
+	// nothing to put there (no chat_id/subscription blob the way
+	// telegram/web_push do), but the column is NOT NULL with no default.
+	UpsertNativePushChannel(ctx context.Context, arg UpsertNativePushChannelParams) (NotificationChannel, error)
 	// Was InsertNotificationDelivery — plain insert, no conflict handling,
 	// because before 000020 a notification could only ever reach this call
 	// once (see GetUndeliveredNotifications' own comment: no code path
