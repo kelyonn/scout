@@ -1,11 +1,12 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
-// SCOUT_MOBILE_SERVER_URL is the one genuinely open question this shell
-// can't resolve on its own — see this file's own long comment below and
-// HANDOFF.md's 2026-08-27 P4 entry for the full writeup. Read at config
-// build time (`npx cap sync` re-reads this file), not at app runtime, so
-// changing it always needs a `cap sync` + rebuild, never just an env
-// change on a running install.
+// SCOUT_MOBILE_SERVER_URL — decided 2026-08-28: Tailscale, scoped to just
+// the phone<->laptop leg, not a reversal of ADR-018 (see the server block
+// below for the full reasoning). Read at config build time (`npx cap
+// sync` re-reads this file), not at app runtime, so changing it always
+// needs a `cap sync` + rebuild, never just an env change on a running
+// install. Defaults to the Android emulator's own host-loopback alias,
+// which needs no Tailscale at all — set this for a real device.
 const serverURL = process.env.SCOUT_MOBILE_SERVER_URL || "http://10.0.2.2:3000";
 
 const config: CapacitorConfig = {
@@ -22,36 +23,32 @@ const config: CapacitorConfig = {
     // ADR-012's whole architecture: "WebView → the deployed Next.js app
     // (identical UI to the browser, no fork)". This is that pointer.
     //
-    // THE OPEN QUESTION THIS FILE CANNOT ANSWER ON ITS OWN: ADR-012
-    // (2026-08-07) was written assuming Tailscale gave the phone a
-    // MagicDNS name to reach the laptop by. ADR-018 (2026-08-19, twelve
-    // days later) removed Tailscale entirely — "no remote host, no
+    // THE GAP AND THE DECISION: ADR-012 (2026-08-07) assumed Tailscale
+    // gave the phone a MagicDNS name to reach the laptop by. ADR-018
+    // (2026-08-19) removed Tailscale entirely — "no remote host, no
     // Tailscale, no Oracle... the web dashboard is reached at localhost
-    // while the stack is running" — and never revisited what that means
-    // for a physically separate phone, which cannot reach another
-    // device's localhost by definition. The two ADRs were never
-    // reconciled; this is not an oversight in this config file, it's a
-    // real unresolved architectural gap. flagged in
-    // docs/19-roadmap.md's P4 section and HANDOFF.md rather than papered
-    // over here.
+    // while the stack is running" — without revisiting what that means
+    // for a physically separate phone. Decided 2026-08-28: **Tailscale,
+    // re-added scoped to just the phone<->laptop leg.** This is not a
+    // reversal of ADR-018 — that ADR's reasoning was about not needing a
+    // remote HOST (no Oracle A1, no dead-man's switch, no public
+    // ingress), all of which stays true. A tailnet between two of the
+    // same person's own devices needs none of that; it's the same shape
+    // as any other personal-device mesh. Rejected the alternative (LAN
+    // IP + binding apps/api/apps/web to 0.0.0.0) because that widens
+    // reachability to literally anything on the same Wi-Fi gated only by
+    // SCOUT_AUTH_TOKEN, whereas Tailscale's own device identity is a
+    // second, independent gate — and it keeps working away from home
+    // Wi-Fi, which a LAN IP never would.
     //
-    // The default below (10.0.2.2, Android's own always-on alias for
-    // "the host machine's localhost from inside the emulator") is
-    // therefore deliberately scoped to emulator development ONLY — it is
-    // the one case that works today, with zero network changes, and
-    // needs no decision from anyone. A REAL PHONE needs one of:
-    //   (a) phone and laptop on the same LAN, apps/api and apps/web
-    //       bound to 0.0.0.0 instead of localhost-only (a real,
-    //       deliberate loosening of ADR-018's "this process only ever
-    //       binds to localhost" security posture, not a config toggle
-    //       to flip casually), and SCOUT_MOBILE_SERVER_URL set to the
-    //       laptop's LAN IP; or
-    //   (b) Tailscale re-added for the phone<->laptop leg specifically
-    //       (this does not require reversing all of ADR-018 — a tailnet
-    //       between two of the user's own devices needs no Oracle host),
-    //       and SCOUT_MOBILE_SERVER_URL set to the MagicDNS name.
-    // Neither is decided. Set SCOUT_MOBILE_SERVER_URL before syncing for
-    // real-device use once one is.
+    // infra/compose/local.yml's api/web services now bind
+    // SCOUT_HOST_BIND_ADDR (.env.example's own setup steps) instead of a
+    // hardcoded 127.0.0.1 — set it to this laptop's Tailscale IP
+    // (`tailscale ip -4`) to actually finish this. Until that's done,
+    // the default below (10.0.2.2, Android's own always-on alias for
+    // "the host machine's localhost from inside the emulator") is what's
+    // actually reachable — real for emulator development, not a stand-in
+    // for a real phone.
     url: serverURL,
     cleartext: serverURL.startsWith("http://"),
   },
