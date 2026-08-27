@@ -131,7 +131,14 @@ services:
       SCOUT_GOOGLE_CLIENT_SECRET: ${SCOUT_GOOGLE_CLIENT_SECRET:-}
       SCOUT_GOOGLE_REDIRECT_URL: ${SCOUT_GOOGLE_REDIRECT_URL:-http://localhost:3000/api/integrations/google/callback}
     ports:
-      - "127.0.0.1:${SCOUT_API_PORT:-8081}:8080"
+      # SCOUT_HOST_BIND_ADDR defaults to 127.0.0.1 — ADR-018's "this process
+      # only ever binds to localhost" posture. Set to the laptop's own
+      # Tailscale IP (`tailscale ip -4`) in .env to make this reachable from
+      # apps/mobile on a real phone (see that app's own README for the full
+      # writeup) — deliberately NOT 0.0.0.0: binding to the tailnet's own
+      # interface, not every interface, is what keeps this off the regular
+      # LAN even once mobile connectivity is turned on.
+      - "${SCOUT_HOST_BIND_ADDR:-127.0.0.1}:${SCOUT_API_PORT:-8081}:8080"
     healthcheck:
       test: ["CMD", "/app/app", "healthcheck"]
       interval: 10s
@@ -275,7 +282,9 @@ services:
       # for local Docker exactly like it is for `next dev`: no TLS.
       SCOUT_ENV: local
     ports:
-      - "127.0.0.1:${SCOUT_WEB_PORT:-3000}:3000"
+      # Same SCOUT_HOST_BIND_ADDR as the api service above — both need to be
+      # reachable over the tailnet for apps/mobile, not just one.
+      - "${SCOUT_HOST_BIND_ADDR:-127.0.0.1}:${SCOUT_WEB_PORT:-3000}:3000"
     mem_limit: 256m
     depends_on:
       api:
