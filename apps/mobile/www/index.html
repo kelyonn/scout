@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<!--
+  This page is Capacitor's required local webDir content — it exists
+  because `cap sync` needs a non-empty webDir to bundle, not because a
+  connected user is meant to see it. capacitor.config.ts's server.url
+  takes over on every real launch; this only ever renders in the narrow
+  window before that navigation completes, or if the device has no
+  network path to the configured server at all (see that file's own long
+  comment on what "the configured server" even means for a real phone —
+  still an open question as of 2026-08-27).
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>Scout</title>
+    <style>
+      html, body {
+        height: 100%;
+        margin: 0;
+        background: #191919;
+        color: #e5e5e5;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      body {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        padding: 24px;
+        box-sizing: border-box;
+      }
+    </style>
+  </head>
+  <body>
+    <p>Connecting to Scout&hellip;</p>
+  </body>
+</html>
