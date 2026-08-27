@@ -21,6 +21,7 @@
   },
   "devDependencies": {
     "@capacitor/cli": "^8.5.0",
+    "@types/node": "^26.4.0",
     "typescript": "^5"
   },
   "packageManager": "pnpm@9.15.0"
