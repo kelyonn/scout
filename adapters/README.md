@@ -5,10 +5,22 @@ One module per source type. See
 adapter" section of [`CONTRIBUTING.md`](../CONTRIBUTING.md).
 
 **Implemented:** Greenhouse, Lever, Ashby (P1), Workable, SmartRecruiters,
-Recruitee, Teamtailor, Workday (P3), Keka (P5). All nine are registered in
-`apps/collector/cmd/main.go`'s adapter map, and all are verified against at
-least one real, live board — see each package's own doc comment for
-specifics.
+Recruitee, Teamtailor, Workday (P3), Keka, Zoho Recruit (P5). All ten are
+registered in `apps/collector/cmd/main.go`'s adapter map, and all are
+verified against at least one real, live board — see each package's own doc
+comment for specifics.
+
+**Zoho Recruit is HTML, not JSON, despite docs/05's original guess.**
+Verified 2026-08-27 against two real tenants (increff.zohorecruit.com,
+educohire.zohorecruit.com): there is no separate JSON API — the career-site
+listing page itself embeds the job array as HTML-entity-encoded JSON inside
+a single `<input id="jobs" value="...">`. Per-tenant module configuration
+varies which fields that array carries (one tenant's board omitted
+`Job_Description` entirely; the other included it), so every field this
+adapter reads is optional. `/jobs/Careers` is the one path verified to work
+on both tenants — the shorter `/careers` alias that worked for one tenant
+timed out entirely for the other, so this adapter always seeds and fetches
+`/jobs/Careers`. See the package's own doc comment for the full shape.
 
 **Keka covers one of (at least) two real careers-portal templates.** Verified
 2026-08-24 against three real tenants (fynd.keka.com, pennanttech.keka.com,

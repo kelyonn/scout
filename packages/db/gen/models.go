@@ -526,6 +526,7 @@ const (
 	SourceKindVcPortfolio        SourceKind = "vc_portfolio"
 	SourceKindResearchLab        SourceKind = "research_lab"
 	SourceKindAtsKeka            SourceKind = "ats_keka"
+	SourceKindAtsZohorecruit     SourceKind = "ats_zohorecruit"
 )
 
 func (e *SourceKind) Scan(src interface{}) error {

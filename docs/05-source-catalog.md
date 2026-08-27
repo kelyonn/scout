@@ -49,7 +49,7 @@ public JSON.
 | **Taleo** | HTML | Varies | Poor — legacy, being replaced | High | Deferred |
 | **Darwinbox** | Partial JSON | `{tenant}.darwinbox.in/ms/candidate/careers` | Fair — common at Indian enterprises and GCCs | Medium | P5 |
 | **Keka** | Public JSON | `{tenant}.keka.com/careers/api/jobs/default/active` | Good — widely used by Indian mid-market | Low | **Covered** — `adapters/ats/keka`, 2026-08-24. Two of three real tenants checked resolve on the plain endpoint this adapter targets; a second "embed widget" portal variant (seen at one of the three) is a known, unsupported gap — see the adapter's own doc comment |
-| **Zoho Recruit** | Public JSON | `{tenant}.zohorecruit.in/recruit/portal/...` | Good — common at Indian SMBs | Low | P5 |
+| **Zoho Recruit** | HTML career site, job array embedded as entity-encoded JSON in an `<input id="jobs">` | `{tenant}.zohorecruit.com/jobs/Careers` | Good where a tenant's module config includes `Job_Description`; title/location/experience only otherwise | Low | **Covered** — `adapters/ats/zohorecruit`, 2026-08-27. The original guess above (a separate public JSON API on `.zohorecruit.in`) was wrong, found by inspecting two real tenants (increff.zohorecruit.com, educohire.zohorecruit.com) live rather than by reading Zoho's docs — see the adapter's own doc comment for the real shape |
 
 **Why Greenhouse, Lever, and Ashby come first.** Between them they cover the
 large majority of the startup and scale-up market that Scout most wants to reach,
