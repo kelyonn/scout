@@ -25,6 +25,7 @@ import (
 	"github.com/kelyon/scout/apps/api/internal/companies"
 	"github.com/kelyon/scout/apps/api/internal/googlecalendar"
 	"github.com/kelyon/scout/apps/api/internal/jobs"
+	"github.com/kelyon/scout/apps/api/internal/push"
 	"github.com/kelyon/scout/apps/api/internal/resume"
 	"github.com/kelyon/scout/apps/api/internal/search"
 	"github.com/kelyon/scout/apps/api/internal/stream"
@@ -142,6 +143,7 @@ func run(log *slog.Logger) error {
 		ClientSecret: os.Getenv("SCOUT_GOOGLE_CLIENT_SECRET"),
 		RedirectURL:  os.Getenv("SCOUT_GOOGLE_REDIRECT_URL"),
 	})
+	pushHandler := push.New(pool, log)
 
 	broker := stream.NewBroker()
 	streamCtx, stopStream := context.WithCancel(context.Background())
@@ -157,7 +159,7 @@ func run(log *slog.Logger) error {
 		// routing happens, and observeRequests already forwards Flush
 		// through its own wrapper, so nesting them this way doesn't lose
 		// SSE's flushing either.
-		Handler:           otelhttp.NewHandler(routes(log, authenticator, resumeHandler, jobsHandler, searchHandler, streamHandler, companiesHandler, googleCalendarHandler), "api"),
+		Handler:           otelhttp.NewHandler(routes(log, authenticator, resumeHandler, jobsHandler, searchHandler, streamHandler, companiesHandler, googleCalendarHandler, pushHandler), "api"),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -199,6 +201,7 @@ func routes(
 	log *slog.Logger, a *auth.Authenticator, resumeHandler *resume.Handler,
 	jobsHandler *jobs.Handler, searchHandler *search.Handler, streamHandler *stream.Handler,
 	companiesHandler *companies.Handler, googleCalendarHandler *googlecalendar.Handler,
+	pushHandler *push.Handler,
 ) http.Handler {
 	protected := http.NewServeMux()
 	protected.HandleFunc("POST /v1/resume", resumeHandler.Upload)
@@ -220,6 +223,7 @@ func routes(
 	protected.HandleFunc("POST /v1/integrations/google/disconnect", googleCalendarHandler.Disconnect)
 	protected.HandleFunc("POST /v1/integrations/google/sync", googleCalendarHandler.Sync)
 	protected.HandleFunc("GET /v1/integrations/google/events", googleCalendarHandler.Events)
+	protected.HandleFunc("POST /v1/push/register-device", pushHandler.RegisterDevice)
 
 	root := http.NewServeMux()
 

@@ -13,6 +13,7 @@ import (
 	"github.com/kelyon/scout/apps/api/internal/companies"
 	"github.com/kelyon/scout/apps/api/internal/googlecalendar"
 	"github.com/kelyon/scout/apps/api/internal/jobs"
+	"github.com/kelyon/scout/apps/api/internal/push"
 	"github.com/kelyon/scout/apps/api/internal/resume"
 	"github.com/kelyon/scout/apps/api/internal/search"
 	"github.com/kelyon/scout/apps/api/internal/stream"
@@ -50,12 +51,16 @@ func testGoogleCalendarHandler() *googlecalendar.Handler {
 	return googlecalendar.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)), googlecalendar.Config{})
 }
 
+func testPushHandler() *push.Handler {
+	return push.New(nil, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
 func TestRoutes(t *testing.T) {
 	a, err := auth.New(testToken, true)
 	if err != nil {
 		t.Fatalf("auth.New: %v", err)
 	}
-	h := routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler())
+	h := routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler(), testPushHandler())
 
 	tests := []struct {
 		name       string
@@ -127,7 +132,7 @@ func TestHealthDoesNotLeakTheToken(t *testing.T) {
 	}
 
 	w := httptest.NewRecorder()
-	routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler()).
+	routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler(), testPushHandler()).
 		ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/health", nil))
 
 	if strings.Contains(w.Body.String(), testToken) {
@@ -140,7 +145,7 @@ func TestMetricsIsReachableWithoutACredential(t *testing.T) {
 	if err != nil {
 		t.Fatalf("auth.New: %v", err)
 	}
-	h := routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler())
+	h := routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler(), testPushHandler())
 
 	w := httptest.NewRecorder()
 	h.ServeHTTP(w, httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/metrics", nil))

@@ -208,6 +208,11 @@ services:
       # notifier -setup` once to register a real chat id before this service
       # can deliver anything (docs/11-notifications.md section 11).
       SCOUT_NOTIFIER_TELEGRAM_BOT_TOKEN: ${SCOUT_NOTIFIER_TELEGRAM_BOT_TOKEN:-}
+      # ADR-012's native push transport. Both empty is a valid disabled
+      # state — apps/notifier/internal/fcm degrades to "not configured,"
+      # the same way an unset Telegram token would if that channel had one.
+      SCOUT_FCM_PROJECT_ID: ${SCOUT_FCM_PROJECT_ID:-}
+      SCOUT_FCM_SERVICE_ACCOUNT_JSON: ${SCOUT_FCM_SERVICE_ACCOUNT_JSON:-}
     healthcheck:
       test: ["CMD", "/app/app", "healthcheck"]
       interval: 30s

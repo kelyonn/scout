@@ -1,19 +1,21 @@
 // Package deliver implements docs/11-notifications.md section 8 steps 5-9
-// for Telegram: budget check, quiet hours, render, send, record, plus
-// section 3's BATCHED urgency class ("accumulated and delivered hourly on
-// the hour") — a batched notification still passes the same per-item quiet
-// hours/budget gate as an instant one (docs/11 section 3's table gives both
-// classes the identical "queued until 07:30" quiet-hours behavior, and
-// budgets count deliveries regardless of how they're rendered), but cleared
-// batched items are grouped into a single Telegram message rather than sent
-// individually — see sendBatch. Native push, Web Push, email, and Discord
-// (section 5's other channels) are P3+ — Telegram is P1's only channel, per
-// the roadmap.
+// for Telegram and, per ADR-012, native push via FCM: budget check, quiet
+// hours, render, send, record, plus section 3's BATCHED urgency class
+// ("accumulated and delivered hourly on the hour") — a batched notification
+// still passes the same per-item quiet hours/budget gate as an instant one
+// (docs/11 section 3's table gives both classes the identical "queued until
+// 07:30" quiet-hours behavior, and budgets count deliveries regardless of
+// how they're rendered), but cleared batched items are grouped into a
+// single Telegram message rather than sent individually — see sendBatch.
+// Native push does not group the same way; see sendNativePush's own
+// comment for why that's fine. Web Push, email, and Discord (section 5's
+// other channels) remain unbuilt.
 package deliver
 
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math"
@@ -27,6 +29,7 @@ import (
 
 	db "github.com/kelyon/scout/packages/db/gen"
 
+	"github.com/kelyon/scout/apps/notifier/internal/fcm"
 	"github.com/kelyon/scout/apps/notifier/internal/telegram"
 	"github.com/kelyon/scout/apps/notifier/internal/trigger"
 	"github.com/kelyon/scout/packages/metrics"
@@ -65,18 +68,24 @@ func retryBackoff(attempt int16) time.Duration {
 	return d
 }
 
-// Deliverer sends queued notifications over Telegram, subject to quiet
-// hours and budgets.
+// Deliverer sends queued notifications over Telegram and, per ADR-012, FCM
+// to every registered device, subject to quiet hours and budgets.
 type Deliverer struct {
 	pool     *pgxpool.Pool
 	telegram *telegram.Client
+	fcm      *fcm.Client
 	log      *slog.Logger
 	now      func() time.Time // overridable for tests; defaults to time.Now
 }
 
-// New returns a Deliverer.
-func New(pool *pgxpool.Pool, tg *telegram.Client, log *slog.Logger) *Deliverer {
-	return &Deliverer{pool: pool, telegram: tg, log: log, now: time.Now}
+// New returns a Deliverer. fcmClient may be nil — a nil client's Enabled()
+// is never called (nativePushChannels only fans out when the caller
+// actually has native_push rows to send to, and even then Send's own
+// Enabled() check inside fcm.Client covers "configured but not this
+// build"), so passing nil here is only for callers (existing tests) that
+// predate FCM entirely and have no reason to construct one.
+func New(pool *pgxpool.Pool, tg *telegram.Client, fcmClient *fcm.Client, log *slog.Logger) *Deliverer {
+	return &Deliverer{pool: pool, telegram: tg, fcm: fcmClient, log: log, now: time.Now}
 }
 
 // istLocation is docs/11's fixed frame of reference — quiet_hours_start/end
@@ -117,6 +126,15 @@ func (d *Deliverer) Run(ctx context.Context, userID pgtype.UUID) (sent, queued i
 		return 0, 0, fmt.Errorf("deliver: %w", err)
 	}
 
+	// ADR-012's fan-out list — every registered device, alongside the one
+	// Telegram channel above. A user with no app installed gets an empty
+	// slice here and every native-push call below is a no-op, so this adds
+	// nothing to the Telegram-only path's behavior or its test suite.
+	devices, err := d.nativePushChannels(ctx, q, userID)
+	if err != nil {
+		return 0, 0, fmt.Errorf("deliver: get native push channels: %w", err)
+	}
+
 	notifications, err := q.GetUndeliveredNotifications(ctx, db.GetUndeliveredNotificationsParams{
 		UserID: userID, Limit: deliveryBatchLimit,
 	})
@@ -150,6 +168,7 @@ func (d *Deliverer) Run(ctx context.Context, userID pgtype.UUID) (sent, queued i
 		// together below instead of sent here.
 		if n.Urgency == "batched" {
 			batchReady = append(batchReady, n)
+			d.sendNativePush(ctx, q, n, devices, now)
 			continue
 		}
 
@@ -158,6 +177,11 @@ func (d *Deliverer) Run(ctx context.Context, userID pgtype.UUID) (sent, queued i
 		} else {
 			queued++
 		}
+		// sent/queued reflect the Telegram outcome only, unchanged from
+		// before native push existed — a device push is delivered
+		// best-effort alongside it, not folded into these counts. See
+		// sendNativePush's own comment for why.
+		d.sendNativePush(ctx, q, n, devices, now)
 	}
 
 	if len(batchReady) > 0 {
@@ -169,6 +193,26 @@ func (d *Deliverer) Run(ctx context.Context, userID pgtype.UUID) (sent, queued i
 	}
 
 	return sent, queued, nil
+}
+
+// nativePushChannels returns userID's enabled native_push channels —
+// GetEnabledChannels filtered to the one kind this deliverer fans out to
+// individually. Telegram is still fetched via GetTelegramChannel, above:
+// leaving that path untouched (rather than also deriving it from this same
+// query) is what keeps this change additive to a well-tested existing
+// path instead of a rewrite of it.
+func (d *Deliverer) nativePushChannels(ctx context.Context, q *db.Queries, userID pgtype.UUID) ([]db.NotificationChannel, error) {
+	all, err := q.GetEnabledChannels(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("get enabled channels: %w", err)
+	}
+	devices := make([]db.NotificationChannel, 0, len(all))
+	for _, c := range all {
+		if c.Kind == "native_push" {
+			devices = append(devices, c)
+		}
+	}
+	return devices, nil
 }
 
 func bengaluruOverrideApplies(n db.GetUndeliveredNotificationsRow) bool {
@@ -290,6 +334,159 @@ func (d *Deliverer) send(
 		d.log.Warn("record notification_delivery failed", "notification_id", n.ID.String(), "err", err)
 	}
 	return sendErr == nil
+}
+
+// sendNativePush is ADR-012's fan-out: unlike Telegram (one channel, so
+// send/sendBatch group BATCHED notifications into a single message), a
+// user's devices are a slice, and each gets its own push regardless of
+// urgency — Android's own per-channel notification grouping (docs/11
+// section 6.2's four channel IDs) already gives the user a collapsed view
+// per category, so there is no equivalent benefit to holding batched pushes
+// back the way the Telegram message is held back. A documented
+// simplification, not a silent gap: a user who saves up several BATCHED
+// matches in one hour gets several individual pushes instead of one
+// grouped one, same as if they'd arrived INSTANT.
+//
+// Errors are logged, not returned — this is always called alongside the
+// Telegram send whose success or failure already determines Run's
+// sent/queued counts, and docs/17 section 10's "block one channel, the
+// other still delivers" chaos-test requirement means a push failure must
+// never affect whether the Telegram attempt (or the notification's overall
+// queued/sent accounting) proceeds.
+func (d *Deliverer) sendNativePush(ctx context.Context, q *db.Queries, n db.GetUndeliveredNotificationsRow, devices []db.NotificationChannel, now time.Time) {
+	if len(devices) == 0 || d.fcm == nil || !d.fcm.Enabled() {
+		return
+	}
+
+	push, err := renderPushNotification(n, now)
+	if err != nil {
+		d.log.Warn("render push notification failed", "notification_id", n.ID.String(), "err", err)
+		return
+	}
+
+	for _, device := range devices {
+		if device.DeviceToken == nil {
+			continue // native_push_needs_device already guarantees this in the schema; defensive only
+		}
+		d.sendNativePushToDevice(ctx, q, n, device, push, now)
+	}
+}
+
+func (d *Deliverer) sendNativePushToDevice(
+	ctx context.Context, q *db.Queries, n db.GetUndeliveredNotificationsRow,
+	device db.NotificationChannel, push fcm.Notification, now time.Time,
+) {
+	attempt := n.PriorAttempts + 1
+	params := db.UpsertNotificationDeliveryParams{
+		NotificationID: n.ID,
+		ChannelID:      device.ID,
+		Attempts:       attempt,
+	}
+	latency := now.Sub(n.CreatedAt.Time)
+
+	msgID, sendErr := d.fcm.Send(ctx, *device.DeviceToken, push)
+	if sendErr != nil {
+		var invalidErr *fcm.TokenInvalidError
+		if errors.As(sendErr, &invalidErr) {
+			// docs/17 section 10: retire the token rather than retrying it
+			// forever — an uninstalled app's token will never become valid
+			// again, and every future attempt would just repeat the same
+			// permanent failure.
+			if err := q.DisableChannel(ctx, device.ID); err != nil {
+				d.log.Warn("disable stale push channel failed", "channel_id", device.ID.String(), "err", err)
+			}
+		}
+		errMsg := sendErr.Error()
+		params.Status = "failed"
+		params.Error = &errMsg
+		if attempt < maxDeliveryAttempts {
+			params.NextAttemptAt = pgtype.Timestamptz{Time: now.Add(retryBackoff(attempt)), Valid: true}
+		}
+		metrics.NotificationTotal.WithLabelValues(string(n.Trigger), "failed").Inc()
+	} else {
+		latencyMs := int32(latency.Milliseconds()) //nolint:gosec // notification age in ms fits comfortably in int32
+		params.Status = "sent"
+		params.SentAt = pgtype.Timestamptz{Time: now, Valid: true}
+		params.LatencyMs = &latencyMs
+		params.ProviderMsgID = &msgID
+		metrics.NotificationTotal.WithLabelValues(string(n.Trigger), "sent").Inc()
+	}
+	metrics.NotificationLatency.WithLabelValues(string(n.Trigger), "native_push").Observe(latency.Seconds())
+
+	if _, err := q.UpsertNotificationDelivery(ctx, params); err != nil {
+		d.log.Warn("record notification_delivery failed", "notification_id", n.ID.String(), "channel_id", device.ID.String(), "err", err)
+	}
+}
+
+// pushChannelID maps a trigger to one of docs/11 section 6.2's four Android
+// notification channels — created on first launch and, per that section's
+// own warning, un-retunable afterward, so this mapping is meant to be
+// stable rather than revisited per trigger as new ones are added.
+func pushChannelID(trig db.NotificationTrigger) string {
+	switch trig {
+	case "deadline_t72h", "deadline_t24h":
+		return "deadlines"
+	default:
+		return "opportunities"
+	}
+}
+
+// renderPushNotification builds FCM's title/body/data — no emoji, the same
+// deliberate product decision already applied to every Telegram-bound
+// string (docs/11 sections 6.1 and 6.5 were corrected to match; section
+// 6.2's own mockup still has one because native push wasn't built until
+// now — see adapters/README.md-style doc corrections this change also
+// makes). collapse_key is the job group id so a rescored update replaces
+// the existing notification on the device instead of stacking a second
+// one, exactly docs/11 section 6.2's own worked example.
+func renderPushNotification(n db.GetUndeliveredNotificationsRow, now time.Time) (fcm.Notification, error) {
+	var p trigger.Payload
+	if err := json.Unmarshal(n.Payload, &p); err != nil {
+		return fcm.Notification{}, fmt.Errorf("unmarshal payload: %w", err)
+	}
+
+	title := p.Title
+	if p.CompanyName != "" {
+		title = fmt.Sprintf("%s · %s", p.CompanyName, p.Title)
+	}
+
+	bodyParts := make([]string, 0, 4)
+	priority := int16(0)
+	if n.PriorityAtSend != nil {
+		priority = *n.PriorityAtSend
+	}
+	bodyParts = append(bodyParts, fmt.Sprintf("Match %d", priority))
+	if p.CompNormalizedINRMonth != nil {
+		bodyParts = append(bodyParts, fmt.Sprintf("Rs %s/month", formatThousands(*p.CompNormalizedINRMonth)))
+	}
+	if fresh := formatFreshness(p.PostedAt, now); fresh != "" {
+		bodyParts = append(bodyParts, fresh)
+	}
+	body := strings.Join(bodyParts, " · ")
+	if p.Explanation != "" {
+		body += "\n" + p.Explanation
+	}
+
+	data := map[string]string{"trigger": string(n.Trigger)}
+	if n.JobGroupID.Valid {
+		groupID := n.JobGroupID.String()
+		data["job_group_id"] = groupID
+		data["deep_link"] = "scout://job/" + groupID
+	}
+
+	var collapseKey string
+	if n.JobGroupID.Valid {
+		collapseKey = "job-" + n.JobGroupID.String()
+	}
+
+	return fcm.Notification{
+		Title:        title,
+		Body:         body,
+		ChannelID:    pushChannelID(n.Trigger),
+		CollapseKey:  collapseKey,
+		Data:         data,
+		HighPriority: n.Urgency == "instant",
+	}, nil
 }
 
 // sendBatch is the BATCHED counterpart of send: one Telegram message for
