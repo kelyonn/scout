@@ -5,14 +5,18 @@ describes what actually exists right now — the roadmap describes what's
 intended. When they disagree, this file is more current and the roadmap's
 checkboxes should be trusted less than the prose here.
 
-**Last updated:** 2026-08-26 — see that date's own update at the bottom of
-this file for what's new: the Opportunities/Search filter bar, the four real
-CI breaks found and fixed (golangci-lint/sqlfluff/web-typecheck/Postgres never
-running in the `go` job at all), and a real PII exposure
-(`infra/seed/seed.sql`, committed and live on GitHub) found, scrubbed from
-history, and force-pushed. Everything below this point through the
-2026-08-24 update was pushed to GitHub back on 2026-08-20; treat "nothing
-pushed yet" language anywhere below as historical, not current.
+**Last updated:** 2026-08-27 — see that date's own update at the bottom of
+this file for what's new: a real, previously-nonexistent `raw_observation`
+partition-maintenance job, a `discover`-tool SSRF gap and a Stage-3 dedup
+advisory-lock gap both closed, and the second P5 ATS adapter —
+**Zoho Recruit** — built and verified live against three real tenants,
+including the first concrete `services_it` company (SID Global Solutions)
+toward this file's own long-flagged IT-consultancy coverage gap. Everything
+before that, through the 2026-08-26 update, was pushed to GitHub already.
+The partition-maintenance/discover-SSRF/dedup-lock fixes are committed
+locally to `main` but not yet pushed; the Zoho Recruit work is uncommitted
+in the working tree as of this writing (see that section's own closing
+note).
 
 ---
 
@@ -953,3 +957,101 @@ undocumented here until now.
 Everything above is committed and pushed. Nothing in this update is still
 sitting uncommitted the way most of this file's earlier entries describe —
 that was itself part of what today's session found and closed.
+
+---
+
+**Update, 2026-08-27: three real P5 bugs closed (partition maintenance, a
+discover-tool SSRF gap, a dedup advisory-lock miss), and the second P5 ATS
+adapter — Zoho Recruit — is built and verified live.**
+
+- **`raw_observation`'s own documented partition maintenance job never
+  existed.** 000005's migration comment and `restore-drill.sh` both describe
+  "a nightly job [that] maintains a rolling window... and drops partitions
+  older than six months" — invisible only because 000005 pre-created 18
+  months of partitions upfront (through 2028-01) and real data is still
+  well inside that window. `Scheduler.MaintainRawObservationPartitions`
+  (`apps/collector/internal/scheduler/partitions.go`) now re-runs the
+  migration's own DO block on a schedule (a third ticker in `Run()`, plus
+  once immediately at startup) — create through 3 months ahead, detach and
+  drop anything more than 6 months past.
+- **`discover`'s own candidate-list HTTP client bypassed the SSRF dialer**
+  — every other outbound call in this codebase goes through
+  `packages/fetch.Fetcher` or the shared `ssrf.DialContext`; the discovery
+  tool's own client didn't. Fixed to share the same dialer.
+- **Stage 3 dedup merges could run without the company advisory lock**
+  AGENTS.md's "Common mistakes" section already names by name ("Concurrent
+  dedup for the same company creates duplicate groups"). Fixed in
+  `apps/brain`.
+- CI's Python job wasn't seeded the same way the Go job now is (only fixed
+  2026-08-26) — fixed to seed both.
+
+**`adapters/ats/zohorecruit` — the second P5 ATS adapter, built and
+verified live against three real tenants**, not scaffolded. docs/05's
+original guess (`{tenant}.zohorecruit.in/recruit/portal/...`, a separate
+public JSON API) was wrong, the same way SmartRecruiters' and Teamtailor's
+original guesses were — found by inspecting real tenants' live career
+sites in a browser, not by reading Zoho's docs.
+
+- **The real shape**: there is no JSON API. `{tenant}.zohorecruit.com/jobs/
+  Careers` is an HTML page, and the job array is embedded as
+  HTML-entity-encoded JSON inside a single `<input id="jobs" value="...">`
+  element. `/jobs/Careers` is the one path confirmed to work on every
+  tenant checked — the shorter `/careers` alias resolved for one tenant
+  (increff) and timed out entirely for another (educohire), so the adapter
+  always seeds and fetches `/jobs/Careers`.
+- **Per-tenant module configuration varies which fields the embedded array
+  carries** — confirmed by checking two tenants live: increff's board
+  omits `Job_Description` entirely (title/location/experience only);
+  educohire's includes it. Every field the adapter reads is therefore
+  optional; a tenant missing `Job_Description` gets an honestly empty
+  `DescriptionHTML`, the same N+1-driven gap Workable/SmartRecruiters/
+  Workday already carry, not a new one.
+- **Apply URLs need only the numeric job id** — `/jobs/Careers/{id}`
+  resolves identically with or without the SEO slug segment the real site
+  appends (confirmed live against two tenants), so the adapter never
+  attempts to reproduce Zoho's own slugification.
+- New migration `000022` adds `ats_zohorecruit` to the `source_kind` enum
+  (Postgres enums need a migration to grow, by design — 000002's own
+  comment, same pattern 000021 used for Keka). `packages/db/gen`
+  regenerated (`make db-generate`), verified against a real migrated
+  Postgres (`make migrate` applied 000022 cleanly).
+- Full fixture set (standard/empty/malformed/shape-changed/duplicate-ids/
+  unicode-heavy, plus a no-`id="jobs"`-input case) and 15 tests, all
+  passing. Separately verified against three real live tenants through the
+  actual `Fetch`→`Parse`→`Validate` chain (not just fixtures) via a
+  throwaway verification binary, deleted afterward:
+  `increff.zohorecruit.com` (10 real postings, no descriptions — the
+  tenant-config gap above), `onebyzero.zohorecruit.com` (14 real postings,
+  full descriptions, real SDE/QA/AI-engineer roles), `sidgs.zohorecruit.com`
+  (28 real postings, full descriptions). All three seeded as
+  `pending_review` sources (robots.txt `Allow: /jobs/*` on
+  zohorecruit.com, platform-wide, checked before seeding as `permitted`)
+  — Increff (`product`, retail SaaS), One By Zero (`product`,
+  customerplus.io), and **SID Global Solutions** (`services_it` — a real,
+  verified IT/digital-transformation consultancy, the first concrete
+  addition toward the `company_type = services_it/services_consulting`
+  coverage gap this file has flagged since 2026-08-24).
+- golangci-lint, sqlfluff, and `go test ./... -count=1` against a real
+  local Postgres all clean for everything this adapter touched.
+
+**Found in the process, not fixed (out of scope for this adapter,
+flagged as a separate task instead)**: `go test ./...` against this
+project's real local dev Postgres — not a fresh CI database — surfaces two
+pre-existing failures unrelated to anything above:
+`TestList_OnlyReturnsCompaniesWithAtLeastOneOpenJob`
+(`apps/api/internal/companies`) and `TestSearch_MatchesOnTitle`
+(`apps/api/internal/search`). Both insert a uniquely-named fixture row and
+assert it appears in a *default, paginated* response; against this
+project's real accumulated data (~1,429 companies, ~46,000 jobs) the fresh
+row doesn't rank into the default page, so the assertion fails even though
+the feature works. `TestList_QueryFiltersByName`, right next to the first
+failing test, already shows the fix shape (scope the query to the fixture
+instead of relying on the unfiltered default) — not applied here since it
+touches unrelated test files.
+
+Everything in this Zoho Recruit update — the adapter, migration 000022,
+`packages/db/gen`, the doc updates, and the three seeded sources — is
+uncommitted in the working tree as of this writing. The
+partition-maintenance/discover-SSRF/dedup-lock/CI-seed fixes earlier in this
+same dated update were already committed (and are not yet pushed) before
+this adapter work began.
