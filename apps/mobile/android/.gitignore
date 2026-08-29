@@ -52,10 +52,12 @@ captures/
 # Comment next line if keeping position of elements in Navigation Editor is relevant for you
 .idea/navEditor.xml
 
-# Keystore files
-# Uncomment the following lines if you do not want to check your keystore files in.
-#*.jks
-#*.keystore
+# Keystore files — never commit. The real one lives outside the repo
+# entirely (~/.scout-secrets, see keystore.properties), these patterns are
+# defense in depth against ever running keytool inside the tree by mistake.
+*.jks
+*.keystore
+keystore.properties
 
 # External native build folder generated in Android Studio 2.2 and later
 .externalNativeBuild

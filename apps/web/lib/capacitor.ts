@@ -10,11 +10,21 @@
 // Capacitor.isNativePlatform() is false in every normal desktop/mobile
 // browser, so none of this runs or has any effect outside the shell.
 import { App } from "@capacitor/app";
-import { Capacitor } from "@capacitor/core";
+import { Capacitor, registerPlugin } from "@capacitor/core";
 import { PushNotifications } from "@capacitor/push-notifications";
 import { Badge } from "@capawesome/capacitor-badge";
 
 import { registerDevice } from "./api";
+
+// ScoutNativePlugin — apps/mobile/android/app/src/main/java/com/scout/app/
+// ScoutNativePlugin.java. Exists for one check: whether this build was
+// bundled with a google-services.json (see that file's own comment for
+// why calling PushNotifications.register() without checking first
+// crashes the whole native process, not just a JS promise rejection).
+interface ScoutNativePlugin {
+  firebaseAvailable(): Promise<{ available: boolean }>;
+}
+const ScoutNative = registerPlugin<ScoutNativePlugin>("ScoutNative");
 
 // jobDeepLinkPath extracts "/opportunities/{id}" from a
 // "scout://job/{id}" URL — apps/notifier/internal/deliver.
@@ -42,6 +52,15 @@ export function initNativeBridge(navigate: (path: string) => void): void {
 
 async function registerForPush(): Promise<void> {
   try {
+    // Must come first — see ScoutNative's own comment above.
+    // PushNotifications.register() crashes the whole native process (not
+    // a catchable JS rejection) when this is false.
+    const { available } = await ScoutNative.firebaseAvailable();
+    if (!available) {
+      console.warn("scout: Firebase not configured on this build, skipping push registration");
+      return;
+    }
+
     const perm = await PushNotifications.requestPermissions();
     if (perm.receive !== "granted") {
       console.warn("scout: push permission not granted", perm.receive);
