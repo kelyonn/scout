@@ -469,21 +469,27 @@ writeup. The P0 Android signing keystore was also generated this session
 (outside the repo, never committed) and wired into `build.gradle` —
 `build:release` now produces a real signed APK.
 
+**Also 2026-08-29, later the same day: Firebase is live.** A project
+(`scout-d46e6`) already existed under the user's account; the Android app
+was registered, `google-services.json` and the notifier's service account
+key both generated and wired in (neither committed). Verified end to end:
+notifier logs `"native push armed"`, and a real device produced a real
+FCM token that landed in `notification_channel` via the registration
+endpoint. Only the Admin SDK private-key download needed the user's own
+click — the harness itself blocked that one step from being automated,
+correctly treating a full-access server credential as more sensitive than
+the Android app config.
+
 **Still open:**
-- A real Firebase project (`SCOUT_FCM_PROJECT_ID`/
-  `SCOUT_FCM_SERVICE_ACCOUNT_JSON` for the notifier, `google-services.json`
-  for the app) — the backend and the shell both gracefully degrade without
-  one, by design, but FCM delivery itself is entirely unverified until it
-  exists. Deliberately deferred 2026-08-29 — needs the user's own Google
-  login, not more code.
+- An actual push *delivered* through the registered token — registration
+  is proven, delivery through a real trigger event isn't yet.
 - The biometric-auth and local-notification plugins are installed but not
   wired into any UI yet.
-- This milestone's own exit criteria that specifically need FCM (lock-screen
-  actions, no Web Push double-buzz) stay open until the Firebase project
-  above exists. "Installed on the actual phone" and WebView scroll
-  performance are now checkable — the 2026-08-29 verification didn't
-  specifically stress-test scroll, so that exit box is still unchecked
-  pending a deliberate pass.
+- This milestone's exit criteria: "installed on the actual phone,
+  delivering FCM" needs the delivery check above; "Save/Dismiss work from
+  the lock screen" and "no Web Push double-buzz" follow once that's
+  confirmed. WebView scroll performance hasn't been specifically
+  stress-tested yet either.
 
 ---
 

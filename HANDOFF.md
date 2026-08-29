@@ -21,11 +21,29 @@ fatal exceptions. Also generated this session: the P0 release signing
 keystore (RSA-4096, stored outside the repo at `~/.scout-secrets/android`,
 never committed — see docs/13's never-rotate-secret guidance), wired into
 `build.gradle` via a gitignored `keystore.properties`, with a real signed
-release APK built and verified via `apksigner`. `apps/mobile/README.md`
-and `docs/19-roadmap.md`'s P4 section both updated to match. Still open,
-deliberately deferred (needs the user's own Google login, not more code):
-a real Firebase project for FCM push. See the full writeup in this date's
-own update near the bottom.
+release APK built and verified via `apksigner`. **FCM is also now live, same session.** A Firebase project (`scout-d46e6`)
+already existed under the user's account from an earlier attempt; drove
+the Firebase console (with the user's explicit go-ahead) to register the
+Android app and download `google-services.json`, then the user clicked
+through the one step the harness itself blocked automatically —
+generating the notifier's Admin SDK private key, since that's a
+full-access server credential and the classifier correctly treated it as
+more sensitive than the Android config file. Both wired in (neither
+committed — see docs/13's never-log/never-commit posture) and verified
+live: notifier logs `"native push armed"`, and a rebuilt debug APK on the
+same Pixel 7 produced a real FCM token that reached
+`POST /v1/push/register-device` and landed as a real `notification_channel`
+row. Not yet verified: an actual push delivered through that token.
+`apps/mobile/README.md` and `docs/19-roadmap.md`'s P4 section both
+updated to match. See the full writeup in this date's own update near
+the bottom.
+
+One more thing worth flagging: while verifying the dashboard fresh in
+the WebView, logcat caught a real (unrelated) bug — a minified React
+hydration error (#418) firing twice on initial load. Flagged as a
+separate background task rather than fixed here, since it's out of
+scope for P4 and needs reproducing with an unminified build to find the
+actual mismatch.
 
 One operational snag worth remembering: Android's wireless-debugging
 `adb` connection only reconnects automatically over the same local Wi-Fi

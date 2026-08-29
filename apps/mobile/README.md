@@ -52,10 +52,26 @@ produces a real signed APK, confirmed via `apksigner verify
 password file to offline media (a USB drive) yourself** — that step
 needs a human with a USB drive, not more code.
 
-**Not yet done**: FCM push end-to-end (no Firebase project exists —
-deliberately deferred this session, needs your Google login, see below),
-and the biometric-unlock and local-notification plugins are installed
-but not wired into any UI.
+**FCM is now fully wired, same session.** A real Firebase project
+(`scout-d46e6`) already existed under the user's account from an earlier,
+otherwise-untouched attempt; an Android app (`com.scout.app`) was
+registered against it, `google-services.json` downloaded into
+`apps/mobile/android/app/` (gitignored), and a service account key
+generated for the notifier (stored outside the repo at
+`~/.scout-secrets/fcm/`, minified to one line into `SCOUT_FCM_SERVICE_ACCOUNT_JSON`
+per `.env.example`'s own instructions). Verified live, not just wired:
+notifier logs show `"native push armed","transport":"fcm"`, and a debug
+APK rebuilt with `google-services.json` present produced a real FCM
+token on the same Pixel 7 (`ScoutNative.firebaseAvailable()` now returns
+`true`, permissions granted, `PushNotifications.register()` returns a
+token), which reached `POST /v1/push/register-device` and landed as a
+real `notification_channel` row (`kind='native_push', platform='android'`).
+Sending an actual push through that token to confirm delivery end-to-end
+hasn't been done yet — that needs a real trigger event, not just
+registration.
+
+**Not yet done**: the biometric-unlock and local-notification plugins are
+installed but not wired into any UI.
 
 ## How a phone reaches the server: Tailscale, decided 2026-08-28, verified 2026-08-29
 
@@ -135,20 +151,22 @@ present, it produces a real signed APK at
 
 ## FCM (native push)
 
-Needs a real Firebase project — none exists yet. Once one does:
+**Done, 2026-08-29.** Firebase project `scout-d46e6` exists (Spark plan,
+no-cost), with the Android app registered and both halves in place:
 
-1. Firebase console → Project Settings → your Android app (`com.scout.app`)
-   → download `google-services.json` into `apps/mobile/android/app/`
-   (gitignored, never commit the real one).
-2. Project Settings → Service Accounts → "Generate new private key" → set
-   `SCOUT_FCM_PROJECT_ID`/`SCOUT_FCM_SERVICE_ACCOUNT_JSON` in the
-   **notifier's** own `.env` (see `.env.example`) — a completely separate
-   step from (1), since the service account is what
-   `apps/notifier/internal/fcm` uses to *send*, while `google-services.json`
-   is what this app uses to *receive*.
+1. `apps/mobile/android/app/google-services.json` — this app's own copy
+   (gitignored, never committed). Lets `PushNotifications.register()`
+   actually get a token instead of crashing (`ScoutNativePlugin`'s guard
+   made that failure mode graceful before this existed; now it's moot).
+2. The notifier's `SCOUT_FCM_PROJECT_ID`/`SCOUT_FCM_SERVICE_ACCOUNT_JSON`
+   (repo root `.env`, never committed — the JSON is minified to one line
+   per `.env.example`'s own instructions; the source key file lives at
+   `~/.scout-secrets/fcm/scout-fcm-service-account.json`, outside the
+   repo, same posture as the Android keystore).
 
-Until both exist, `apps/notifier/internal/fcm.Client` stays disabled (by
-design — see that package's own doc comment) and this app's own
-`PushNotifications.register()` call will fail without a configured Firebase
-project to register against; `apps/web/lib/capacitor.ts` logs that failure
-and continues rather than blocking the rest of the app.
+Verified live: notifier logs `"native push armed","transport":"fcm"` on
+startup, and a real device (`apps/mobile`'s debug build on a Pixel 7)
+registered a real FCM token that landed in `notification_channel` via
+`POST /v1/push/register-device`. **Not yet verified**: an actual push
+*delivered* through that token — registration works, but nothing has
+triggered a real notification send through it yet.
