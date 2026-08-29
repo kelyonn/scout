@@ -5,7 +5,37 @@ describes what actually exists right now — the roadmap describes what's
 intended. When they disagree, this file is more current and the roadmap's
 checkboxes should be trusted less than the prose here.
 
-**Last updated:** 2026-08-28 — **P4's Capacitor shell is real and running**:
+**Last updated:** 2026-08-29 — **P4's real-device gap is closed.** The
+2026-08-28 entry below verified the shell on an emulator only, with the
+phone-connectivity question (ADR-012 assumed Tailscale, ADR-018 removed
+it) documented but unresolved. This session resolved it end to end: the
+Tailscale daemon (needed root, which the prior session's shell lacked)
+is up, the laptop's tailnet IP is set as `SCOUT_HOST_BIND_ADDR`, and a
+real debug APK built against that IP was installed on the user's actual
+Pixel 7 over `adb` and launched — `logcat` shows a clean load
+(`Loading app at http://<tailnet-ip>:3000`, `App started`/`App resumed`,
+`ScoutNative.firebaseAvailable()` correctly reporting `false` and the JS
+side skipping push registration without crashing), and a screenshot
+shows the real dashboard, not just the login screen, pixel-correct, zero
+fatal exceptions. Also generated this session: the P0 release signing
+keystore (RSA-4096, stored outside the repo at `~/.scout-secrets/android`,
+never committed — see docs/13's never-rotate-secret guidance), wired into
+`build.gradle` via a gitignored `keystore.properties`, with a real signed
+release APK built and verified via `apksigner`. `apps/mobile/README.md`
+and `docs/19-roadmap.md`'s P4 section both updated to match. Still open,
+deliberately deferred (needs the user's own Google login, not more code):
+a real Firebase project for FCM push. See the full writeup in this date's
+own update near the bottom.
+
+One operational snag worth remembering: Android's wireless-debugging
+`adb` connection only reconnects automatically over the same local Wi-Fi
+network as the host — independent of Tailscale, which kept working fine
+over cellular the whole time (proven by a successful `ping` from the
+phone to the laptop's tailnet IP while off Wi-Fi). If `adb devices` goes
+empty mid-session, it's almost always the phone having left Wi-Fi, not a
+Tailscale problem.
+
+**Previous update, 2026-08-28** — **P4's Capacitor shell is real and running**:
 Android Studio and a full headless SDK installed from scratch
 (`android-commandlinetools`), `apps/mobile`'s actual native project
 generated and built (`BUILD SUCCESSFUL`, a real unsigned APK), and

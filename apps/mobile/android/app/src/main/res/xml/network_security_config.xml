@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 9+ (API 28+) blocks all cleartext (HTTP) traffic app-wide by
+  default — capacitor.config.ts's own `cleartext: true` only configures
+  Capacitor's WebView setup, it does not override this OS-level block, so
+  without this file every request to server.url fails with
+  chrome-error://chromewebdata/ regardless of that setting.
+
+  Scoped to the one IP literal baked into capacitor.config.ts's serverURL
+  at the last `cap sync` (SCOUT_MOBILE_SERVER_URL), not usesCleartextTraffic
+  app-wide — same "scope it to exactly what's needed" reasoning as
+  apps/mobile/README.md's Tailscale-over-LAN-IP decision. Update this IP
+  alongside SCOUT_MOBILE_SERVER_URL when the laptop's Tailscale IP changes;
+  both already require a rebuild together, this is one more file in that
+  same manual sync.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">100.78.200.69</domain>
+        <!-- capacitor.config.ts's own emulator default — kept exempt too
+             so emulator-based development (no Tailscale needed) keeps
+             working without editing this file. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

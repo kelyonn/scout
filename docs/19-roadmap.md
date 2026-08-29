@@ -457,29 +457,33 @@ pixel-correct inside it and the JS bundle executing with zero errors
 (confirmed via `Capacitor/Console` logcat output, not just "the build
 succeeded").
 
+**2026-08-29: verified on the real phone, not just the emulator.** The
+connectivity gap above is closed — Tailscale is up (`sudo tailscale up`
+needed root, which is why the earlier session left it open), the laptop's
+tailnet IP is set as `SCOUT_HOST_BIND_ADDR`, and a real debug APK built
+against that IP was installed on the user's actual Pixel 7 and launched.
+`logcat` shows a clean load and the real dashboard rendered
+pixel-correct, over the tailnet, zero fatal exceptions. See
+`apps/mobile/README.md` and `HANDOFF.md`'s 2026-08-29 entry for the full
+writeup. The P0 Android signing keystore was also generated this session
+(outside the repo, never committed) and wired into `build.gradle` —
+`build:release` now produces a real signed APK.
+
 **Still open:**
-- **How a real phone reaches the server at all** — capacitor.config.ts's
-  own long comment has the full writeup: ADR-012 assumed Tailscale,
-  ADR-018 removed it twelve days later and confined everything to
-  `localhost`, and nobody has reconciled the two. The emulator verification
-  above worked via Android's `10.0.2.2` host-loopback alias, which is not
-  a real answer for a physical device. Two real options are named in
-  `apps/mobile/README.md`, neither decided.
-- The P0 Android signing keystore (never generated — same open item P0's
-  own section already lists; today's APK is unsigned debug-only).
 - A real Firebase project (`SCOUT_FCM_PROJECT_ID`/
   `SCOUT_FCM_SERVICE_ACCOUNT_JSON` for the notifier, `google-services.json`
   for the app) — the backend and the shell both gracefully degrade without
   one, by design, but FCM delivery itself is entirely unverified until it
-  exists.
+  exists. Deliberately deferred 2026-08-29 — needs the user's own Google
+  login, not more code.
 - The biometric-auth and local-notification plugins are installed but not
   wired into any UI yet.
-- None of this milestone's own exit criteria (installed on the actual
-  phone, lock-screen actions, no Web Push double-buzz, real-device scroll
-  performance) can be checked until the connectivity question above is
-  resolved and a real device is involved — everything above was verified
-  on an emulator, which is a real, meaningful proof of the architecture
-  but not a substitute for the real thing.
+- This milestone's own exit criteria that specifically need FCM (lock-screen
+  actions, no Web Push double-buzz) stay open until the Firebase project
+  above exists. "Installed on the actual phone" and WebView scroll
+  performance are now checkable — the 2026-08-29 verification didn't
+  specifically stress-test scroll, so that exit box is still unchecked
+  pending a deliberate pass.
 
 ---
 

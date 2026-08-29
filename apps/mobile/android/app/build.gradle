@@ -1,5 +1,18 @@
 apply plugin: 'com.android.application'
 
+// keystore.properties — never committed (see .gitignore), points at the
+// P0 release keystore living outside the repo entirely (~/.scout-secrets).
+// Same "load if present, degrade if not" shape as the google-services.json
+// block below: a clone without the file still builds debug fine, it just
+// can't produce a signed release APK, matching README's own note that
+// build:release has no output until this exists.
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+def keystoreProperties = new Properties()
+def hasKeystore = keystorePropertiesFile.exists()
+if (hasKeystore) {
+    keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+}
+
 android {
     namespace = "com.scout.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -16,10 +29,23 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    if (hasKeystore) {
+        signingConfigs {
+            release {
+                storeFile file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            if (hasKeystore) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 }
@@ -36,6 +62,11 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
+    // Same coordinate capacitor-push-notifications/android/build.gradle
+    // declares (as implementation, so not exposed to this module's compile
+    // classpath on its own) — ScoutNativePlugin.java needs the class
+    // directly. Keep this version in sync with that plugin's own.
+    implementation "com.google.firebase:firebase-messaging:25.0.1"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
