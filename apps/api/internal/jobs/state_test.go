@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -215,5 +216,65 @@ func TestState_FeedAndDetailReflectCurrentState(t *testing.T) {
 	}
 	if !found {
 		t.Fatal("fixture job not found in feed")
+	}
+}
+
+// TestState_RatingOutOfRangeIsUnprocessable: the schema's CHECK
+// constraint used to be the only guard, which turned a rating of 9 into
+// a 500 "internal error" — the caller learned nothing about what was
+// wrong. Both bounds, plus the in-range case to prove the check isn't
+// simply rejecting every rating.
+func TestState_RatingOutOfRangeIsUnprocessable(t *testing.T) {
+	pool := testPool(t)
+	h := testHandler(pool)
+	fx := insertJobFixture(t, pool, fixtureOpts{priority: 50})
+
+	for _, tc := range []struct {
+		rating int
+		want   int
+	}{
+		{rating: 0, want: 422},
+		{rating: 6, want: 422},
+		{rating: 3, want: 200},
+	} {
+		w := doState(t, h, fx.groupID, map[string]any{"state": "viewed", "rating": tc.rating})
+		if w.Code != tc.want {
+			t.Errorf("rating %d: status = %d, want %d, body = %s", tc.rating, w.Code, tc.want, w.Body.String())
+		}
+	}
+}
+
+// TestState_NotesTooLongIsUnprocessable bounds the one free-text field
+// the API accepts — and checks that notes at the limit still round-trip,
+// and that a follow-up transition without a notes field keeps them
+// (the upsert's coalesce), which is what lets the detail page's editor
+// and the Save/Apply buttons coexist on one row.
+func TestState_NotesTooLongIsUnprocessable(t *testing.T) {
+	pool := testPool(t)
+	h := testHandler(pool)
+	fx := insertJobFixture(t, pool, fixtureOpts{priority: 50})
+
+	tooLong := strings.Repeat("x", maxNotesBytes+1)
+	if w := doState(t, h, fx.groupID, map[string]any{"state": "viewed", "notes": tooLong}); w.Code != 422 {
+		t.Errorf("over-limit notes: status = %d, want 422, body = %s", w.Code, w.Body.String())
+	}
+
+	atLimit := strings.Repeat("y", maxNotesBytes)
+	w := doState(t, h, fx.groupID, map[string]any{"state": "viewed", "notes": atLimit})
+	if w.Code != 200 {
+		t.Fatalf("at-limit notes: status = %d, want 200, body = %s", w.Code, w.Body.String())
+	}
+
+	// A later transition with no notes field must not clear them.
+	w = doState(t, h, fx.groupID, map[string]any{"state": "saved"})
+	if w.Code != 200 {
+		t.Fatalf("transition after notes: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp stateResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Notes == nil || *resp.Notes != atLimit {
+		t.Errorf("notes were not preserved across a transition that omitted them")
 	}
 }
