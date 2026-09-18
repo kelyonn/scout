@@ -1,5 +1,6 @@
 import { randomBytes } from "crypto";
 import { NextResponse } from "next/server";
+import { apiConfig, jsonError, NOT_CONFIGURED, UPSTREAM_UNREACHABLE } from "@/lib/proxy";
 
 const STATE_COOKIE = "scout_google_oauth_state";
 
@@ -9,35 +10,43 @@ const STATE_COOKIE = "scout_google_oauth_state";
 // (apps/api/internal/googlecalendar.Handler.AuthURLHandler holds the
 // actual client_id/scope construction; this route only adds the CSRF
 // state and issues the redirect from Scout's own origin).
-export async function GET() {
-  const apiURL = process.env.SCOUT_API_URL;
-  const token = process.env.SCOUT_AUTH_TOKEN;
-  if (!apiURL || !token) {
-    return NextResponse.json(
-      { error: "SCOUT_API_URL/SCOUT_AUTH_TOKEN not configured" },
-      { status: 500 },
-    );
-  }
+export async function GET(request: Request) {
+  const config = apiConfig();
+  if (!config) return jsonError(NOT_CONFIGURED, 500);
 
   const state = randomBytes(16).toString("hex");
 
-  const upstream = new URL("/v1/integrations/google/auth-url", apiURL);
+  const upstream = new URL("/v1/integrations/google/auth-url", config.apiURL);
   upstream.searchParams.set("state", state);
-  const res = await fetch(upstream, {
-    headers: { Authorization: `Bearer ${token}` },
-    cache: "no-store",
-  });
+
+  let res: Response;
+  try {
+    res = await fetch(upstream, {
+      headers: { Authorization: `Bearer ${config.token}` },
+      cache: "no-store",
+      signal: request.signal,
+    });
+  } catch {
+    return NextResponse.redirect(new URL("/settings?google=unreachable", request.url));
+  }
 
   if (!res.ok) {
-    const body = await res.text();
-    return new NextResponse(body, { status: res.status, headers: { "Content-Type": "application/json" } });
+    // Not enabled on this deployment (no client id) or a transient
+    // failure — either way, land on Settings with a readable state
+    // rather than a bare JSON body in a full-page navigation.
+    return NextResponse.redirect(new URL("/settings?google=error", request.url));
   }
 
   const { url } = (await res.json()) as { url: string };
+  if (typeof url !== "string" || !url.startsWith("https://accounts.google.com/")) {
+    console.error("google connect: unexpected authorize url host");
+    return jsonError(UPSTREAM_UNREACHABLE, 502);
+  }
+
   const redirect = NextResponse.redirect(url);
   // Short-lived — this cookie's only job is surviving the round trip to
   // Google's consent screen and back, checked once by the callback route
-  // below and never read again.
+  // and never read again.
   redirect.cookies.set(STATE_COOKIE, state, {
     httpOnly: true,
     secure: process.env.SCOUT_ENV === "production",

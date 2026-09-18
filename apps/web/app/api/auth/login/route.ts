@@ -1,5 +1,6 @@
-import { NextRequest, NextResponse } from "next/server";
-import { SESSION_COOKIE, isValidToken } from "@/lib/auth";
+import { NextResponse } from "next/server";
+import { SESSION_COOKIE, isValidToken, sessionCookieOptions } from "@/lib/auth";
+import { RateLimiter, clientKey } from "@/lib/rateLimit";
 
 // Exchanges the token for a long-lived session cookie — the one flow
 // proxy.ts leaves open (see its matcher) so a browser with no cookie yet
@@ -9,32 +10,35 @@ import { SESSION_COOKIE, isValidToken } from "@/lib/auth";
 // would be state living somewhere durable, and there's exactly one user
 // and one secret, so rotating the variable already is the revocation
 // mechanism).
-export async function POST(request: NextRequest) {
-  const body = await request.json().catch(() => null);
-  const token = typeof body?.token === "string" ? body.token : "";
 
-  if (!isValidToken(token)) {
+// Ten wrong tokens in fifteen minutes from one client, then 429s. A
+// 32+ character token isn't brute-forceable over HTTP anyway; this
+// exists so the attempt is loud and slow rather than silent and fast.
+const limiter = new RateLimiter(10, 15 * 60 * 1000);
+
+// Bounded so a giant body can't be used to tie up the process.
+const MAX_TOKEN_LENGTH = 512;
+
+export async function POST(request: Request) {
+  const key = clientKey(request);
+  const limit = limiter.hit(key);
+  if (!limit.ok) {
+    return NextResponse.json(
+      { error: "too many attempts" },
+      { status: 429, headers: { "Retry-After": String(limit.retryAfterSeconds) } },
+    );
+  }
+
+  const body: unknown = await request.json().catch(() => null);
+  const token =
+    body && typeof body === "object" && "token" in body && typeof body.token === "string" ? body.token : "";
+
+  if (token.length === 0 || token.length > MAX_TOKEN_LENGTH || !isValidToken(token)) {
     return NextResponse.json({ error: "invalid token" }, { status: 401 });
   }
 
+  limiter.reset(key);
   const res = NextResponse.json({ status: "ok" });
-  res.cookies.set(SESSION_COOKIE, token, {
-    httpOnly: true,
-    // SCOUT_ENV, not NODE_ENV — caught by actually running the built
-    // standalone image (infra/docker/web.Dockerfile), not just `next
-    // dev`. `next build`/`next start` set NODE_ENV=production
-    // unconditionally, in both the local Compose stack and real
-    // production, so checking it here would mark the cookie Secure
-    // inside local Docker too, where there's no TLS — the browser would
-    // silently refuse to store it and every login would appear to
-    // succeed and then immediately not be signed in. SCOUT_ENV is the
-    // same variable apps/api/cmd/main.go already uses for exactly this
-    // local-vs-production distinction (see apps/api/internal/auth.go's
-    // secureCookie field).
-    secure: process.env.SCOUT_ENV === "production",
-    sameSite: "strict",
-    path: "/",
-    maxAge: 365 * 24 * 60 * 60,
-  });
+  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
   return res;
 }

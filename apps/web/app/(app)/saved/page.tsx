@@ -3,9 +3,10 @@
 import { useQuery } from "@tanstack/react-query";
 import { fetchApplications } from "@/lib/api";
 import { JobCard } from "@/components/JobCard";
+import { CardListSkeleton, EmptyState, ErrorNotice, PageHeader } from "@/components/ui";
 
 export default function SavedPage() {
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isPending, isSuccess, isError, error, refetch } = useQuery({
     queryKey: ["applications", "saved"],
     queryFn: () => fetchApplications(["saved"]),
   });
@@ -13,24 +14,16 @@ export default function SavedPage() {
   const items = data?.data ?? [];
 
   return (
-    <div className="max-w-4xl mx-auto px-10 py-10">
-      <div className="mb-8">
-        <h1 className="text-title text-text-primary">Saved</h1>
-        <p className="text-caption text-text-muted mt-1.5">
-          {isLoading ? "Loading…" : `${items.length} saved`}
-        </p>
-      </div>
+    <div className="max-w-4xl mx-auto page">
+      <PageHeader title="Saved" subtitle={isPending ? "Loading…" : isError ? undefined : `${items.length} saved`} />
 
-      {isError && (
-        <div className="text-body text-danger rounded-[var(--radius-card)] border border-danger/30 bg-danger/10 p-4">
-          Failed to load: {error instanceof Error ? error.message : "unknown error"}
-        </div>
-      )}
+      {isError && <ErrorNotice error={error} fallback="Couldn't load saved jobs." onRetry={() => void refetch()} />}
+      {isPending && <CardListSkeleton />}
 
-      {!isLoading && !isError && items.length === 0 && (
-        <div className="text-body text-text-secondary rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-8 text-center">
-          Nothing saved yet. Save a job from Opportunities to see it here.
-        </div>
+      {isSuccess && items.length === 0 && (
+        <EmptyState title="Nothing saved yet" action={{ label: "Browse opportunities", href: "/opportunities" }}>
+          Save a job from the feed to keep it here, then apply when you&rsquo;re ready.
+        </EmptyState>
       )}
 
       <div className="space-y-4">

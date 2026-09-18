@@ -22,3 +22,27 @@ export function isValidToken(presented: string): boolean {
   const want = createHash("sha256").update(expected).digest();
   return timingSafeEqual(got, want);
 }
+
+// One definition of the cookie's attributes, shared by login (set) and
+// logout (clear) — a clear whose attributes differ from the set is
+// silently ignored by the browser, which is how "Sign out" stops working.
+//
+// Secure is keyed on SCOUT_ENV, not NODE_ENV: `next build`/`next start`
+// set NODE_ENV=production unconditionally, in the local Compose stack
+// too, and a Secure cookie issued over plain HTTP is never stored — every
+// login would appear to succeed and then immediately not be signed in.
+// SCOUT_ENV is the same variable apps/api/cmd/main.go uses for exactly
+// this local-vs-production distinction.
+export function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.SCOUT_ENV === "production",
+    sameSite: "strict" as const,
+    path: "/",
+    // One year. Rotation is the revocation mechanism (ADR-015), not
+    // expiry — a short lifetime would mean re-typing the token on every
+    // device on a schedule, which buys nothing when the same secret is
+    // what gets re-typed.
+    maxAge: 365 * 24 * 60 * 60,
+  };
+}
