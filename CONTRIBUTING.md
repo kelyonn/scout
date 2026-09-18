@@ -4,10 +4,10 @@
 
 ## Setup
 
-**Prerequisites today:** Docker and Compose, Go 1.23+, `make`. Python with `uv`
-and Node with `pnpm` join when the brain (P2) and the web app (P3) do — see
-[`docs/19-roadmap.md`](docs/19-roadmap.md). Nothing installs a toolchain you do
-not yet need.
+**Prerequisites:** Docker and Compose, `make`, Go 1.25+, Node 22 with `pnpm`
+(`corepack enable`), Python 3.12 with `uv`. Only Docker and `make` are needed
+to run the stack; the language toolchains are for tests, linters, and running
+one service natively.
 
 ```bash
 git clone <repo> scout && cd scout
@@ -24,6 +24,7 @@ therefore deterministic, works offline, and cannot accidentally hammer a real
 company's careers page during a debugging session.
 
 ```
+http://127.0.0.1:3000           web (sign in with SCOUT_AUTH_TOKEN from .env)
 http://127.0.0.1:8081/health    api
 postgres://scout@127.0.0.1:5433/scout
 redis://127.0.0.1:6380/0
@@ -47,12 +48,14 @@ curl -H "Authorization: Bearer local-development-token-not-a-secret-000" \
 ```bash
 make dev              # full local stack, migrated
 make dev-db           # database only, for running one service natively
+make web-dev          # Next.js dev server natively, against make dev's API
 make down             # stop, keeping data
 make clean            # stop and delete the data volume
 make logs             # follow local logs
 make migrate          # apply pending migrations
-make test             # all tests
-make lint             # golangci-lint + sqlfluff
+make test             # all tests (Go, Python, web)
+make test-web         # just apps/web's vitest suite
+make lint             # golangci-lint + sqlfluff + ruff/mypy + eslint/tsc
 make fmt              # gofmt
 make compliance       # the banned-dependency gate
 make restore-drill    # restore the latest nightly into a throwaway container

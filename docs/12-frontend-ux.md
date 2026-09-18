@@ -537,7 +537,39 @@ network is what counts.
 
 ---
 
-## 10. Component inventory
+## 10. Build status (2026-09-18)
+
+What `apps/web` actually implements of this document today, so the gap
+between the spec and the shipped screens is written down rather than
+inferred. Everything listed as built has been walked through in a real
+browser against a real database, on a desktop and a 375px viewport.
+
+**Built:** sections 4.1–4.6 as single-column list views (Home with first-run
+setup guidance, Opportunities with URL-state filters and cursor pagination,
+job detail with all thirteen scores, private notes, and a "view original
+listing" link, the Pipeline board with a `<select>` state menu and
+horizontal snap-scroll on phones, Saved/Applied lists, keyword Search with
+the query in the URL, Calendar with a month grid, Companies with a
+watchlist, Insights, Resume upload with client-side validation, Settings).
+Section 6's bottom tab bar (five items, 56px, safe-area padded) and stacked
+layouts. Section 8's basics: semantic landmarks, labels on every input, a
+skip link, visible `:focus-visible` rings, `aria-live` toasts and status
+regions, no interactive controls nested inside links. Every screen has
+distinct loading (skeleton), empty (with a next step), error (with Retry),
+and not-found states; an offline banner; 401s redirect to `/login`;
+route-level and root error boundaries; a PWA manifest and icon (section 7's
+installable subset).
+
+**Not built:** the virtualized list and keyboard triage (4.4), drag-and-drop
+on the Pipeline (the state menu is the only way to move a card), swipe
+gestures (6), the service worker and offline reading (7), the command
+palette (3), `packages/ui`/shadcn/Storybook (11 — components live in
+`apps/web/components`, hand-written), Prep screens, the Sources/System
+admin screens, and the light theme.
+
+---
+
+## 11. Component inventory
 
 Built in `packages/ui`, all customized from shadcn primitives or written from
 scratch:

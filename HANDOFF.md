@@ -1463,3 +1463,95 @@ wired into any UI.
 Emulator torn down (`adb emu kill`) after verification — same "don't
 leave things running past the task that needed them" discipline as every
 other teardown this project does.
+
+---
+
+**Update, 2026-09-18: a product-readiness pass over `apps/web` and the
+API's edges — the dashboard is now something a person can use end to end
+without being told how.** No new subsystems; this is the "every state
+handled, every failure explained, works on a phone" work that turns the
+built screens into a product. Verified in a real browser against the real
+local database, desktop and 375px, including the failure paths.
+
+**Real bugs found and fixed (each one was user-visible):**
+
+- **A down Go API produced Next.js's own HTML 500 page, which the client
+  then rendered as `500: <!DOCTYPE html>…`.** Every `app/api/*` route
+  called `fetch` with no error handling. All fifteen routes now go
+  through one helper (`apps/web/lib/proxy.ts`) that turns an unreachable
+  upstream into a `502 {"error": …}` and, separately, **forwards the
+  browser's abort signal** — the SSE proxy (`/api/stream`) never closed
+  its upstream connection when a tab closed, so every closed live-feed
+  tab left a subscriber on the Go broker until restart.
+- **Login's `?next=` was an open redirect** (`router.replace(next)`
+  unsanitized) — `lib/safeRedirect.ts`, used by both `proxy.ts` and the
+  login page, allows same-origin paths only. Tested for `//`, `\`, CRLF,
+  absolute URLs, and `/login` loops.
+- **Mutation failures were silent** (`mutateAsync` rejected into an
+  unhandled promise; the button just re-enabled). Every Save/Dismiss/
+  Apply/Move/Watch/Notes action now reports failure in a toast
+  (`components/Toast.tsx`, `aria-live`), and Dismiss/Apply confirm with
+  an Undo.
+- **Raw error bodies everywhere**: pages rendered `error.message` as
+  `409: {"error":"invalid transition: saved -> applied"}`. `lib/api.ts`'s
+  `ApiError` maps status → a sentence a person can act on, keeps the
+  server's string as `detail`, never surfaces HTML, and **a 401 bounces
+  to `/login?next=…`** instead of dead-ending every screen after a token
+  rotation.
+- **JobCard was an `<a>` wrapping `<button>`s** — invalid HTML, and
+  screen readers announced one giant link. Rebuilt as an `<article>` with
+  a stretched title link; actions sit above it. Same fix on company rows.
+- **Empty states showed on paused queries.** TanStack pauses retries
+  while the tab is hidden; pages keyed their empty state on
+  `!isLoading && !isError`, so a background tab that hit a 502 showed
+  "Nothing saved yet" as if it had loaded. Empty states now require
+  `isSuccess`, skeletons use `isPending`, and 5xx/4xx are not retried
+  at all (only status-0 network errors, once).
+- **A rating outside 1–5 was a 500** (only the CHECK constraint caught
+  it). `POST /state` now validates rating and bounds notes at 4000 bytes
+  → 422 with a reason; unknown authenticated routes return JSON 404, not
+  `text/plain`. Tests for all three.
+- **No mobile navigation at all** — the sidebar was the only nav and
+  every page used `px-10`. `Shell.tsx` now has docs/12 §6's bottom tab
+  bar under `md`, a mobile header, safe-area insets, and a `.page`
+  utility for the gutters; Pipeline snap-scrolls; FilterBar starts
+  collapsed on phones.
+
+**Also built:** first-run guidance on Home (a setup card that appears
+only while there's no resume or no collected jobs — no onboarding flag
+to persist), `error.tsx`/`not-found.tsx`/`global-error.tsx` and a real
+not-found state on job/company detail, "View original listing ↗" on
+detail (previously the only way to open a posting was to mark it
+applied), a notes editor on detail (the API already supported notes;
+nothing wrote them), deadline chips on cards, compensation/posted/
+deadline on detail, the search query and company query in the URL, a
+login rate limiter (10/15min per client, in-process), response security
+headers, an unauthenticated `/api/health` with real wget healthchecks in
+both compose files (the old one was `node -e process.exit(0)`, which
+reports healthy before the server binds), an offline banner, a PWA
+manifest + icon, a skip link and visible focus rings, resume-upload
+validation (type/size, keyboard-operable dropzone), plain-language copy
+on Login/Settings (no more "see ADR-015" in the UI), and the
+create-next-app boilerplate (README, `public/*.svg`) removed.
+
+**Tests:** `apps/web` had none. Now vitest (one new dev dependency;
+`pnpm run test`, in `make test` and CI's `web` job): 32 tests over
+`lib/**` — token comparison fails closed, redirect sanitizer, error
+mapping (incl. "never render HTML"), rate limiter, proxy failure modes,
+the state-machine mirror pins the Go transition table. Go: 3 new tests
+(rating bounds, notes bounds + persistence across transitions, JSON
+404). `make lint`, `make test`, `golangci-lint`, `next build` all clean.
+
+**Docs:** README "Getting started" now says what to open, what to type,
+and what a fresh database looks like, plus a configuration table;
+CONTRIBUTING's prerequisites were three phases stale; `apps/web/README.md`
+and `apps/web/.env.example` are new; docs/12 §10 records exactly which
+parts of that spec are built vs. not.
+
+**Deliberately not done, and why:** no accounts/signup (AGENTS.md: one
+user, ADR-015 — the "productize" brief's sign-up flow does not apply);
+no strict CSP (needs per-request nonces to coexist with Next's inline
+runtime — noted in `next.config.ts`); no service worker/offline reading,
+no drag-and-drop, no virtualized list (docs/12's larger items, listed in
+its §10). The Go API still trusts the tailnet for rate limiting — only
+the browser login path got a limiter.
