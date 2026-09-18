@@ -285,6 +285,17 @@ services:
       # Same SCOUT_HOST_BIND_ADDR as the api service above — both need to be
       # reachable over the tailnet for apps/mobile, not just one.
       - "${SCOUT_HOST_BIND_ADDR:-127.0.0.1}:${SCOUT_WEB_PORT:-3000}:3000"
+    # A real request, not a bare `node -e process.exit(0)` (which reports
+    # healthy while the server is still booting or has crashed its
+    # listener). /api/health is unauthenticated and exempt from proxy.ts —
+    # see apps/web/app/api/health/route.ts. node:22-alpine ships busybox
+    # wget; the image has no curl.
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     mem_limit: 256m
     depends_on:
       api:

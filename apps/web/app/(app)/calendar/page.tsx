@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { fetchApplications, fetchGoogleCalendarEvents, fetchGoogleCalendarStatus } from "@/lib/api";
+import { EmptyState, ErrorNotice, PageHeader, Skeleton } from "@/components/ui";
 import type { ApplicationItem, GoogleCalendarEvent } from "@/lib/types";
 
 function dayLabel(iso: string): string {
@@ -137,7 +138,7 @@ function MonthGrid({
   }
 
   return (
-    <div className="rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-5 mb-8">
+    <div className="rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-3 sm:p-5 mb-8">
       <div className="flex items-center justify-between mb-4">
         <h2 className="text-heading text-text-primary">
           {cursor.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
@@ -201,7 +202,7 @@ function MonthGrid({
           return (
             <div
               key={cell.key}
-              className={`min-h-[92px] rounded-[var(--radius-input)] border p-1.5 flex flex-col gap-1 ${
+              className={`min-h-[56px] sm:min-h-[92px] rounded-[var(--radius-input)] border p-1 sm:p-1.5 flex flex-col gap-1 ${
                 cell.isToday
                   ? "border-accent-primary/40 bg-accent-subtle"
                   : "border-border-subtle bg-bg-base"
@@ -259,7 +260,7 @@ function MonthGrid({
 // you create, interview scheduling) would need a new table; this is the
 // honest subset that's free with data already tracked.
 export default function CalendarPage() {
-  const { data, isLoading } = useQuery({
+  const { data, isPending, isSuccess, isError, error, refetch } = useQuery({
     queryKey: ["applications"],
     queryFn: () => fetchApplications(),
   });
@@ -292,13 +293,17 @@ export default function CalendarPage() {
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-10 py-10">
-      <div className="mb-8">
-        <h1 className="text-title text-text-primary">Calendar</h1>
-        <p className="text-caption text-text-muted mt-1.5">
-          {isLoading ? "Loading…" : `${items.length} tracked deadlines`}
-        </p>
-      </div>
+    <div className="max-w-4xl mx-auto page">
+      <PageHeader
+        title="Calendar"
+        subtitle={isPending ? "Loading…" : isError ? undefined : `${items.length} deadline${items.length === 1 ? "" : "s"} across your saved and applied jobs`}
+      />
+
+      {isError && (
+        <div className="mb-6">
+          <ErrorNotice error={error} fallback="Couldn't load deadlines." onRetry={() => void refetch()} />
+        </div>
+      )}
 
       {googleStatus?.enabled && !googleStatus.connected && (
         <a
@@ -311,12 +316,12 @@ export default function CalendarPage() {
 
       <MonthGrid items={items} events={googleEvents?.data ?? []} />
 
-      {isLoading && <p className="text-body text-text-muted">Loading…</p>}
+      {isPending && <Skeleton className="h-24" />}
 
-      {!isLoading && items.length === 0 && (googleEvents?.data.length ?? 0) === 0 && (
-        <div className="text-body text-text-secondary rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-8 text-center">
-          No deadlines among your saved or applied jobs right now.
-        </div>
+      {isSuccess && items.length === 0 && (googleEvents?.data.length ?? 0) === 0 && (
+        <EmptyState title="No deadlines coming up" action={{ label: "Browse opportunities", href: "/opportunities" }}>
+          Deadlines appear here for jobs you&rsquo;ve saved or applied to, whenever the posting states one.
+        </EmptyState>
       )}
 
       {GROUP_ORDER.filter((g) => groups.has(g)).map((groupName) => (

@@ -2,6 +2,7 @@
 
 import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { safeNextPath } from "@/lib/safeRedirect";
 
 function LoginForm() {
   const router = useRouter();
@@ -9,61 +10,114 @@ function LoginForm() {
   const [token, setToken] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [showHint, setShowHint] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (pending) return;
     setPending(true);
     setError(null);
     try {
       const res = await fetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ token }),
+        body: JSON.stringify({ token: token.trim() }),
       });
-      if (!res.ok) {
-        setError("That token doesn't match. Check .env's SCOUT_AUTH_TOKEN.");
+      if (res.status === 429) {
+        setError("Too many attempts. Wait a few minutes, then try again.");
         return;
       }
-      router.replace(searchParams.get("next") || "/");
+      if (!res.ok) {
+        setError("That token doesn't match. Check it and try again.");
+        return;
+      }
+      router.replace(safeNextPath(searchParams.get("next")));
       router.refresh();
     } catch {
-      setError("Couldn't reach the server — is it running?");
+      setError("Couldn't reach Scout. Is the web service running?");
     } finally {
       setPending(false);
     }
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-bg-base px-6">
+    <main className="min-h-screen flex items-center justify-center bg-bg-base px-4 py-8">
       <form
         onSubmit={handleSubmit}
-        className="w-full max-w-sm rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-8"
+        noValidate
+        className="w-full max-w-sm rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-6 sm:p-8"
       >
-        <h1 className="text-title text-text-primary">Scout</h1>
-        <p className="text-caption text-text-muted mt-1.5 mb-6">
-          Enter your access token to continue. One device, once — it stays signed in.
-        </p>
+        <div className="flex items-center gap-3 mb-5">
+          <span
+            aria-hidden
+            className="w-9 h-9 rounded-lg flex items-center justify-center"
+            style={{ background: "color-mix(in srgb, var(--accent-primary) 16%, transparent)" }}
+          >
+            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="var(--accent-primary)" strokeWidth="1.6">
+              <circle cx="10" cy="10" r="6.5" />
+              <circle cx="10" cy="10" r="3" />
+              <circle cx="10" cy="10" r="0.6" fill="var(--accent-primary)" stroke="none" />
+            </svg>
+          </span>
+          <div>
+            <h1 className="text-title text-text-primary leading-none">Scout</h1>
+            <p className="text-caption text-text-muted mt-1">Internship and new-grad roles, ranked for you.</p>
+          </div>
+        </div>
 
+        <label htmlFor="token" className="block text-label text-text-secondary mb-1.5">
+          Access token
+        </label>
         <input
+          id="token"
+          name="token"
           type="password"
           value={token}
           onChange={(e) => setToken(e.target.value)}
-          placeholder="Access token"
           autoFocus
+          autoComplete="current-password"
+          spellCheck={false}
+          required
+          aria-invalid={error ? true : undefined}
+          aria-describedby={error ? "token-error" : "token-help"}
           className="w-full text-body bg-bg-elevated border border-border-subtle rounded-[var(--radius-input)] px-3 py-2.5 text-text-primary placeholder:text-text-muted focus:outline-none focus:border-accent-primary font-mono"
         />
+        <p id="token-help" className="text-caption text-text-muted mt-2">
+          Enter it once on this device — you stay signed in.
+        </p>
 
-        {error && <p className="text-caption text-danger mt-3">{error}</p>}
+        {error && (
+          <p id="token-error" role="alert" className="text-caption text-danger mt-3">
+            {error}
+          </p>
+        )}
 
         <button
           type="submit"
-          disabled={pending || token.length === 0}
-          className="w-full mt-4 text-label text-white bg-accent-primary rounded-[var(--radius-card)] py-2.5 transition-colors duration-100 hover:bg-accent-hover disabled:opacity-50"
+          disabled={pending || token.trim().length === 0}
+          className="w-full mt-4 text-label text-white bg-accent-primary rounded-[var(--radius-card)] py-2.5 transition-colors duration-100 hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {pending ? "Checking…" : "Continue"}
         </button>
+
+        <button
+          type="button"
+          onClick={() => setShowHint((s) => !s)}
+          aria-expanded={showHint}
+          className="mt-4 text-caption text-text-muted hover:text-text-secondary transition-colors duration-100"
+        >
+          Where do I find the token?
+        </button>
+        {showHint && (
+          <p className="text-caption text-text-muted mt-2 leading-relaxed">
+            Scout runs on your own machine with one access token. It&rsquo;s the{" "}
+            <code className="font-mono text-text-secondary">SCOUT_AUTH_TOKEN</code> value in the server&rsquo;s{" "}
+            <code className="font-mono text-text-secondary">.env</code> file. Changing that value and restarting signs
+            every device out.
+          </p>
+        )}
       </form>
-    </div>
+    </main>
   );
 }
 

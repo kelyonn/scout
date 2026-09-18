@@ -212,12 +212,16 @@ services:
       SCOUT_ENV: production
     tmpfs:
       - /tmp:size=16m,mode=1777
+    # A real request against the app's own unauthenticated liveness
+    # route (apps/web/app/api/health/route.ts), not a bare
+    # `node -e process.exit(0)` that reported healthy before the server
+    # had bound its port. busybox wget ships in node:22-alpine.
     healthcheck:
-      test: ["CMD", "node", "-e", "process.exit(0)"]
-      interval: 10s
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/api/health"]
+      interval: 15s
       timeout: 5s
       retries: 3
-      start_period: 10s
+      start_period: 15s
     mem_limit: 512m
     depends_on:
       api:

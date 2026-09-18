@@ -3,50 +3,58 @@
 import { use } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { fetchCompanyDetail, fetchJobs } from "@/lib/api";
+import { ApiError, fetchCompanyDetail, fetchJobs } from "@/lib/api";
 import { JobCard } from "@/components/JobCard";
 import { CompanyAvatar } from "@/components/CompanyAvatar";
 import { WatchButton } from "@/components/WatchButton";
+import { CardListSkeleton, EmptyState, ErrorNotice, Skeleton } from "@/components/ui";
 
-export default function CompanyDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function CompanyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
 
-  const { data: company, isLoading, isError, error } = useQuery({
+  const { data: company, isPending, isError, error, refetch } = useQuery({
     queryKey: ["company-detail", id],
     queryFn: () => fetchCompanyDetail(id),
   });
 
-  const { data: jobsData, isLoading: jobsLoading } = useQuery({
+  const jobsQuery = useQuery({
     queryKey: ["jobs", "company", id],
     queryFn: () => fetchJobs({ minPriority: 1, companyId: id, limit: 50 }),
+    enabled: !!company,
   });
 
-  const jobs = jobsData?.data ?? [];
+  const jobs = jobsQuery.data?.data ?? [];
+  const notFound = isError && error instanceof ApiError && error.isNotFound;
 
   return (
-    <div className="max-w-5xl mx-auto px-10 py-10">
-      <Link
-        href="/companies"
-        className="text-label text-text-muted hover:text-text-secondary transition-colors duration-100"
-      >
+    <div className="max-w-5xl mx-auto page">
+      <Link href="/companies" className="text-label text-text-muted hover:text-text-secondary transition-colors duration-100">
         ← Companies
       </Link>
 
-      {isLoading && <p className="text-body text-text-muted mt-6">Loading…</p>}
-      {isError && (
-        <div className="mt-6 text-body text-danger rounded-[var(--radius-card)] border border-danger/30 bg-danger/10 p-4">
-          {error instanceof Error ? error.message : "Failed to load company"}
+      {isPending && (
+        <div className="mt-6 space-y-4" role="status" aria-label="Loading">
+          <Skeleton className="h-12 w-1/2" />
+          <Skeleton className="h-20" />
+        </div>
+      )}
+      {notFound && (
+        <div className="mt-6">
+          <EmptyState title="Company not found" action={{ label: "Back to Companies", href: "/companies" }}>
+            It may have been merged into another entry or removed.
+          </EmptyState>
+        </div>
+      )}
+      {isError && !notFound && (
+        <div className="mt-6">
+          <ErrorNotice error={error} fallback="Couldn't load this company." onRetry={() => void refetch()} />
         </div>
       )}
 
       {company && (
         <div className="mt-6 grid grid-cols-1 lg:grid-cols-[1fr_280px] gap-8">
           <div className="min-w-0">
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3 sm:gap-4">
               <CompanyAvatar id={company.id} name={company.name} size={48} />
               <div className="min-w-0 flex-1">
                 <h1 className="text-title text-text-primary">{company.name}</h1>
@@ -57,9 +65,7 @@ export default function CompanyDetailPage({
               <WatchButton companyId={company.id} />
             </div>
 
-            {company.description && (
-              <p className="text-body text-text-secondary mt-5">{company.description}</p>
-            )}
+            {company.description && <p className="text-body text-text-secondary mt-5">{company.description}</p>}
 
             {company.industries.length > 0 && (
               <div className="flex flex-wrap gap-1.5 mt-4">
@@ -74,14 +80,17 @@ export default function CompanyDetailPage({
               </div>
             )}
 
-            <div className="mt-8">
-              <h2 className="text-heading text-text-primary mb-3">
-                Open roles ({jobsLoading ? "…" : jobs.length})
+            <section className="mt-8" aria-labelledby="open-roles">
+              <h2 id="open-roles" className="text-heading text-text-primary mb-3">
+                Open roles ({jobsQuery.isPending ? "…" : jobs.length})
               </h2>
-              {jobsLoading && <p className="text-body text-text-muted">Loading…</p>}
-              {!jobsLoading && jobs.length === 0 && (
+              {jobsQuery.isPending && <CardListSkeleton count={2} />}
+              {jobsQuery.isError && (
+                <ErrorNotice error={jobsQuery.error} fallback="Couldn't load this company's roles." onRetry={() => void jobsQuery.refetch()} />
+              )}
+              {jobsQuery.isSuccess && jobs.length === 0 && (
                 <div className="text-body text-text-secondary rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-6 text-center">
-                  Nothing currently open matches the feed&rsquo;s seniority filter.
+                  No scored open roles at this company right now.
                 </div>
               )}
               <div className="space-y-4">
@@ -89,17 +98,17 @@ export default function CompanyDetailPage({
                   <JobCard key={job.job_group_id} job={job} />
                 ))}
               </div>
-            </div>
+            </section>
           </div>
 
           <div className="lg:sticky lg:top-8 lg:self-start space-y-4">
-            <div className="rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-4 space-y-2.5 text-body">
+            <dl className="rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-4 space-y-2.5 text-body">
               <Row label="Type" value={company.company_type.replace(/_/g, " ")} />
               {company.size_bucket && <Row label="Size" value={company.size_bucket} />}
               {company.stage && <Row label="Stage" value={company.stage.replace(/_/g, " ")} />}
               {company.founded_year && <Row label="Founded" value={String(company.founded_year)} />}
               <Row label="Open roles" value={String(company.open_job_count)} />
-            </div>
+            </dl>
 
             {company.website_url && (
               <a
@@ -120,9 +129,9 @@ export default function CompanyDetailPage({
 
 function Row({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center justify-between">
-      <span className="text-text-secondary">{label}</span>
-      <span className="text-text-primary text-caption">{value}</span>
+    <div className="flex items-center justify-between gap-3">
+      <dt className="text-text-secondary">{label}</dt>
+      <dd className="text-text-primary text-caption text-right">{value}</dd>
     </div>
   );
 }

@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { updateJobState } from "@/lib/api";
+import { errorMessage, updateJobState } from "@/lib/api";
+import { useToast } from "@/components/Toast";
 import type { ApplicationState } from "@/lib/types";
 
 // docs/12-frontend-ux.md section 4.2's job-card action row: Save,
@@ -24,6 +25,7 @@ export function StateControls({
   size?: "sm" | "md";
 }) {
   const queryClient = useQueryClient();
+  const { toast } = useToast();
   const [showElsewherePrompt, setShowElsewherePrompt] = useState(false);
   const [pending, setPending] = useState(false);
 
@@ -45,7 +47,12 @@ export function StateControls({
   // is still in `new`, and "Save" or "Apply" from `new` needs to pass
   // through `viewed` (and `saved`, for Apply) first rather than 409ing on
   // a jump the user experiences as a single action.
-  async function transitionTo(target: ApplicationState, foundElsewhereFirst?: boolean) {
+  //
+  // Returns whether the whole chain committed. A failure anywhere shows
+  // one toast and stops; the server's row is whatever the last
+  // successful hop left it, and the invalidated queries re-render that.
+  async function transitionTo(target: ApplicationState, foundElsewhereFirst?: boolean): Promise<boolean> {
+    if (pending) return false;
     setPending(true);
     try {
       let current = state;
@@ -65,34 +72,55 @@ export function StateControls({
         });
         current = step;
       }
+      return true;
+    } catch (err) {
+      toast(errorMessage(err, "Couldn't update this job. Try again."), { kind: "error" });
+      return false;
     } finally {
       setPending(false);
     }
   }
 
-  const pad = size === "sm" ? "px-2.5 py-1" : "px-3 py-1.5";
+  async function dismiss() {
+    if (await transitionTo("dismissed")) {
+      toast("Dismissed", {
+        action: { label: "Undo", onClick: () => void transitionTo("saved") },
+      });
+    }
+  }
+
+  async function apply(foundElsewhereFirst: boolean) {
+    // Open the listing first, synchronously inside the click — popup
+    // blockers only allow window.open during a user gesture, and an
+    // await before it would lose that.
+    window.open(applyUrl, "_blank", "noopener,noreferrer");
+    setShowElsewherePrompt(false);
+    if (await transitionTo("applied", foundElsewhereFirst)) {
+      toast("Marked as applied", {
+        kind: "success",
+        action: { label: "Undo", onClick: () => void transitionTo("saved") },
+      });
+    }
+  }
+
+  const pad = size === "sm" ? "px-2.5 py-1.5 sm:py-1" : "px-3 py-1.5";
   const text = size === "sm" ? "text-caption" : "text-label";
   const busy = pending || mutate.isPending;
+  const base = `${text} ${pad} rounded-[var(--radius-input)] transition-colors duration-100 disabled:opacity-50 disabled:cursor-not-allowed`;
+  const secondary = `${base} border border-border-subtle text-text-secondary hover:text-text-primary hover:border-border-strong`;
+  const muted = `${base} border border-border-subtle text-text-muted hover:text-text-primary hover:border-border-strong`;
+  const primary = `${base} text-white bg-accent-primary hover:bg-accent-hover`;
 
   if (state === "dismissed") {
     return (
-      <button
-        type="button"
-        onClick={(e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          transitionTo("saved");
-        }}
-        disabled={busy}
-        className={`${text} ${pad} rounded-[var(--radius-input)] border border-border-subtle text-text-muted transition-colors duration-100 hover:text-text-primary hover:border-border-strong disabled:opacity-50`}
-      >
+      <button type="button" onClick={() => void transitionTo("saved")} disabled={busy} className={muted}>
         Undo dismiss
       </button>
     );
   }
 
   return (
-    <div className="flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+    <div className="flex flex-wrap items-center justify-end gap-2" aria-busy={busy || undefined}>
       {/* Save / Unsave toggle. Same target state either way (a fresh
           `saved` from new/viewed, or back to `dismissed` once already
           saved — the one transition saved allows besides applying) — the
@@ -101,42 +129,24 @@ export function StateControls({
       {state === "saved" ? (
         <button
           type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            transitionTo("dismissed");
-          }}
+          onClick={() => void transitionTo("dismissed")}
           disabled={busy}
           title="Remove from Saved"
-          className={`${text} ${pad} rounded-[var(--radius-input)] border border-accent-primary/30 text-accent-primary bg-accent-subtle transition-colors duration-100 hover:bg-danger/10 hover:border-danger/30 hover:text-danger disabled:opacity-50`}
+          aria-pressed
+          className={`${base} border border-accent-primary/30 text-accent-primary bg-accent-subtle hover:bg-danger/10 hover:border-danger/30 hover:text-danger`}
         >
           Unsave
         </button>
       ) : (
         state !== "applied" && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              transitionTo("saved");
-            }}
-            disabled={busy}
-            className={`${text} ${pad} rounded-[var(--radius-input)] border border-border-subtle text-text-secondary transition-colors duration-100 hover:text-text-primary hover:border-border-strong disabled:opacity-50`}
-          >
+          <button type="button" onClick={() => void transitionTo("saved")} disabled={busy} aria-pressed={false} className={secondary}>
             Save
           </button>
         )
       )}
 
       {state !== "applied" && state !== "saved" && (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            transitionTo("dismissed");
-          }}
-          disabled={busy}
-          className={`${text} ${pad} rounded-[var(--radius-input)] border border-border-subtle text-text-muted transition-colors duration-100 hover:text-text-primary hover:border-border-strong disabled:opacity-50`}
-        >
+        <button type="button" onClick={() => void dismiss()} disabled={busy} className={muted}>
           Dismiss
         </button>
       )}
@@ -146,58 +156,39 @@ export function StateControls({
           <span className={`${text} ${pad} rounded-[var(--radius-input)] text-success`}>Applied</span>
           <button
             type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              transitionTo("saved");
-            }}
+            onClick={() => void transitionTo("saved")}
             disabled={busy}
             title="Didn't actually submit an application — move this back to Saved"
-            className={`${text} ${pad} rounded-[var(--radius-input)] border border-border-subtle text-text-muted transition-colors duration-100 hover:text-text-primary hover:border-border-strong disabled:opacity-50`}
+            className={muted}
           >
             Un-apply
           </button>
         </div>
       ) : showElsewherePrompt ? (
-        // Plain <button>s, not <a href>, deliberately: this component
-        // renders inside JobCard's own outer <Link>, and a nested <a>
-        // inside an <a> is invalid HTML with inconsistent click-target
-        // behavior across browsers. window.open keeps "opens the real
-        // listing in a new tab" without that nesting.
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              window.open(applyUrl, "_blank", "noopener,noreferrer");
-              transitionTo("applied", false);
-            }}
-            className={`${text} ${pad} rounded-[var(--radius-input)] text-white bg-accent-primary transition-colors duration-100 hover:bg-accent-hover`}
-          >
+        <div role="group" aria-label="Had you already seen this listing?" className="flex flex-wrap items-center gap-1.5">
+          <button type="button" onClick={() => void apply(false)} disabled={busy} className={primary}>
             Apply now →
           </button>
           <button
             type="button"
-            onClick={(e) => {
-              e.preventDefault();
-              window.open(applyUrl, "_blank", "noopener,noreferrer");
-              transitionTo("applied", true);
-            }}
+            onClick={() => void apply(true)}
+            disabled={busy}
             title="I already knew about this one from elsewhere before Scout showed it to me"
-            className={`${text} ${pad} rounded-[var(--radius-input)] border border-border-subtle text-text-secondary transition-colors duration-100 hover:text-text-primary`}
+            className={secondary}
           >
             Found elsewhere first
           </button>
+          <button
+            type="button"
+            onClick={() => setShowElsewherePrompt(false)}
+            aria-label="Cancel"
+            className={`${base} text-text-muted hover:text-text-primary`}
+          >
+            ✕
+          </button>
         </div>
       ) : (
-        <button
-          type="button"
-          onClick={(e) => {
-            e.preventDefault();
-            setShowElsewherePrompt(true);
-          }}
-          disabled={busy}
-          className={`${text} ${pad} rounded-[var(--radius-input)] text-white bg-accent-primary transition-colors duration-100 hover:bg-accent-hover disabled:opacity-50`}
-        >
+        <button type="button" onClick={() => setShowElsewherePrompt(true)} disabled={busy} className={primary}>
           Apply →
         </button>
       )}
