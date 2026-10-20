@@ -28,7 +28,8 @@ Use [`ADR-000-template.md`](ADR-000-template.md) for new records.
 | [015](ADR-015-single-user-auth.md) | Network-gated bearer token instead of passkeys | Accepted |
 | [016](ADR-016-free-tier-llm-cascade.md) | Free-tier and local models; budgets in requests, not rupees | Accepted |
 | [017](ADR-017-tiered-backup-without-object-storage.md) | Back up by recoverability class, to storage already owned | Accepted |
-| [018](ADR-018-laptop-only-hosting.md) | Laptop-only hosting — no remote host, no Tailscale | Accepted |
+| [018](ADR-018-laptop-only-hosting.md) | Laptop-only hosting — no remote host, no Tailscale | **Superseded by 019** |
+| [019](ADR-019-cardless-hosted-pipeline.md) | Cardless hosted pipeline — Actions, Neon, Upstash, Render, Vercel | Accepted |
 
 ## The ₹0 group: 014–017
 

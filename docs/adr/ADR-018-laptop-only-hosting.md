@@ -1,6 +1,6 @@
 # ADR-018: Laptop-only hosting — no remote host, no Tailscale
 
-**Status:** Accepted
+**Status:** Superseded by [ADR-019](ADR-019-cardless-hosted-pipeline.md)
 **Date:** 2026-08-19
 **Supersedes:** [ADR-014](ADR-014-zero-cost-hosting.md)'s choice of Oracle A1 as
 primary host (ADR-014's portability argument and ARM64 reasoning are unaffected

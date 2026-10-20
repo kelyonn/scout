@@ -78,10 +78,83 @@ func main() {
 	// process actually exits. See the identical reasoning that used to live
 	// here before the scheduler existed — it still applies, with more defers
 	// now depending on it.
-	if err := run(log); err != nil {
+	var err error
+	if len(os.Args) > 1 && os.Args[1] == "-once" {
+		err = runOnce(log)
+	} else {
+		err = run(log)
+	}
+	if err != nil {
 		log.Error("exited with error", "err", err)
 		os.Exit(1)
 	}
+}
+
+// onceMaxDuration bounds a `collector -once` invocation so a scheduled CI job
+// always terminates; sources still due are picked up by the next invocation.
+func onceMaxDuration() time.Duration {
+	if d, err := time.ParseDuration(os.Getenv("SCOUT_ONCE_MAX_DURATION")); err == nil && d > 0 {
+		return d
+	}
+	return 10 * time.Minute
+}
+
+// runOnce is the externally scheduled mode (ADR-019): same compliance gate,
+// pipeline and database as run, but no background loops — it does upkeep,
+// polls every due source until none are left (or the time budget ends), and
+// exits. Email-alert polling is long-lived IMAP and is not part of this mode.
+func runOnce(log *slog.Logger) error {
+	contactURL := os.Getenv("SCOUT_COLLECTOR_CONTACT_URL")
+	operatorEmail := os.Getenv("SCOUT_COLLECTOR_OPERATOR_EMAIL")
+	if contactURL == "" || operatorEmail == "" {
+		return errors.New(
+			"SCOUT_COLLECTOR_CONTACT_URL and SCOUT_COLLECTOR_OPERATOR_EMAIL must both be set (SCOUT-LEGAL-003)")
+	}
+
+	gate, rdb, err := buildPolitenessGate(log, contactURL, operatorEmail)
+	if err != nil {
+		return fmt.Errorf("configure politeness gate: %w", err)
+	}
+	defer func() { _ = rdb.Close() }()
+
+	if err = selfCheckPolitenessGate(context.Background(), gate); err != nil {
+		return fmt.Errorf("politeness gate self-check: %w", err)
+	}
+
+	pool, err := buildDatabasePool(context.Background())
+	if err != nil {
+		return fmt.Errorf("configure database: %w", err)
+	}
+	defer pool.Close()
+
+	queueClient, err := queue.New(pool)
+	if err != nil {
+		return fmt.Errorf("configure queue: %w", err)
+	}
+
+	fetcher := fetch.New(contactURL, operatorEmail)
+	sched := scheduler.New(pool, gate, fetcher, log).
+		WithPipeline(buildPipeline(fetcher)).
+		WithQueue(queueClient)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ctx, cancel := context.WithTimeout(ctx, onceMaxDuration())
+	defer cancel()
+
+	sched.RunMaintenanceOnce(ctx)
+
+	if os.Getenv("SCOUT_FIXTURES_ONLY") == "true" {
+		log.Warn("fetching skipped: SCOUT_FIXTURES_ONLY=true")
+		return nil
+	}
+
+	claimed, err := sched.RunUntilIdle(ctx)
+	if err != nil {
+		return fmt.Errorf("poll due sources: %w", err)
+	}
+	log.Info("collector run complete", "claimed", claimed)
+	return nil
 }
 
 func run(log *slog.Logger) error {

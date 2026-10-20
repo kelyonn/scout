@@ -1,0 +1,29 @@
+# Render blueprint for the API only (ADR-019). The workers run on GitHub Actions
+# (.github/workflows/ingest.yml) and the web app runs on Vercel.
+#
+# Secrets are marked sync: false so they are entered in the Render dashboard
+# and never live in this public repository.
+services:
+  - type: web
+    name: scout-api
+    runtime: docker
+    plan: free
+    dockerfilePath: infra/docker/go-service.Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: SERVICE
+        value: api
+      - key: SCOUT_API_ADDR
+        value: ":10000"
+      - key: SCOUT_ENV
+        value: production
+      - key: SCOUT_DATABASE_URL
+        sync: false
+      - key: SCOUT_REDIS_URL
+        sync: false
+      - key: SCOUT_AUTH_TOKEN
+        sync: false
+      - key: SCOUT_USER_EMAIL
+        sync: false
