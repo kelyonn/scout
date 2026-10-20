@@ -353,3 +353,153 @@ swe.general:
   weak:
     - engineering intern
     - software.*intern
+
+# --- Beyond software (ADR-020, 2026-10-21) ---
+# docs/01-prd.md section 4.3 no longer excludes these. Every family below
+# carries `is_software: false` explicitly (roles.go defaults the key to
+# true when absent, so none of the swe.*/advocacy.* families above needed
+# editing). None carries `requires: technical_evidence` — unlike
+# advocacy.*, a Product/Consulting/Business title is non-technical by the
+# title itself, with no description-level gate needed, so Tier 0 resolves
+# these directly and Tier 2's LLM escalation (which only advocacy.*
+# triggers) never sees them.
+
+product.management:
+  exemplars:
+    - Product Management Intern
+    - Associate Product Manager Intern
+    - Product Manager Intern
+    - Product Owner Intern
+  strong:
+    - product manager
+    - associate product manager
+    - \bapm\b
+    - product owner
+  weak:
+    - product management.*intern
+  negative:
+    - product marketing
+    - product designer
+    - product engineer
+  is_software: false
+
+product.design:
+  exemplars:
+    - Product Design Intern
+    - UX Designer Intern
+    - UI/UX Designer Intern
+    - Product Designer Intern
+  strong:
+    - product designer
+    - ux designer
+    - ui/ux designer
+    - ui designer
+    - user experience designer
+  weak:
+    - product design.*intern
+    - (ux|ui).*design.*intern
+    - user experience.*intern
+  negative:
+    - graphic designer
+    - industrial designer
+  is_software: false
+
+product.analyst:
+  exemplars:
+    - Product Analyst Intern
+    - Product Operations Analyst Intern
+  strong:
+    - product analyst
+    - product operations analyst
+  weak:
+    - product analytics.*intern
+  negative:
+    - product marketing analyst
+  is_software: false
+
+# Scoped tightly to explicit "consultant"/"consulting" titles — "business
+# analyst" alone is not strong-matched here, since that title is at least
+# as common at a product company (business.general) as at a consulting
+# firm, and admitting it here would misclassify the former.
+consulting.strategy:
+  exemplars:
+    - Strategy Consulting Intern
+    - Management Consulting Intern
+    - Associate Consultant Intern
+  strong:
+    - management consultant
+    - strategy consultant
+    - management consulting intern
+    - strategy consulting intern
+    - associate consultant
+  weak:
+    - consulting.*intern
+  is_software: false
+
+# advocacy.solutions (checked earlier in file order, so it wins any real
+# clash) is reserved for genuine hands-on technical building — "technical
+# consultant" is its own strong pattern there, not duplicated here. This
+# family is the advisory-not-hands-on side: scoping/delivering a
+# technology-enabled business change without writing the implementation.
+consulting.technology:
+  exemplars:
+    - Technology Consulting Intern
+    - Digital Consulting Intern
+    - Business Technology Analyst Intern
+  strong:
+    - technology consulting
+    - digital consulting
+    - business technology analyst
+    - technology consultant
+  weak:
+    - tech consulting.*intern
+  negative:
+    - solutions engineer
+    - forward deployed engineer
+    - implementation engineer
+  is_software: false
+
+business.strategy:
+  exemplars:
+    - Corporate Strategy Intern
+    - Strategy & Operations Intern
+    - Chief of Staff Intern
+  strong:
+    - corporate strategy
+    - strategy and operations
+    - strategy & operations
+    - chief of staff
+  weak:
+    - strategy.*intern
+  negative:
+    - product strategy
+  is_software: false
+
+business.operations:
+  exemplars:
+    - Business Operations Intern
+    - BizOps Intern
+    - Operations Analyst Intern
+  strong:
+    - business operations
+    - biz ops
+    - operations analyst
+  weak:
+    - operations.*intern
+  is_software: false
+
+# The catch-all leaf for business roles that don't name a specialization —
+# same role swe.general plays for swe.*. Checked last so a more specific
+# business/product/consulting title above matches first.
+business.general:
+  exemplars:
+    - Business Development Intern
+    - Business Analyst Intern
+    - General Management Intern
+  strong:
+    - business analyst
+    - business development
+    - general management
+  weak:
+    - business.*intern
+  is_software: false

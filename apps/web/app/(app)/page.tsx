@@ -210,7 +210,7 @@ function SetupCard({ hasResume, hasAnyJobs }: { hasResume: boolean; hasAnyJobs: 
         {hasAnyJobs ? "One more step" : "Welcome to Scout"}
       </h2>
       <p className="text-body text-text-secondary mt-1">
-        Scout finds internship and new-grad software roles, ranks them against your profile, and notifies you about the
+        Scout finds internship and new-grad roles across software, product, consulting, and business, ranks them against your profile, and notifies you about the
         ones worth your time. Two things make that work:
       </p>
       <ol className="mt-4 space-y-3">

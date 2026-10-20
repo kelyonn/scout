@@ -12,7 +12,7 @@
 --     noted, rated, notified. Protection is by group, so every member of a
 --     protected group is kept whole.
 --   * Compaction never touches the notifier's inputs (status, priority,
---     notified_at, is_software, paid, ...), so it cannot create or suppress a
+--     notified_at, in_scope, paid, ...), so it cannot create or suppress a
 --     notification (rule 3).
 --   * Only dedup-input columns are cleared, and clearing them can only make
 --     Stage 2/3 find fewer matches, i.e. under-merge (rule 4).
@@ -20,9 +20,11 @@
 -- name: CompactColdJobs :execrows
 -- A job is cold when nothing will read its bulky columns again:
 --   * closed/expired/filled for longer than closed_grace_secs;
---   * not a software role (never shown in the feed — feed.sql hard-filters
---     is_software) and older than irrelevant_grace_secs, which leaves recent
---     descriptions available for dedup and boilerplate learning;
+--   * out of scope entirely (never shown in the feed — feed.sql hard-filters
+--     in_scope; ADR-020 widened what's admitted beyond pure software, but a
+--     genuinely unmatched job is still never shown) and older than
+--     irrelevant_grace_secs, which leaves recent descriptions available for
+--     dedup and boilerplate learning;
 --   * still 'open' but first posted more than stale_open_age_secs ago —
 --     beyond the 45-day dedup window and with a near-zero freshness
 --     multiplier;
@@ -53,7 +55,7 @@ where id in (
         (j.status <> 'open'
             and coalesce(j.closed_at, j.last_seen_at)
             < now() - make_interval(secs => sqlc.arg(closed_grace_secs)::float8))
-        or (j.is_software = FALSE
+        or (j.in_scope = FALSE
             and j.first_seen_at
             < now() - make_interval(secs => sqlc.arg(irrelevant_grace_secs)::float8))
         or (j.status = 'open'
@@ -136,7 +138,7 @@ js.weight_version
         (j.status <> 'open'
             and coalesce(j.closed_at, j.last_seen_at)
             < now() - make_interval(secs => sqlc.arg(closed_grace_secs)::float8))
-        or (j.is_software = FALSE
+        or (j.in_scope = FALSE
             and j.first_seen_at
             < now() - make_interval(secs => sqlc.arg(irrelevant_grace_secs)::float8))
         or (j.status = 'open'

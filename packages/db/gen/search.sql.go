@@ -43,7 +43,7 @@ left join job_score as js on j.id = js.job_id
 left join user_job_state as ujs on jg.id = ujs.job_group_id
     and ujs.user_id = $2::uuid
 where j.status = 'open'
-    and j.is_software = TRUE
+    and j.in_scope = TRUE
     and (
         j.search_vector @@ websearch_to_tsquery('english', $1::text)
         or c.canonical_name ilike '%' || $1::text || '%'

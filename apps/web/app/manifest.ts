@@ -9,7 +9,7 @@ export default function manifest(): MetadataRoute.Manifest {
   return {
     name: "Scout",
     short_name: "Scout",
-    description: "Internship and new-grad software roles, found and ranked for you.",
+    description: "Internship and new-grad roles across software, product, consulting, and business, found and ranked for you.",
     start_url: "/",
     display: "standalone",
     background_color: "#eeede8",

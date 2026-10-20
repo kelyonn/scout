@@ -385,28 +385,36 @@ func (ns NullRiverJobState) Value() (driver.Value, error) {
 type RoleFamily string
 
 const (
-	RoleFamilySwegeneral        RoleFamily = "swe.general"
-	RoleFamilySwebackend        RoleFamily = "swe.backend"
-	RoleFamilySwefrontend       RoleFamily = "swe.frontend"
-	RoleFamilySwefullstack      RoleFamily = "swe.fullstack"
-	RoleFamilySwemobile         RoleFamily = "swe.mobile"
-	RoleFamilySweml             RoleFamily = "swe.ml"
-	RoleFamilySwemlresearch     RoleFamily = "swe.ml.research"
-	RoleFamilySwedata           RoleFamily = "swe.data"
-	RoleFamilySweinfra          RoleFamily = "swe.infra"
-	RoleFamilySweinfrasre       RoleFamily = "swe.infra.sre"
-	RoleFamilySweinfradevops    RoleFamily = "swe.infra.devops"
-	RoleFamilySweinfraplatform  RoleFamily = "swe.infra.platform"
-	RoleFamilySweinfracloud     RoleFamily = "swe.infra.cloud"
-	RoleFamilySwesystems        RoleFamily = "swe.systems"
-	RoleFamilySwesecurity       RoleFamily = "swe.security"
-	RoleFamilySweembedded       RoleFamily = "swe.embedded"
-	RoleFamilySweqa             RoleFamily = "swe.qa"
-	RoleFamilySweresearch       RoleFamily = "swe.research"
-	RoleFamilyAdvocacydevrel    RoleFamily = "advocacy.devrel"
-	RoleFamilyAdvocacydevex     RoleFamily = "advocacy.devex"
-	RoleFamilyAdvocacysolutions RoleFamily = "advocacy.solutions"
-	RoleFamilySweother          RoleFamily = "swe.other"
+	RoleFamilySwegeneral           RoleFamily = "swe.general"
+	RoleFamilySwebackend           RoleFamily = "swe.backend"
+	RoleFamilySwefrontend          RoleFamily = "swe.frontend"
+	RoleFamilySwefullstack         RoleFamily = "swe.fullstack"
+	RoleFamilySwemobile            RoleFamily = "swe.mobile"
+	RoleFamilySweml                RoleFamily = "swe.ml"
+	RoleFamilySwemlresearch        RoleFamily = "swe.ml.research"
+	RoleFamilySwedata              RoleFamily = "swe.data"
+	RoleFamilySweinfra             RoleFamily = "swe.infra"
+	RoleFamilySweinfrasre          RoleFamily = "swe.infra.sre"
+	RoleFamilySweinfradevops       RoleFamily = "swe.infra.devops"
+	RoleFamilySweinfraplatform     RoleFamily = "swe.infra.platform"
+	RoleFamilySweinfracloud        RoleFamily = "swe.infra.cloud"
+	RoleFamilySwesystems           RoleFamily = "swe.systems"
+	RoleFamilySwesecurity          RoleFamily = "swe.security"
+	RoleFamilySweembedded          RoleFamily = "swe.embedded"
+	RoleFamilySweqa                RoleFamily = "swe.qa"
+	RoleFamilySweresearch          RoleFamily = "swe.research"
+	RoleFamilyAdvocacydevrel       RoleFamily = "advocacy.devrel"
+	RoleFamilyAdvocacydevex        RoleFamily = "advocacy.devex"
+	RoleFamilyAdvocacysolutions    RoleFamily = "advocacy.solutions"
+	RoleFamilySweother             RoleFamily = "swe.other"
+	RoleFamilyProductmanagement    RoleFamily = "product.management"
+	RoleFamilyProductdesign        RoleFamily = "product.design"
+	RoleFamilyProductanalyst       RoleFamily = "product.analyst"
+	RoleFamilyConsultingstrategy   RoleFamily = "consulting.strategy"
+	RoleFamilyConsultingtechnology RoleFamily = "consulting.technology"
+	RoleFamilyBusinessstrategy     RoleFamily = "business.strategy"
+	RoleFamilyBusinessoperations   RoleFamily = "business.operations"
+	RoleFamilyBusinessgeneral      RoleFamily = "business.general"
 )
 
 func (e *RoleFamily) Scan(src interface{}) error {
@@ -789,6 +797,7 @@ type Job struct {
 	AiSummary              *string            `db:"ai_summary" json:"ai_summary"`
 	AiSummaryModel         *string            `db:"ai_summary_model" json:"ai_summary_model"`
 	AiSummaryGeneratedAt   pgtype.Timestamptz `db:"ai_summary_generated_at" json:"ai_summary_generated_at"`
+	InScope                bool               `db:"in_scope" json:"in_scope"`
 }
 
 type JobGroup struct {

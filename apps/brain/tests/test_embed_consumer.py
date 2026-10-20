@@ -179,10 +179,19 @@ def test_handle_revises_zero_confidence_job_via_tier1(embedder: Embedder, role_i
         consumer.handle(Job(id=1, kind="embed", queue="embed", attempt=1, max_attempts=25, args={"job_id": job_id}))
 
         with conn.cursor() as cur:
-            cur.execute("SELECT role_family, role_confidence FROM job WHERE id = %s", (job_id,))
-            role_family, role_confidence = fetchone(cur)
+            cur.execute(
+                "SELECT role_family, role_confidence, is_software, in_scope FROM job WHERE id = %s", (job_id,)
+            )
+            role_family, role_confidence, is_software, in_scope = fetchone(cur)
         assert role_family == "swe.general"
         assert role_confidence >= 0.72
+        # ADR-020's own regression guard: this fixture starts at Tier 0's
+        # swe.other fallback (is_software=False, in_scope=False) and must
+        # not stay there after Tier 1 promotes it to a real family — the
+        # exact bug this migration's backfill found 11 real rows already
+        # silently stuck in.
+        assert is_software is True
+        assert in_scope is True
     finally:
         _cleanup(conn, job_id)
         conn.close()

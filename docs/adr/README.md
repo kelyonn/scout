@@ -30,6 +30,7 @@ Use [`ADR-000-template.md`](ADR-000-template.md) for new records.
 | [017](ADR-017-tiered-backup-without-object-storage.md) | Back up by recoverability class, to storage already owned | Accepted |
 | [018](ADR-018-laptop-only-hosting.md) | Laptop-only hosting — no remote host, no Tailscale | **Superseded by 019** |
 | [019](ADR-019-cardless-hosted-pipeline.md) | Cardless hosted pipeline — Actions, Neon, Upstash, Render, Vercel | Accepted |
+| [020](ADR-020-expand-beyond-software-roles.md) | Expand beyond software engineering — Product, Consulting, Business | Accepted |
 
 ## The ₹0 group: 014–017
 

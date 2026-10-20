@@ -19,7 +19,7 @@ select
     c.company_type::text as company_type,
     w.notify_any_role,
     w.added_at,
-    count(j.id) filter (where j.status = 'open' and j.is_software = TRUE) as open_job_count
+    count(j.id) filter (where j.status = 'open' and j.in_scope = TRUE) as open_job_count
 from watchlist as w
 inner join company as c on w.company_id = c.id
 left join job as j on w.company_id = j.company_id

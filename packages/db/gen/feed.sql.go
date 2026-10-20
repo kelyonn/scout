@@ -46,7 +46,7 @@ left join job_score as js on j.id = js.job_id
 left join user_job_state as ujs on jg.id = ujs.job_group_id
     and ujs.user_id = $1::uuid
 where j.status = 'open'
-    and j.is_software = TRUE
+    and j.in_scope = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and coalesce(js.priority, 0) >= 92))
     and (
         $3::text [] is NULL
@@ -134,9 +134,10 @@ type SelectJobFeedRow struct {
 //
 // Filters follow the same hard-eligibility pattern
 // packages/db/queries/notification.sql's SelectUnnotifiedJobGroups
-// established: is_software and status='open' are not optional (this
-// product is software internships/new-grad roles, full stop), the rest
-// are optional narg()s that pass through when NULL.
+// established: in_scope and status='open' are not optional (ADR-020 widened
+// what's in scope beyond pure software — product/consulting/business roles
+// now admit too — but an unmatched/excluded job never shows regardless), the
+// rest are optional narg()s that pass through when NULL.
 //
 // role_family/seniority/work_mode filters are cast through ::text[] then
 // ::role_family[]/::seniority[]/::work_mode[] rather than bound directly

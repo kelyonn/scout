@@ -27,7 +27,7 @@ returning id;
 
 -- name: SelectDigestOvernightJobs :many
 -- Same eligibility filter as SelectJobFeed (packages/db/queries/feed.sql):
--- is_software, open, paid-or-high-confidence-unknown. `since` is the
+-- in_scope, open, paid-or-high-confidence-unknown. `since` is the
 -- previous digest's 08:00 IST boundary, computed in Go.
 select
     jg.id as job_group_id,
@@ -44,7 +44,7 @@ left join job_score as js on j.id = js.job_id
     and js.user_id = sqlc.arg(user_id)::uuid
     and js.weight_version = sqlc.arg(weight_version)::text
 where j.status = 'open'
-    and j.is_software = TRUE
+    and j.in_scope = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and coalesce(js.priority, 0) >= 92))
     and jg.first_seen_at >= sqlc.arg(since)::timestamptz
 order by coalesce(js.priority, 0) desc
@@ -54,7 +54,7 @@ limit sqlc.arg(limit_)::int;
 select count(*) from job_group as jg
 inner join job as j on jg.representative_job_id = j.id
 where j.status = 'open'
-    and j.is_software = TRUE
+    and j.in_scope = TRUE
     and (j.paid = 'paid' or j.paid = 'unknown')
     and jg.first_seen_at >= sqlc.arg(since)::timestamptz;
 

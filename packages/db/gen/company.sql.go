@@ -31,7 +31,7 @@ select
     c.hq_country,
     c.quality_score,
     c.engineering_score,
-    count(j.id) filter (where j.status = 'open' and j.is_software = TRUE) as open_job_count
+    count(j.id) filter (where j.status = 'open' and j.in_scope = TRUE) as open_job_count
 from company as c
 left join job as j on c.id = j.company_id
 where c.id = $1::uuid
@@ -101,7 +101,7 @@ select
     c.quality_score,
     c.hq_city,
     c.hq_country,
-    count(j.id) filter (where j.status = 'open' and j.is_software = TRUE) as open_job_count
+    count(j.id) filter (where j.status = 'open' and j.in_scope = TRUE) as open_job_count
 from company as c
 inner join job as j on c.id = j.company_id
 where c.deleted_at is NULL
@@ -110,7 +110,7 @@ where c.deleted_at is NULL
         or c.normalized_name ilike '%' || $1::text || '%'
     )
 group by c.id
-having count(j.id) filter (where j.status = 'open' and j.is_software = TRUE) > 0
+having count(j.id) filter (where j.status = 'open' and j.in_scope = TRUE) > 0
 order by open_job_count desc, c.quality_score desc nulls last, c.canonical_name asc
 limit $2::int
 `

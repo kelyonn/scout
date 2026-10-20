@@ -8,8 +8,9 @@ import "time"
 // this type, and the caller converts at the insert boundary.
 type RoleFamily string
 
-// The 21 role_family enum values (infra/migrations/000002_enums.up.sql),
-// the docs/07 section 4 taxonomy's leaves plus its swe.other catch-all.
+// The 29 role_family enum values (infra/migrations/000002_enums.up.sql,
+// 000024_product_consulting_business_roles.up.sql), the docs/07 section 4
+// taxonomy's leaves plus its swe.other catch-all.
 const (
 	RoleSWEGeneral        RoleFamily = "swe.general"
 	RoleSWEBackend        RoleFamily = "swe.backend"
@@ -33,6 +34,16 @@ const (
 	RoleAdvocacyDevEx     RoleFamily = "advocacy.devex"
 	RoleAdvocacySolutions RoleFamily = "advocacy.solutions"
 	RoleSWEOther          RoleFamily = "swe.other"
+
+	// Beyond software (ADR-020) — all eight carry is_software: false.
+	RoleProductManagement    RoleFamily = "product.management"
+	RoleProductDesign        RoleFamily = "product.design"
+	RoleProductAnalyst       RoleFamily = "product.analyst"
+	RoleConsultingStrategy   RoleFamily = "consulting.strategy"
+	RoleConsultingTechnology RoleFamily = "consulting.technology"
+	RoleBusinessStrategy     RoleFamily = "business.strategy"
+	RoleBusinessOperations   RoleFamily = "business.operations"
+	RoleBusinessGeneral      RoleFamily = "business.general"
 )
 
 // Seniority mirrors the seniority enum.
@@ -97,8 +108,12 @@ type NormalizedJob struct {
 	RoleFamily     RoleFamily
 	RoleConfidence float32
 	Seniority      Seniority
-	IsSoftware     bool
-	Skills         []string // ontology IDs, docs/07 section 8
+	// IsSoftware is the literal signal (ADR-020) — false for product.*/
+	// consulting.*/business.* too, not the feed-admission gate. See InScope.
+	IsSoftware bool
+	// InScope is the feed-admission gate every surfacing query filters on.
+	InScope bool
+	Skills  []string // ontology IDs, docs/07 section 8
 
 	// Location (docs/07 section 6)
 	LocationRaw     string

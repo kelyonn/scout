@@ -92,8 +92,9 @@ func NewAssessor(fetcher *fetch.Fetcher, adapters map[padapter.SourceKind]padapt
 }
 
 // Assess fetches a candidate's board and classifies every posting on it,
-// reporting relevant=true the moment one posting is both software and
-// entry-level-ish. A 404 or empty board is not an error — it is a
+// reporting relevant=true the moment one posting is both in-scope (ADR-020
+// widened this beyond swe.*/advocacy.* to product.*/consulting.*/
+// business.* too) and entry-level-ish. A 404 or empty board is not an error — it is a
 // Result{Relevant: false}, the routine "this candidate doesn't pan out"
 // outcome discovery exists to filter for.
 func (a *Assessor) Assess(ctx context.Context, cand Candidate) (Result, error) {
@@ -128,7 +129,7 @@ func (a *Assessor) Assess(ctx context.Context, cand Candidate) (Result, error) {
 	for _, p := range postings {
 		normalizedTitle := normalize.NormalizeTitle(p.TitleRaw).Normalized
 		role := classify.ClassifyRole(normalizedTitle, p.DescriptionText, a.Roles, a.Skills)
-		if !role.IsSoftware {
+		if !role.InScope {
 			continue
 		}
 		seniority := classify.ResolveSeniority(p.TitleRaw, p.RequirementsText, p.EmploymentTypeRaw)
