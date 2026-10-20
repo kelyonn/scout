@@ -9,4 +9,4 @@ docker compose --env-file "${ENV_FILE:-.env}" -f infra/compose/local.yml \
 	exec -T postgres psql -v ON_ERROR_STOP=1 -U scout -d scout \
 	< infra/seed/careerpage_sources.sql
 
-echo "seeded: 12 direct career-site sources (sitemap + JSON-LD), status=pending_review"
+echo "seeded: 14 direct career-site sources (sitemap + JSON-LD, or html_page link-following), status=pending_review"
