@@ -867,31 +867,125 @@ transactionally where Postgres permits.
    job populates it. This keeps deploys fast and backfills resumable.
 
 **Partition maintenance**: create partitions three months ahead, detach and
-drop partitions older than six months. Implemented in
+drop partitions older than **two** months (originally six; shortened for the
+~0.5 GB hosted database, [ADR-019](adr/ADR-019-cardless-hosted-pipeline.md) —
+payloads are scrubbed after two *days* anyway, see section 11). A partition that
+still holds a row with no `processed_at`, no `job_id` and no `process_error` is
+kept and logged rather than dropped. Implemented in
 `apps/collector/internal/scheduler/partitions.go`
 (`Scheduler.MaintainRawObservationPartitions`), run once at collector startup
-and every `PartitionMaintenanceInterval` (6h) after that — not strictly
-nightly, since ADR-018's on-demand sessions are often shorter than 24h and a
-ticker-only schedule could go long stretches without ever actually firing.
-The "after verifying the snapshot archive" language in earlier drafts of this
-section predates ADR-017: `raw_observation` is Bulk-class there, covered only
-by the nightly whole-database dump, not backed up per-partition — see that
-function's own comment for the full reasoning.
+and every `PartitionMaintenanceInterval` (6h) after that, and once per `-once`
+cycle. The "after verifying the snapshot archive" language in earlier drafts of
+this section predates ADR-017: `raw_observation` is Bulk-class there, covered
+only by the nightly whole-database dump — see that function's own comment.
 
 ---
 
 ## 11. Capacity and retention
 
+Two sizings. The Year-1 table is the original plan for a host with an 80 GB
+disk. The **hosted** budget is Neon free, ~0.5 GB
+([ADR-019](adr/ADR-019-cardless-hosted-pipeline.md)), and it is a wall: writes
+fail at the limit. Retention below is what makes the second one hold.
+
 | Table | Rows @ Year 1 | Size estimate | Retention |
 | --- | --- | --- | --- |
-| `raw_observation` | ~55M | ~28 GB | 6 months (partition drop) |
-| `job` | ~250k | ~4 GB | Indefinite (soft delete) |
-| `job_score` | ~250k | ~200 MB | Current weight version + 1 |
+| `raw_observation` | ~55M | ~28 GB | Payload scrubbed after 2 days (row kept); partition dropped after 2 months |
+| `job` | ~250k | ~4 GB | Row kept forever; cold rows *compacted* (below) |
+| `job_score` | ~250k | ~200 MB | Current weight version + 1; `score_inputs` / `explanation` cleared for compacted-cold jobs |
 | `user_feedback` | ~50k | ~10 MB | Indefinite (training data) |
 | `llm_call` | ~500k | ~120 MB | 90 days |
 | `notification` | ~10k | ~5 MB | Indefinite |
-| River queue tables | ~50k live | ~50 MB | Completed rows pruned hourly |
-| **Total** | | **~33 GB** | Within the 80GB NVMe with room |
+| River queue tables | ~50k live | ~50 MB | Finished rows after 1 day; unclaimed rows after 7 days |
+
+### Measured growth (local database, one live day, 2026-10-17..20)
+
+The first live sweep ingested ~34k postings in about two hours; after that day
+the database was 1,132 MB. Per-table (total incl. indexes and TOAST): `job`
+805 MB (TOAST 720 MB, GIN `search_vector` 42 MB), `raw_observation_2026_10`
+204 MB (payload 160 MB), `job_score` 77 MB, `river_job` 26 MB (71k rows, 70k of
+them never claimed), `job_group` 5.6 MB. Per posting that is ~24 KB in `job`
+(description_html ~3.4 KB, description_text ~3.1 KB, raw_payload ~4.5 KB,
+search_vector ~4.6 KB, plus stripped text and embedding), ~6 KB in
+`raw_observation`, ~2.2 KB in `job_score`. 79% of postings were not software
+roles, which the feed never shows (`feed.sql` hard-filters `is_software`).
+
+This is a **burst**, not a daily rate: ~99% of the rows arrived in one sweep, so
+per-day growth cannot be read from it. The steady-state rate (new postings per
+day) must be re-measured after a week; the hot set below scales with it.
+
+### Retention rules (`apps/collector/internal/scheduler/retention.go`)
+
+Run on every maintenance pass: each `-once` cycle, and every 6 h in the
+long-running collector. DB-only, idempotent, batched (2,000 rows per statement),
+opt-in via `Scheduler.WithRetention`. Queries: `packages/db/queries/retention.sql`;
+supporting indexes and autovacuum settings: migration `000023_retention`.
+
+**Compaction, not deletion.** A *cold* job has `description_html`,
+`description_text`, `description_stripped`, `requirements_text`, `embedding` and
+`raw_payload` cleared. The row stays, with `canonical_url_hash`, `simhash`,
+`normalized_title`, classification, `job_group_id` and `job_merge_event` history,
+so a re-observed posting resolves to the same job and the same `job_group` and
+cannot be notified twice (AGENTS.md rule 2). No `job` or `job_group` row is ever
+deleted. Cold means any of:
+
+- `status <> 'open'` for more than 3 days;
+- not a software role and first seen more than 1 hour ago (never displayed);
+- still open but first posted more than 45 days ago (past the dedup window);
+- not seen on its source for 14 days.
+
+`job.raw_payload` is write-only (nothing reads it back) and is cleared from every
+unprotected job after 1 day, hot ones included.
+
+**Protected.** Any job whose `job_group` has a `user_job_state`,
+`user_job_state_event`, `notification` or `google_calendar_event` row is never
+touched: saved, applied, noted, rated, notified and calendared opportunities
+stay whole. Protection is by *group*, so a saved opportunity's other source
+listings are kept too. A test asserts this and that groups, jobs and notes
+survive.
+
+**Rules 3 and 4.** Retention writes no `status`, `priority`, `notified_at`,
+`is_software` or `paid` column, so it cannot create or suppress a notification.
+Everything it clears is dedup *input*; clearing input can only make Stage 2/3
+find fewer matches, i.e. under-merge, which is the safe direction. Compacted
+jobs keep `simhash`, so Stage 2 still sees them.
+
+**`raw_observation`.** Payloads of processed rows older than 2 days are set to
+`'{}'` but the *rows are kept*: `(source_id, content_hash)` per monthly
+partition is the idempotency key (migration 000005), and deleting rows would let
+unchanged content re-insert and re-run the pipeline on the next poll. Whole
+partitions are dropped after 2 months. Consequence: reprocessing from
+observations only works for the last ~2 days; older data cannot be backfilled
+from the audit log.
+
+**Queue.** `river_job` rows completed/cancelled/discarded for more than 1 day
+are deleted (the insert-only client in `-once` mode runs no River cleaner), and
+rows unclaimed after 7 days (embed, deep-classify) are deleted: they are
+best-effort enrichment with a degraded mode (rule 6).
+
+**Size guard.** Above 380 MB (`RetentionHighWaterBytes`) the run switches to
+`Aggressive()` windows (no grace periods, 30-day stale-open, 1-hour observation
+payloads) and logs a warning; above 300 MB after a run it warns that the
+database is near the free-tier limit.
+
+### Measured result
+
+Same database cloned, migration applied, then retention run with the default
+windows, timestamps aged to simulate the day-three steady state, and `VACUUM
+FULL` (plain vacuum reuses space but does not shrink files, and Neon bills file
+size):
+
+| | Before | After |
+| --- | --- | --- |
+| Database | 1,219 MB | **201 MB** |
+| `job` (38k rows; 5.2k hot, rest compacted) | 805 MB | 144 MB |
+| `raw_observation_2026_10` | 216 MB | 19 MB |
+| `job_score` | 77 MB | 19 MB |
+| `river_job` | 27 MB | 0.1 MB |
+
+The hot set (open software postings within 45 days) is the remaining term:
+~25 KB each. 200 MB leaves room for roughly 8k more hot postings before the
+400 MB target; see R39 in [20](20-risks.md).
 
 **The vacuum consideration.** Queue tables and `job_score` are high-churn. Both
 get per-table autovacuum tuning:
