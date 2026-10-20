@@ -9,6 +9,7 @@ package adapter
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/kelyon/scout/packages/fetch"
@@ -54,6 +55,14 @@ const SourceKindKeka SourceKind = "ats_keka"
 // boards — docs/05 section 2 rates Zoho Recruit "Low effort," "common at
 // Indian SMBs."
 const SourceKindZohoRecruit SourceKind = "ats_zohorecruit"
+
+// SourceKindSitemap is the source_kind enum value for career sites that
+// publish their job URLs in a sitemap.xml (docs/05 section 3, method 3).
+const SourceKindSitemap SourceKind = "sitemap"
+
+// SourceKindHTMLPage is the source_kind enum value for a career page whose
+// jobs are published as schema.org JSON-LD (docs/05 section 3, method 2).
+const SourceKindHTMLPage SourceKind = "html_page"
 
 // FetchHints carries the previous poll's conditional-request validators,
 // mirroring fetch.Request's own fields — an adapter's Fetch translates
@@ -102,6 +111,30 @@ type Source struct {
 	ID            string
 	URL           string
 	AdapterConfig map[string]any // board token and other per-source overrides
+
+	// Gate clears every request an OwnFetcher adapter makes beyond the first.
+	// The scheduler has already passed PolitenessGate.Allow for Source.URL
+	// itself; an adapter that goes on to fetch other URLs (a sitemap's job
+	// pages) must call Gate.Allow before each one — AGENTS.md rule 1. Nil
+	// means "no clearance available", and such an adapter must fail closed
+	// rather than fetch.
+	Gate RequestGate
+}
+
+// ErrRequestRefused is returned by RequestGate.Allow when the politeness gate
+// refuses a request outright (robots.txt disallows the path, the source is
+// not permitted). It is terminal for that URL: skip it, do not retry.
+var ErrRequestRefused = errors.New("request refused by politeness gate")
+
+// RequestGate is the politeness gate as an adapter sees it: one call per
+// outbound request, for a URL on the source's own registered domain.
+type RequestGate interface {
+	// Allow blocks until the request may proceed (waiting out rate-limit and
+	// crawl-delay deferrals), then returns a release func the caller must
+	// invoke exactly once after the request completes. It returns an error
+	// wrapping ErrRequestRefused for a terminal refusal, or another error if
+	// the context ends or the source's circuit is open.
+	Allow(ctx context.Context, rawURL string) (release func(context.Context), err error)
 }
 
 // Adapter is docs/06 section 8's interface, verbatim.

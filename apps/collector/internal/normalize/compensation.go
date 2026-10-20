@@ -54,12 +54,18 @@ var (
 	)
 	vaguePositivePattern = regexp.MustCompile(`(?i)competitive (?:stipend|salary|pay|compensation)|\bpaid internship\b|stipend provided`)
 	unpaidPattern        = regexp.MustCompile(`(?i)\bunpaid\b|no stipend|for academic credit only|\bvolunteer\b`)
-	currencySymbolINR    = regexp.MustCompile(`₹|\brs\.?\b|\binr\b`)
-	currencySymbolUSD    = regexp.MustCompile(`\$|\busd\b`)
-	monthlyWord          = regexp.MustCompile(`(?i)\b(month|mo|monthly)\b`)
-	yearlyWord           = regexp.MustCompile(`(?i)\b(year|yr|annum|annual|lpa)\b`)
-	hourlyWord           = regexp.MustCompile(`(?i)\b(hour|hr|hourly)\b`)
-	weeklyWord           = regexp.MustCompile(`(?i)\b(week|weekly)\b`)
+	// Case-insensitive: structured sources (JSON-LD baseSalary, via
+	// adapters/web/careerpage) write the ISO code uppercase, "INR 800000",
+	// which a lowercase-only pattern silently missed.
+	currencySymbolINR = regexp.MustCompile(`(?i)₹|\brs\.?\b|\binr\b`)
+	// lakh/crore/LPA are Indian-only notation: no other market writes
+	// "8-12 LPA", so the unit itself identifies the currency.
+	indianUnitWord    = regexp.MustCompile(`(?i)\b(?:lpa|lakhs?|lacs?|crores?)\b`)
+	currencySymbolUSD = regexp.MustCompile(`\$|\busd\b`)
+	monthlyWord       = regexp.MustCompile(`(?i)\b(month|mo|monthly)\b`)
+	yearlyWord        = regexp.MustCompile(`(?i)\b(year|yr|annum|annual|lpa)\b`)
+	hourlyWord        = regexp.MustCompile(`(?i)\b(hour|hr|hourly)\b`)
+	weeklyWord        = regexp.MustCompile(`(?i)\b(week|weekly)\b`)
 )
 
 // ParseCompensation implements docs/07 section 7's extraction ladder. text
@@ -309,7 +315,7 @@ func canonicalPeriod(separator, word string) string {
 
 func detectCurrency(text string) string {
 	switch {
-	case currencySymbolINR.MatchString(text):
+	case currencySymbolINR.MatchString(text), indianUnitWord.MatchString(text):
 		return "INR"
 	case currencySymbolUSD.MatchString(text):
 		return "USD"

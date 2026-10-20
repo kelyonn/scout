@@ -478,6 +478,7 @@ func (s *Scheduler) fetchResult(ctx context.Context, row db.SelectDueSourcesRow,
 				if err != nil {
 					return nil, fmt.Errorf("build adapter source: %w", err)
 				}
+				adapterSrc.Gate = NewRequestGate(s.gate, src)
 				raw, err := ad.Fetch(ctx, adapterSrc, padapter.FetchHints{
 					IfNoneMatch:     derefStr(row.LastEtag),
 					IfModifiedSince: derefStr(row.LastModified),
