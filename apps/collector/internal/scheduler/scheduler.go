@@ -102,6 +102,10 @@ type Scheduler struct {
 	// shadowBatchLimit bounds one ReviewShadowSources pass, same reasoning
 	// as batchLimit for RunOnce.
 	shadowBatchLimit int32
+	// retention is nil until WithRetention is called. Retention rewrites and
+	// deletes data, so it is opt-in: tests and tools that construct a
+	// Scheduler against a shared database never run it by accident.
+	retention *RetentionConfig
 	// now is MaintainRawObservationPartitions's clock — overridable for
 	// tests, same pattern as apps/notifier/internal/digest's Generator.now,
 	// for the same reason that file's own comment gives: a partition-window
@@ -141,6 +145,11 @@ func New(pool *pgxpool.Pool, gate Gate, fetcher Fetcher, log *slog.Logger) *Sche
 // WithNow overrides the clock MaintainRawObservationPartitions uses —
 // test-only, the same reasoning as WithShadowBatchLimit's own comment.
 func (s *Scheduler) WithNow(now func() time.Time) *Scheduler { s.now = now; return s }
+
+// WithRetention enables bounded data retention (retention.go) as part of the
+// maintenance pass, in both RunMaintenance and RunMaintenanceOnce. Not enabled
+// by default: it clears bulky columns on cold rows.
+func (s *Scheduler) WithRetention(cfg RetentionConfig) *Scheduler { s.retention = &cfg; return s }
 
 // WithQueue enables enqueueing embed jobs for apps/brain to consume. Without
 // it, new jobs are written exactly as WithPipeline alone already does, just
@@ -248,6 +257,7 @@ func (s *Scheduler) runShadowReview(ctx context.Context) {
 }
 
 func (s *Scheduler) runPartitionMaintenance(ctx context.Context) {
+	defer s.runRetention(ctx)
 	created, dropped, err := s.MaintainRawObservationPartitions(ctx)
 	if err != nil {
 		s.log.Warn("partition maintenance failed", "err", err)
@@ -255,6 +265,18 @@ func (s *Scheduler) runPartitionMaintenance(ctx context.Context) {
 	}
 	if created > 0 || dropped > 0 {
 		s.log.Info("partition maintenance", "created", created, "dropped", dropped)
+	}
+}
+
+// runRetention is the bounded-retention pass (retention.go). It rides the same
+// DB-only maintenance hook as partition upkeep, so it runs in both the
+// long-running loop and -once mode.
+func (s *Scheduler) runRetention(ctx context.Context) {
+	if s.retention == nil {
+		return
+	}
+	if _, err := s.RunRetention(ctx); err != nil {
+		s.log.Warn("retention failed", "err", err)
 	}
 }
 

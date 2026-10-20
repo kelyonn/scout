@@ -209,7 +209,11 @@ func TestDropExpiredPartitions_OnlyTouchesWhatsPassedIn(t *testing.T) {
 // not by luck, regardless of what a shared database actually has stored.
 func TestMaintainRawObservationPartitions_RealClockTouchesNothingUnexpected(t *testing.T) {
 	pool := testPool(t)
-	s := New(pool, nil, nil, testLogger()).WithNow(func() time.Time { return time.Now().UTC() })
+	// Pinned clock: retention is two months, so against the real clock the
+	// empty pre-created 2026-08 partition becomes droppable in due course.
+	s := New(pool, nil, nil, testLogger()).WithNow(func() time.Time {
+		return time.Date(2026, time.October, 20, 0, 0, 0, 0, time.UTC)
+	})
 
 	created, dropped, err := s.MaintainRawObservationPartitions(context.Background())
 	if err != nil {
@@ -219,7 +223,7 @@ func TestMaintainRawObservationPartitions_RealClockTouchesNothingUnexpected(t *t
 		t.Errorf("created = %d, want 0 — infra/migrations/000005 already covers the real ahead-window", created)
 	}
 	if dropped != 0 {
-		t.Errorf("dropped = %d, want 0 — nothing real is 6 months past retention yet", dropped)
+		t.Errorf("dropped = %d, want 0 — nothing real is 2 months past retention at the pinned date", dropped)
 	}
 }
 

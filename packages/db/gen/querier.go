@@ -41,6 +41,43 @@ type Querier interface {
 	// apps/collector/internal/politeness's concurrency slots have via their Redis
 	// TTL, applied here via a column this table already had.
 	ClaimSources(ctx context.Context, arg ClaimSourcesParams) error
+	// job.raw_payload is write-only: the ingest path stores the adapter's output on
+	// insert and nothing reads it back (it duplicates the description columns and
+	// the raw_observation payload, ~4.5 KB per job). It is cleared from every
+	// unprotected job after max_age_secs, hot ones included, so the hot set carries
+	// only what the feed and detail page render.
+	ClearOldJobRawPayload(ctx context.Context, arg ClearOldJobRawPayloadParams) (int64, error)
+	// Bounded retention — docs/03-data-model.md section 11, ADR-019.
+	// apps/collector/internal/scheduler/retention.go owns the orchestration.
+	//
+	// Hard invariants, enforced in SQL rather than by caller discipline:
+	//   * No job_group, job, user_job_state, notification or note row is ever
+	//     deleted here. Jobs are COMPACTED (bulky nullable columns cleared); the
+	//     row, its canonical_url_hash, simhash, group membership and merge
+	//     history stay, so a re-observed posting still lands on the same job and
+	//     the same job_group, and notification dedup (rule 2) is untouched.
+	//   * A job whose group has ANY user_job_state / user_job_state_event /
+	//     notification / google_calendar_event row is protected: saved, applied,
+	//     noted, rated, notified. Protection is by group, so every member of a
+	//     protected group is kept whole.
+	//   * Compaction never touches the notifier's inputs (status, priority,
+	//     notified_at, is_software, paid, ...), so it cannot create or suppress a
+	//     notification (rule 3).
+	//   * Only dedup-input columns are cleared, and clearing them can only make
+	//     Stage 2/3 find fewer matches, i.e. under-merge (rule 4).
+	// A job is cold when nothing will read its bulky columns again:
+	//   * closed/expired/filled for longer than closed_grace_secs;
+	//   * not a software role (never shown in the feed — feed.sql hard-filters
+	//     is_software) and older than irrelevant_grace_secs, which leaves recent
+	//     descriptions available for dedup and boilerplate learning;
+	//   * still 'open' but first posted more than stale_open_age_secs ago —
+	//     beyond the 45-day dedup window and with a near-zero freshness
+	//     multiplier;
+	//   * not seen on its source for unseen_age_secs.
+	// Batched by the caller (batch_size) so one statement never holds a long
+	// transaction against the hosted database; order by first_seen_at makes
+	// successive batches deterministic.
+	CompactColdJobs(ctx context.Context, arg CompactColdJobsParams) (int64, error)
 	// A cheap health signal for the scheduler's own startup log: how large is the
 	// pool it is about to start polling. Not a substitute for the yield and
 	// latency metrics docs/16-observability.md specifies, which arrive with the
@@ -52,6 +89,9 @@ type Querier interface {
 	// never reached the user and must not count against their budget.
 	CountDeliveriesSince(ctx context.Context, arg CountDeliveriesSinceParams) (int64, error)
 	CountDigestEligibleJobsSince(ctx context.Context, since pgtype.Timestamptz) (int64, error)
+	// Completed/cancelled/discarded River rows are history; River's own cleaner
+	// would do this, but the insert-only client in -once mode never runs one.
+	DeleteFinalizedQueueJobs(ctx context.Context, arg DeleteFinalizedQueueJobsParams) (int64, error)
 	DeleteGoogleCalendarCredential(ctx context.Context, userID pgtype.UUID) error
 	// Run on disconnect — the stored google_event_id values are meaningless
 	// once the credential that could act on them is gone, and keeping them
@@ -59,6 +99,11 @@ type Querier interface {
 	// Google account gets connected next.
 	DeleteGoogleCalendarEventsForUser(ctx context.Context, userID pgtype.UUID) error
 	DeleteJobGroup(ctx context.Context, id pgtype.UUID) error
+	// Work that has waited longer than max_age_secs without being claimed is moot:
+	// embeddings and Stage 3 adjudication are best-effort enrichment with a
+	// degraded mode (rule 6), and the job they target has aged out of the
+	// freshness window. Deleting never loses user data.
+	DeleteStaleQueueJobs(ctx context.Context, arg DeleteStaleQueueJobsParams) (int64, error)
 	// The daily digest — docs/11-notifications.md section 6.5, docs/19-roadmap.md's
 	// P3 "Daily digest at 08:00 IST to Telegram." Every query here is scoped to
 	// the sole user (ADR-015) and takes an explicit `since`/window boundary
@@ -332,6 +377,14 @@ type Querier interface {
 	RescheduleSource(ctx context.Context, arg RescheduleSourceParams) error
 	// docs/06 section 10: three consecutive 404s means the board is gone.
 	RetireSource(ctx context.Context, id pgtype.UUID) error
+	// raw_observation is an audit log; its payload is only needed to reprocess
+	// recent data. The ROW is kept: (source_id, content_hash) is the idempotency
+	// key (migration 000005), so removing rows would let unchanged content
+	// re-insert on the next poll and re-run the whole pipeline for it. Clearing
+	// the payload keeps that guarantee and the staleness signal (observed_at,
+	// canonical_url_hash, job_id). Rows not yet processed or errored are kept
+	// whole: the observation is still the only copy of its data.
+	ScrubOldObservationPayloads(ctx context.Context, arg ScrubOldObservationPayloadsParams) (int64, error)
 	// GET /v1/search — docs/04-api-design.md section 4.2. Keyword mode only:
 	// `mode=semantic`/`hybrid` need a query embedding, which means an
 	// embedding-service round trip apps/brain (Python) currently owns, and
@@ -389,6 +442,7 @@ type Querier interface {
 	// trivial enough that computing it in Go (computeCompensation's caller)
 	// is simpler than fighting that in SQL.
 	SelectCompensationPercentileExact(ctx context.Context, arg SelectCompensationPercentileExactParams) (SelectCompensationPercentileExactRow, error)
+	SelectDatabaseSizeBytes(ctx context.Context) (int64, error)
 	// docs/11 section 2's deadline_approaching trigger, split at the schema
 	// level into deadline_t72h/deadline_t24h (infra/migrations/000016 — see
 	// its own comment for why two trigger values rather than one). "Tracked"
@@ -581,6 +635,12 @@ type Querier interface {
 	// of creating a new one — bumps last_seen_at without touching member_count,
 	// since it's the same job, not an additional one merged in.
 	TouchJobGroup(ctx context.Context, id pgtype.UUID) error
+	// job_score.score_inputs (~1.7 KB) and explanation are an audit/explainer
+	// for rows a user can actually see. Scores of compacted-cold jobs are not
+	// shown, and a rescore rebuilds them. The numeric score columns and priority
+	// stay, so ordering and the (job, user, weight_version) key are untouched.
+	// Same cold + unprotected definition as CompactColdJobs; keep them in sync.
+	TrimColdJobScores(ctx context.Context, arg TrimColdJobScoresParams) (int64, error)
 	// Called after a refresh-token round trip, which never returns a new
 	// refresh_token (Google only issues one on initial consent) — only
 	// access_token/token_expiry change here, deliberately narrower than
