@@ -426,3 +426,17 @@ func TestUpdateSourceAfterPoll_YieldRatioTracksRecentPolls(t *testing.T) {
 		t.Errorf("yield_ratio = %v, want >= 0", afterEmpty)
 	}
 }
+
+func TestRunUntilIdleStopsWhenContextDone(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	// nil pool: a done context must return before RunOnce ever touches the
+	// database, which is the bound that keeps a scheduled CI run finite.
+	s := New(nil, &fakeGate{}, &fakeFetcher{}, testLogger())
+
+	n, err := s.RunUntilIdle(ctx)
+	if err != nil || n != 0 {
+		t.Fatalf("RunUntilIdle on cancelled ctx = (%d, %v), want (0, nil)", n, err)
+	}
+}

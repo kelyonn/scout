@@ -350,6 +350,7 @@ jobs:
           SCOUT_BRAIN_GEMINI_API_KEY: ${{ secrets.SCOUT_BRAIN_GEMINI_API_KEY }}
           SCOUT_BRAIN_GROQ_API_KEY: ${{ secrets.SCOUT_BRAIN_GROQ_API_KEY }}
           SCOUT_BRAIN_OPENROUTER_API_KEY: ${{ secrets.SCOUT_BRAIN_OPENROUTER_API_KEY }}
+          SCOUT_BRAIN_NVIDIA_API_KEY: ${{ secrets.SCOUT_BRAIN_NVIDIA_API_KEY }}
         run: make evals
 
   sql-lint:

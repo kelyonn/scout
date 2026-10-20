@@ -245,6 +245,36 @@ func (s *Scheduler) RunMaintenance(ctx context.Context) {
 	}
 }
 
+// RunMaintenanceOnce runs the same upkeep as RunMaintenance exactly once and
+// returns, for externally scheduled invocations (docs/adr/ADR-019).
+func (s *Scheduler) RunMaintenanceOnce(ctx context.Context) {
+	s.runPartitionMaintenance(ctx)
+	s.runShadowReview(ctx)
+}
+
+// RunUntilIdle calls RunOnce repeatedly until a call claims nothing (no
+// source is due) or ctx is done, returning the total claimed. A failed
+// RunOnce is returned only if nothing had been claimed yet; later errors are
+// logged, since work already done must not be reported as a failed run.
+func (s *Scheduler) RunUntilIdle(ctx context.Context) (int, error) {
+	total := 0
+	for ctx.Err() == nil {
+		n, err := s.RunOnce(ctx)
+		if err != nil {
+			if total == 0 {
+				return 0, err
+			}
+			s.log.Warn("scheduler pass failed", "err", err)
+			return total, nil
+		}
+		if n == 0 {
+			break
+		}
+		total += n
+	}
+	return total, nil
+}
+
 func (s *Scheduler) runShadowReview(ctx context.Context) {
 	n, err := s.ReviewShadowSources(ctx)
 	if err != nil {

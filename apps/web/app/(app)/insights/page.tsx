@@ -5,8 +5,6 @@ import { fetchApplications, fetchJobs } from "@/lib/api";
 import { EmptyState, ErrorNotice, PageHeader, Skeleton } from "@/components/ui";
 import { formatRoleFamily } from "@/lib/taxonomy";
 
-const SENIORITY_FILTER = ["internship", "new_grad", "entry", "unknown"];
-
 function Bar({ label, count, total, color }: { label: string; count: number; total: number; color: string }) {
   const pct = total > 0 ? (count / total) * 100 : 0;
   return (
@@ -42,8 +40,8 @@ function topN<T extends string>(counts: Record<T, number>, n: number): [T, numbe
 // this is the honest subset that's free with data already in hand.
 export default function InsightsPage() {
   const jobsQuery = useQuery({
-    queryKey: ["jobs", SENIORITY_FILTER, "insights"],
-    queryFn: () => fetchJobs({ minPriority: 1, seniority: SENIORITY_FILTER, limit: 100 }),
+    queryKey: ["jobs", "insights"],
+    queryFn: () => fetchJobs({ minPriority: 1, limit: 100 }),
   });
   const applicationsQuery = useQuery({
     queryKey: ["applications"],
