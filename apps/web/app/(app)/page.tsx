@@ -14,7 +14,6 @@ import { NavIcon } from "@/components/NavIcon";
 import { ErrorNotice, Skeleton } from "@/components/ui";
 import type { ApplicationItem } from "@/lib/types";
 
-const SENIORITY_FILTER = ["internship", "new_grad", "entry", "unknown"];
 const STALE_DAYS = 14;
 const WEEK_MS = 7 * 86_400_000;
 
@@ -267,9 +266,11 @@ function StepMark({ done }: { done: boolean }) {
 }
 
 export default function HomePage() {
+  // No seniority filter — the point of "new since you last looked" is
+  // everything new, not just the internship/new-grad slice.
   const jobsQuery = useQuery({
-    queryKey: ["jobs", SENIORITY_FILTER, "home"],
-    queryFn: () => fetchJobs({ minPriority: 1, seniority: SENIORITY_FILTER, limit: 6 }),
+    queryKey: ["jobs", "home"],
+    queryFn: () => fetchJobs({ minPriority: 1, limit: 6 }),
   });
 
   const applicationsQuery = useQuery({

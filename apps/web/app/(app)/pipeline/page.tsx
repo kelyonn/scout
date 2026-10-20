@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { fetchApplications } from "@/lib/api";
 import { StateMenu } from "@/components/StateMenu";
 import { EmptyState, ErrorNotice, PageHeader, Skeleton } from "@/components/ui";
-import { PIPELINE_COLUMNS, STATE_LABEL } from "@/lib/stateMachine";
+import { PIPELINE_COLUMNS, STATE_LABEL, pipelineDropTarget } from "@/lib/stateMachine";
+import { useJobActions } from "@/lib/useJobActions";
 import type { ApplicationItem } from "@/lib/types";
 
 const STALE_DAYS = 14;
@@ -23,13 +25,36 @@ function staleNudge(item: ApplicationItem): string | null {
   return `${STATE_LABEL[item.state]} ${days} days ago — no response. Follow up?`;
 }
 
-function PipelineCard({ item }: { item: ApplicationItem }) {
+function PipelineCard({
+  item,
+  dragging,
+  onDragStart,
+  onDragEnd,
+}: {
+  item: ApplicationItem;
+  dragging: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
   const nudge = staleNudge(item);
   return (
-    <article className="rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-4">
+    <article
+      // Drag is a desktop convenience; the StateMenu below is the accessible
+      // path (keyboard, screen reader, touch).
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", item.job_group_id);
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      className={`rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-4 sm:cursor-grab active:cursor-grabbing transition-opacity duration-100 ${
+        dragging ? "opacity-40" : ""
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
         <h3 className="min-w-0 text-[13px] font-semibold text-text-primary truncate">
-          <Link href={`/opportunities/${item.job_group_id}`} className="hover:text-accent-primary transition-colors duration-100">
+          <Link href={`/opportunities/${item.job_group_id}`} draggable={false} className="hover:text-accent-primary transition-colors duration-100">
             {item.title}
           </Link>
         </h3>
@@ -61,6 +86,9 @@ export default function PipelinePage() {
   });
 
   const items = data?.data ?? [];
+  const actions = useJobActions();
+  const [dragged, setDragged] = useState<ApplicationItem | null>(null);
+  const [overColumn, setOverColumn] = useState<string | null>(null);
 
   return (
     <div className="page">
@@ -93,15 +121,48 @@ export default function PipelinePage() {
             const colItems = items
               .filter((it) => col.states.includes(it.state))
               .sort((a, b) => new Date(b.state_changed_at).getTime() - new Date(a.state_changed_at).getTime());
+            const droppable = dragged !== null && pipelineDropTarget(dragged.state, col.label) !== null;
             return (
-              <section key={col.label} aria-label={col.label} className="w-[82vw] sm:w-80 shrink-0 snap-start">
+              <section
+                key={col.label}
+                aria-label={col.label}
+                onDragOver={(e) => {
+                  if (!dragged || !droppable) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (overColumn !== col.label) setOverColumn(col.label);
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverColumn(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const target = dragged ? pipelineDropTarget(dragged.state, col.label) : null;
+                  const moving = dragged;
+                  setDragged(null);
+                  setOverColumn(null);
+                  if (moving && target) void actions.move(moving.job_group_id, moving.state, target);
+                }}
+                className={`w-[82vw] sm:w-80 shrink-0 snap-start rounded-[var(--radius-card)] transition-colors duration-100 ${
+                  overColumn === col.label ? "bg-accent-subtle outline-2 outline-dashed outline-accent-primary/60 outline-offset-4" : ""
+                } ${dragged && !droppable && !col.states.includes(dragged.state) ? "opacity-50" : ""}`}
+              >
                 <div className="flex items-center justify-between mb-3 px-0.5">
                   <h2 className="text-label text-text-secondary">{col.label}</h2>
                   <span className="text-micro text-text-muted">{colItems.length}</span>
                 </div>
                 <div className="space-y-2.5">
                   {colItems.map((item) => (
-                    <PipelineCard key={item.job_group_id} item={item} />
+                    <PipelineCard
+                      key={item.job_group_id}
+                      item={item}
+                      dragging={dragged?.job_group_id === item.job_group_id}
+                      onDragStart={() => setDragged(item)}
+                      onDragEnd={() => {
+                        setDragged(null);
+                        setOverColumn(null);
+                      }}
+                    />
                   ))}
                   {colItems.length === 0 && (
                     <div className="text-micro text-text-muted rounded-[var(--radius-card)] border border-dashed border-border-subtle p-3 text-center">
