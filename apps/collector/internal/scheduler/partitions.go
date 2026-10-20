@@ -17,11 +17,14 @@ import (
 // reason (see Run's own comment).
 const PartitionMaintenanceInterval = 6 * time.Hour
 
-// partitionCreateAheadMonths and partitionRetentionMonths are docs/03
-// section 10's literal numbers.
+// partitionCreateAheadMonths is docs/03 section 10's number. Retention is
+// shorter than section 10's original six months: the free-tier database is
+// ~0.5 GB (ADR-019), payloads are scrubbed after days (retention.go), and the
+// scrubbed rows that remain still cost ~0.5 KB each. Two months comfortably
+// outlasts the 45-day dedup window and the monthly idempotency scope.
 const (
 	partitionCreateAheadMonths = 3
-	partitionRetentionMonths   = 6
+	partitionRetentionMonths   = 2
 )
 
 const (
@@ -181,6 +184,21 @@ func (s *Scheduler) dropExpiredPartitions(ctx context.Context, now time.Time, ex
 		}
 
 		table := pgx.Identifier{name}.Sanitize()
+
+		// Never drop the only copy of unprocessed data: a row with no job,
+		// no error and no processed_at has not been consumed yet.
+		var pending bool
+		if err := s.pool.QueryRow(ctx, fmt.Sprintf(
+			"select exists(select 1 from %s where processed_at is null and job_id is null and process_error is null)",
+			table,
+		)).Scan(&pending); err != nil {
+			return dropped, fmt.Errorf("check unprocessed rows in %s: %w", name, err)
+		}
+		if pending {
+			s.log.Warn("expired raw_observation partition kept: unprocessed rows remain", "partition", name)
+			continue
+		}
+
 		if _, err := s.pool.Exec(ctx, fmt.Sprintf(
 			"ALTER TABLE %s DETACH PARTITION %s", rawObservationTable, table,
 		)); err != nil {
