@@ -83,10 +83,22 @@ def _write_classification(
     confidence: float,
     is_software: bool,
 ) -> None:
+    # in_scope (ADR-020) tracks is_software exactly here, never
+    # independently: this consumer only ever resolves into the swe.*/
+    # advocacy.* space (its ROLE_FAMILIES list and prompt predate the
+    # product.*/consulting.*/business.* families, which get no
+    # technical-evidence gate and so never escalate here), and for every
+    # family in that space in_scope and is_software have always been the
+    # same value.
     with conn.cursor() as cur:
         cur.execute(
-            "UPDATE job SET role_family = %s, role_confidence = %s, is_software = %s, updated_at = now() WHERE id = %s",
-            (role_family, confidence, is_software, job_id),
+            """
+            UPDATE job
+            SET role_family = %s, role_confidence = %s,
+                is_software = %s, in_scope = %s, updated_at = now()
+            WHERE id = %s
+            """,
+            (role_family, confidence, is_software, is_software, job_id),
         )
     conn.commit()
 

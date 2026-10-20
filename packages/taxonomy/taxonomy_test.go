@@ -76,6 +76,28 @@ func TestLoadRolePatterns(t *testing.T) {
 	}
 }
 
+// TestLoadRolePatterns_IsSoftwareDefault is ADR-020's own correctness
+// requirement: a family with no `is_software` key in roles.yaml (every
+// swe.*/advocacy.* family declared before 2026-10-21) must default to true,
+// so none of those 20 blocks needed editing when the new non-software
+// families were added — and a family that explicitly sets `is_software:
+// false` must carry that value through, not the default.
+func TestLoadRolePatterns_IsSoftwareDefault(t *testing.T) {
+	families := LoadRolePatterns()
+
+	byName := make(map[string]RoleFamily, len(families))
+	for _, f := range families {
+		byName[f.FamilyName] = f
+	}
+
+	if sw, ok := byName["swe.backend"]; !ok || !sw.IsSoftware {
+		t.Errorf("swe.backend: IsSoftware = %v (ok=%v), want true (no is_software key, should default true)", sw.IsSoftware, ok)
+	}
+	if pm, ok := byName["product.management"]; !ok || pm.IsSoftware {
+		t.Errorf("product.management: IsSoftware = %v (ok=%v), want false (explicit is_software: false)", pm.IsSoftware, ok)
+	}
+}
+
 func TestLoadSkills(t *testing.T) {
 	skills := LoadSkills()
 	if len(skills) == 0 {

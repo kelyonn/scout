@@ -98,11 +98,11 @@ func insertSearchableJob(t *testing.T, pool *pgxpool.Pool, title, description st
 	err := pool.QueryRow(ctx, `
 		insert into job (
 			job_group_id, company_id, primary_source_id, canonical_url, canonical_url_hash,
-			content_hash, title, normalized_title, description_text, apply_url, is_software, paid, status,
+			content_hash, title, normalized_title, description_text, apply_url, is_software, in_scope, paid, status,
 			role_family, seniority, work_mode
 		) values (
 			$1::uuid, $2::uuid, $3::uuid, $4, $5,
-			$6, $7, $8, $9, $4, TRUE, 'paid', 'open',
+			$6, $7, $8, $9, $4, TRUE, TRUE, 'paid', 'open',
 			'swe.backend', 'internship', 'remote'
 		) returning id
 	`, groupID, companyID, sourceID, canonicalURL, canonicalHash[:], contentHash[:], title, title, description).Scan(&jobID)
@@ -270,11 +270,11 @@ func insertSearchableJobWithAttrs(t *testing.T, pool *pgxpool.Pool, title, roleF
 	err := pool.QueryRow(ctx, `
 		insert into job (
 			job_group_id, company_id, primary_source_id, canonical_url, canonical_url_hash,
-			content_hash, title, normalized_title, description_text, apply_url, is_software, paid, status,
+			content_hash, title, normalized_title, description_text, apply_url, is_software, in_scope, paid, status,
 			role_family, seniority, work_mode
 		) values (
 			$1::uuid, $2::uuid, $3::uuid, $4, $5,
-			$6, $7, $8, $9, $4, TRUE, 'paid', 'open',
+			$6, $7, $8, $9, $4, TRUE, TRUE, 'paid', 'open',
 			$10::role_family, $11::seniority, $12::work_mode
 		) returning id
 	`, groupID, companyID, sourceID, canonicalURL, canonicalHash[:], contentHash[:], title, title, "Filter test fixture.",

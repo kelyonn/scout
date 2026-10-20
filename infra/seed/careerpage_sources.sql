@@ -29,6 +29,22 @@
 --   Infosys / Microsoft / Cisco (no usable robots.txt or sitemap, or the
 --   robots response is a redirect).
 --
+-- ADR-020's Phase 2 (2026-10-21): probed for management/strategy consulting
+-- coverage, since zero such firms existed in any seed file before this pass.
+--   Seeded: BCG (below). Blocked by active bot-protection, not pursued per
+--   rule 1's "refuse over fetch" — McKinsey (Akamai challenge on every
+--   request), Bain (Cloudflare JS challenge). Needs a dedicated adapter, not
+--   this one — no JobPosting JSON-LD in the raw HTML despite a real sitemap:
+--   EY (careers.ey.com, Oracle-style ATS, 8,906 job URLs — the single
+--   largest candidate found, worth a dedicated adapter on its own), Kearney
+--   (kearney.recsolu.com, Yello Enterprise, fully client-rendered SPA).
+--   Inconclusive, needs a longer pass: Deloitte (apply.deloitte.com,
+--   Avature-backed — robots.txt and sitemap index resolve but the specific
+--   sitemap checked came back empty, likely a different path or needs
+--   authenticated/paginated discovery), Accenture Strategy, Oliver Wyman,
+--   KPMG Advisory, PwC Strategy&, ZS Associates, Tata Strategic Management
+--   Group — not reached in this pass, not investigated at all yet.
+--
 -- All rows are pending_review: a human promotes a source to active. Polling
 -- is gentle by construction — base interval 24h, 0.5 rps, 150 job pages per
 -- poll, and every request (not only the sitemap) passes PolitenessGate.Allow.
@@ -48,7 +64,8 @@ values
     ('sap', 'SAP', 'sap', 'product', 'heuristic', 'seed'),
     ('servicenow', 'ServiceNow', 'servicenow', 'product', 'heuristic', 'seed'),
     ('nutanix', 'Nutanix', 'nutanix', 'product', 'heuristic', 'seed'),
-    ('cognizant', 'Cognizant', 'cognizant', 'services_it', 'heuristic', 'seed')
+    ('cognizant', 'Cognizant', 'cognizant', 'services_it', 'heuristic', 'seed'),
+    ('bcg', 'Boston Consulting Group', 'boston consulting group', 'services_consulting', 'heuristic', 'seed')
 on conflict do nothing;
 
 insert into source (company_id, kind, url, url_hash, legal_posture, status, base_interval_s, max_rps, adapter_config, notes)
@@ -88,6 +105,9 @@ join (values
         'Sitemap with <lastmod>, JSON-LD on job pages. Verified live 2026-10-20 (8/8). 1/8 India (Bangalore) in sample; Nutanix has a large Bengaluru engineering office.'),
     ('cognizant', 'https://careers.cognizant.com/sitemap.xml',
         '{"url_include": "/india-en/jobs/[0-9]", "max_pages": 150}',
-        'Sitemap with <lastmod> (16,884 URLs, 2,088 under /india-en/jobs/). The locale prefix is the site language, NOT the job location — the sample returned Australian, US and Argentine roles. Verified live 2026-10-20 (12/12). 0 India in sample; kept because Cognizant India graduate hiring is large, but expect the location tiering to do the filtering.')
+        'Sitemap with <lastmod> (16,884 URLs, 2,088 under /india-en/jobs/). The locale prefix is the site language, NOT the job location — the sample returned Australian, US and Argentine roles. Verified live 2026-10-20 (12/12). 0 India in sample; kept because Cognizant India graduate hiring is large, but expect the location tiering to do the filtering.'),
+    ('bcg', 'https://careers.bcg.com/global/en/sitemap_index.xml',
+        '{"url_include": "/job/", "max_pages": 150}',
+        'ADR-020 Phase 2 — the first management-consulting source seeded. Phenom-hosted (same platform as adobe/hpe/mastercard above); sitemap index (2 children, 1059+ URLs incl. job/event/location pages), JobPosting JSON-LD on job pages, no <lastmod> at the index level so url_include is load-bearing to skip the event/location noise. Verified live 2026-10-21 via sourceprobe through the real gate: 3/12 sampled URLs were real postings (the rest were event/location pages the url_include filter let through at this shallow a sample — expect a higher job-page ratio once polling walks deeper into the per-child sitemaps). 1/3 India (Gurgaon) in sample.')
 ) as v(slug, url, adapter_config, note) on v.slug = c.slug
 on conflict do nothing;

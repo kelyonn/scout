@@ -30,16 +30,19 @@ type retentionFixture struct {
 	closedJob, extraColdJob1, extraColdJob2      string
 }
 
+// software sets both is_software and in_scope (ADR-020 made them distinct
+// columns, but every family this fixture exercises is swe.*-equivalent, so
+// the two are always the same value here).
 func (f *retentionFixture) job(ctx context.Context, t *testing.T, tx pgx.Tx, company, source, group string, software bool, status, seen string) string {
 	t.Helper()
 	var id string
 	err := tx.QueryRow(ctx, `
 		insert into job (job_group_id, company_id, primary_source_id, canonical_url, canonical_url_hash,
 			content_hash, title, normalized_title, description_html, description_text, description_stripped,
-			requirements_text, apply_url, is_software, status, first_seen_at, last_seen_at, posted_at,
+			requirements_text, apply_url, is_software, in_scope, status, first_seen_at, last_seen_at, posted_at,
 			simhash, raw_payload)
 		values ($1, $2, $3, 'https://x.test/'||gen_random_uuid(), gen_random_bytes(16), gen_random_bytes(16),
-			'Engineer', 'engineer', '<p>hi</p>', 'hi', 'hi', 'reqs', 'https://x.test/apply', $4, $5::job_status,
+			'Engineer', 'engineer', '<p>hi</p>', 'hi', 'hi', 'reqs', 'https://x.test/apply', $4, $4, $5::job_status,
 			$6::timestamptz, $6::timestamptz, $6::timestamptz, 42, '{"k":"v"}')
 		returning id`, group, company, source, software, status, seen).Scan(&id)
 	if err != nil {

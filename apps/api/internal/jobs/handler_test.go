@@ -86,7 +86,7 @@ type jobFixture struct {
 
 // insertJobFixture inserts a company/source/job_group/job/job_score row
 // tuple directly — the minimum a row needs to satisfy SelectJobFeed's
-// joins and WHERE clause (status='open', is_software=TRUE, paid='paid').
+// joins and WHERE clause (status='open', in_scope=TRUE, paid='paid').
 // Cleaned up in t.Cleanup regardless of pass/fail.
 func insertJobFixture(t *testing.T, pool *pgxpool.Pool, opts fixtureOpts) jobFixture {
 	t.Helper()
@@ -145,11 +145,11 @@ func insertJobFixture(t *testing.T, pool *pgxpool.Pool, opts fixtureOpts) jobFix
 	err = pool.QueryRow(ctx, `
 		insert into job (
 			job_group_id, company_id, primary_source_id, canonical_url, canonical_url_hash,
-			content_hash, title, normalized_title, apply_url, is_software, paid, status,
+			content_hash, title, normalized_title, apply_url, is_software, in_scope, paid, status,
 			role_family, seniority, work_mode
 		) values (
 			$1::uuid, $2::uuid, $3::uuid, $4, digest($4, 'sha256'),
-			digest($4, 'sha256'), $5, $6, $4, TRUE, 'paid', 'open',
+			digest($4, 'sha256'), $5, $6, $4, TRUE, TRUE, 'paid', 'open',
 			$7::role_family, $8::seniority, $9::work_mode
 		) returning id
 	`, groupID, companyID, sourceID, canonicalURL, title, title, roleFamily, seniority, workMode).Scan(&jobID)

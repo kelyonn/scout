@@ -60,6 +60,12 @@ describe("formatRoleFamily", () => {
     expect(formatRoleFamily("")).toBe("");
   });
 
+  it("formats the beyond-software families (ADR-020) without a special case", () => {
+    expect(formatRoleFamily("product.management")).toBe("Product (Management)");
+    expect(formatRoleFamily("consulting.strategy")).toBe("Consulting (Strategy)");
+    expect(formatRoleFamily("business.general")).toBe("Business");
+  });
+
   it("produces a label for every filter option", () => {
     for (const r of ROLE_FAMILY_OPTIONS) expect(formatRoleFamily(r)).not.toBe("");
   });

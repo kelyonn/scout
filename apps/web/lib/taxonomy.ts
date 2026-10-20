@@ -72,6 +72,15 @@ export const ROLE_FAMILY_OPTIONS = [
   "advocacy.devrel",
   "advocacy.devex",
   "advocacy.solutions",
+  // Beyond software (ADR-020).
+  "product.management",
+  "product.design",
+  "product.analyst",
+  "consulting.strategy",
+  "consulting.technology",
+  "business.strategy",
+  "business.operations",
+  "business.general",
 ];
 
 // formatRoleFamily turns "swe.infra.devops" into "Software Engineering

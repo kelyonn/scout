@@ -200,6 +200,7 @@ func toInsertJobParams(
 		RoleConfidence:         n.RoleConfidence,
 		Seniority:              db.Seniority(n.Seniority),
 		IsSoftware:             n.IsSoftware,
+		InScope:                n.InScope,
 		Skills:                 emptyIfNil(n.Skills),
 		LocationRaw:            nilIfEmpty(n.LocationRaw),
 		LocationCity:           nilIfEmpty(n.LocationCity),
