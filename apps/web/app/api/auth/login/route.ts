@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { SESSION_COOKIE, isValidToken, sessionCookieOptions } from "@/lib/auth";
+import { SESSION_COOKIE, resolveLoginToken, sessionCookieOptions } from "@/lib/auth";
 import { RateLimiter, clientKey } from "@/lib/rateLimit";
 
 // Exchanges the token for a long-lived session cookie — the one flow
@@ -33,12 +33,13 @@ export async function POST(request: Request) {
   const token =
     body && typeof body === "object" && "token" in body && typeof body.token === "string" ? body.token : "";
 
-  if (token.length === 0 || token.length > MAX_TOKEN_LENGTH || !isValidToken(token)) {
+  const sessionToken = token.length === 0 || token.length > MAX_TOKEN_LENGTH ? null : resolveLoginToken(token);
+  if (!sessionToken) {
     return NextResponse.json({ error: "invalid token" }, { status: 401 });
   }
 
   limiter.reset(key);
   const res = NextResponse.json({ status: "ok" });
-  res.cookies.set(SESSION_COOKIE, token, sessionCookieOptions());
+  res.cookies.set(SESSION_COOKIE, sessionToken, sessionCookieOptions());
   return res;
 }

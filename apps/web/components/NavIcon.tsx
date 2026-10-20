@@ -16,6 +16,12 @@ const ICON_PATHS: Record<string, React.ReactNode> = {
       <circle cx="10" cy="10" r="0.6" fill="currentColor" stroke="none" />
     </>
   ),
+  profile: (
+    <>
+      <circle cx="10" cy="7" r="3" />
+      <path d="M4 16.5c.6-3 3-4.5 6-4.5s5.4 1.5 6 4.5" />
+    </>
+  ),
   saved: <path d="M6 3.5h8a1 1 0 0 1 1 1V17l-5-3.3L5 17V4.5a1 1 0 0 1 1-1z" />,
   applied: (
     <>

@@ -183,7 +183,7 @@ services:
       # production. Placeholder values, not secrets: the contact URL and
       # operator email are meant to be public, published in every request's
       # User-Agent by design.
-      SCOUT_COLLECTOR_CONTACT_URL: https://github.com/kelyon/scout
+      SCOUT_COLLECTOR_CONTACT_URL: https://github.com/kelyonn/scout
       SCOUT_COLLECTOR_OPERATOR_EMAIL: scout-dev@localhost
     healthcheck:
       test: ["CMD", "/app/app", "healthcheck"]

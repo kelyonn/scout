@@ -11,6 +11,8 @@ import logging
 import os
 import sys
 import threading
+import time
+from collections.abc import Callable
 
 import psycopg
 from scout_riverpy import run_worker
@@ -39,13 +41,47 @@ logging.getLogger().addFilter(ScrubbingFilter())
 logger = logging.getLogger(__name__)
 
 
+def _drain_stop(database_url: str, max_seconds: float) -> Callable[[], bool]:
+    """Stop condition for `--once` (ADR-019): True once both queues have had
+    nothing claimable or running for two consecutive checks, or the time
+    budget ends. Checking both queues matters because embed jobs enqueue
+    brain_deep jobs; stopping on one queue alone would strand the other's work
+    until the next scheduled run.
+    """
+    deadline = time.monotonic() + max_seconds
+    idle_checks = 0
+    lock = threading.Lock()
+    conn = psycopg.connect(database_url, autocommit=True)
+
+    def stop() -> bool:
+        nonlocal idle_checks
+        with lock:
+            if time.monotonic() >= deadline:
+                return True
+            row = conn.execute(
+                """
+                SELECT count(*) FROM river_job
+                WHERE queue IN ('embed', 'brain_deep')
+                  AND (state = 'running'
+                       OR (state IN ('available', 'retryable') AND scheduled_at <= now()))
+                """
+            ).fetchone()
+            pending = row[0] if row else 0
+            idle_checks = idle_checks + 1 if pending == 0 else 0
+            return idle_checks >= 2
+
+    return stop
+
+
 def main() -> None:
+    once = "--once" in sys.argv[1:]
     config = load()
 
     # docs/16-observability.md — Python's port, not SCOUT_METRICS_ADDR, since
     # prometheus_client.start_http_server takes a bare port rather than a
     # host:port string the Go services' own SCOUT_METRICS_ADDR convention uses.
-    start_metrics_server(int(os.environ.get("SCOUT_METRICS_PORT", "9090")))
+    if not once:
+        start_metrics_server(int(os.environ.get("SCOUT_METRICS_PORT", "9090")))
 
     logger.info("scout-brain starting, loading embedding model...")
     embedder = Embedder()
@@ -89,6 +125,14 @@ def main() -> None:
         dedup_stage3, classify_tier2, summarize, explain
     )
 
+    stop = (
+        _drain_stop(
+            config.database_url, float(os.environ.get("SCOUT_ONCE_MAX_SECONDS", "900"))
+        )
+        if once
+        else None
+    )
+
     brain_deep_thread = threading.Thread(
         target=run_worker,
         args=(
@@ -97,13 +141,23 @@ def main() -> None:
             "brain-worker-1",
             brain_deep_consumer.handle,
         ),
-        daemon=True,
+        kwargs={"stop": stop},
+        daemon=not once,
     )
     brain_deep_thread.start()
     logger.info("brain_deep consumer started")
 
     logger.info("embed consumer starting (blocks)")
-    run_worker(config.database_url, "embed", "brain-worker-1", embed_consumer.handle)
+    run_worker(
+        config.database_url,
+        "embed",
+        "brain-worker-1",
+        embed_consumer.handle,
+        stop=stop,
+    )
+    if once:
+        brain_deep_thread.join()
+        logger.info("queues drained, exiting")
 
 
 if __name__ == "__main__":

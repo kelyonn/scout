@@ -12,9 +12,14 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "Internship and new-grad software roles, found and ranked for you.",
     start_url: "/",
     display: "standalone",
-    background_color: "#282828",
-    theme_color: "#282828",
-    icons: [{ src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
+    background_color: "#eeede8",
+    theme_color: "#eeede8",
+    icons: [
+      { src: "/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+      { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+      { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+      { src: "/icons/maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    ],
     shortcuts: [
       { name: "Opportunities", url: "/opportunities" },
       { name: "Saved", url: "/saved" },
