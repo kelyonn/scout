@@ -79,14 +79,21 @@ func TestSend_Success(t *testing.T) {
 	if gotBody.Message.Token != "device-token-1" {
 		t.Errorf("Token = %q", gotBody.Message.Token)
 	}
-	if gotBody.Message.Notification.Title != "Bengaluru match — 92" {
-		t.Errorf("Notification.Title = %q", gotBody.Message.Notification.Title)
+	// Data-only message: title/body/channel_id travel in Data, not a
+	// top-level "notification" block — see message's own doc comment on
+	// why (auto-display can't carry actions and silently falls back to
+	// the wrong channel on-device).
+	if gotBody.Message.Data["title"] != "Bengaluru match — 92" {
+		t.Errorf("Data[title] = %q", gotBody.Message.Data["title"])
+	}
+	if gotBody.Message.Data["body"] != "Senior SRE at Amtech" {
+		t.Errorf("Data[body] = %q", gotBody.Message.Data["body"])
 	}
 	if gotBody.Message.Android == nil || gotBody.Message.Android.Priority != "high" {
 		t.Errorf("Android.Priority = %+v, want high", gotBody.Message.Android)
 	}
-	if gotBody.Message.Android.Notification == nil || gotBody.Message.Android.Notification.ChannelID != "bengaluru_match" {
-		t.Errorf("Android.Notification.ChannelID = %+v", gotBody.Message.Android.Notification)
+	if gotBody.Message.Data["channel_id"] != "bengaluru_match" {
+		t.Errorf("Data[channel_id] = %q", gotBody.Message.Data["channel_id"])
 	}
 	if gotBody.Message.Android.CollapseKey != "job-group-1" {
 		t.Errorf("CollapseKey = %q", gotBody.Message.Android.CollapseKey)
