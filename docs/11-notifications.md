@@ -230,46 +230,74 @@ lose the user.
 │ Go and distributed systems match your      │
 │ top skills.                                │
 │                                            │
-│   Apply        Save        Dismiss         │
+│           Save            Dismiss          │
 └────────────────────────────────────────────┘
 ```
 
+Tapping the body itself opens the job (the deep link below); `Save` and
+`Dismiss` are the two lock-screen actions. There is no separate `Apply`
+action — same honest gap as section 6.1's Telegram buttons, and for the
+same reason (nowhere to send a third action that isn't already "open the
+job").
+
 ```jsonc
 {
-  "notification": {
-    "title": "Cloudflare · SWE Intern · Bengaluru",
-    "body":  "Match 94 · ₹85k/mo · posted 12 min ago\nGo and distributed systems match your top skills."
-  },
   "data": {
+    "title": "Cloudflare · SWE Intern · Bengaluru",
+    "body":  "Match 94 · ₹85k/mo · posted 12 min ago\nGo and distributed systems match your top skills.",
+    "channel_id": "opportunities",
     "job_group_id": "0192f3a1-...",
     "deep_link": "scout://job/0192f3a1-...",
     "trigger": "bengaluru_match",
-    "priority": 94
+    "priority": "94"
   },
   "android": {
     "collapse_key": "job-0192f3a1",        // replaces rather than stacks
-    "priority": "high",                    // wakes the device from Doze
-    "notification": {
-      "channel_id": "opportunities",
-      "click_action": "OPEN_JOB",
-      "notification_count": 7              // launcher badge
-    }
+    "priority": "high"                     // wakes the device from Doze
   }
 }
 ```
 
+**Deliberately data-only — no top-level `notification` block.** A
+`notification` + `data` message is auto-displayed by Android's own FCM SDK
+whenever the app is backgrounded, before any app code runs. That path can't
+attach `Save`/`Dismiss` actions, and — the bug that motivated this section's
+rewrite — silently falls back to Android's own
+`fcm_fallback_notification_channel` if the channel named in
+`android.notification.channel_id` doesn't exist on the device yet, which is
+indistinguishable from a generic system notification. Sending everything as
+`data` instead means the app's own `FirebaseMessagingService`
+(`com.scout.app.ScoutMessagingService`,
+`apps/mobile/android/app/src/main/java/com/scout/app/`) is invoked in every
+app state and builds the notification itself, so channel routing and actions
+are never at the mercy of auto-display.
+
 Four details that matter:
 
 **`collapse_key`** means a score update for the same job replaces the existing
-notification instead of stacking a second one.
+notification instead of stacking a second one — enforced on two independent
+layers: FCM's own `android.collapse_key` (this payload), and, separately,
+`ScoutMessagingService` deriving the on-device notification ID from the same
+key so `NotificationManager` replaces rather than stacks even for a message
+FCM itself didn't collapse (e.g. one arriving while the device was offline).
 
 **`priority: high`** is what gets an instant alert through Doze and App Standby. It
 is applied only to INSTANT urgency — batched and digest use normal priority, because
 burning the high-priority allowance on a daily summary is how Android starts
 throttling the ones that matter.
 
-**Actions call the API from the native layer.** `Save` and `Dismiss` write to
-`user_job_state` without opening the app, matching the Telegram inline buttons.
+**Actions call the API from the native layer.** `Save` and `Dismiss` are two
+`NotificationCompat` actions, each a broadcast to `JobActionReceiver`
+(`apps/mobile/android/app/src/main/java/com/scout/app/`), which
+`POST`s `/v1/jobs/{group_id}/state` directly — no activity launch, matching
+the Telegram inline buttons. Authenticated the same way the WebView already
+is: the `scout_web_session` cookie set by `/api/auth/login` (its value *is*
+the raw `SCOUT_AUTH_TOKEN` — see that route's own comment), read via
+Android's `CookieManager`, which persists independently of whether a
+`Bridge`/WebView is alive when the action fires. If the user has never
+signed into the app once, there is no cookie yet and the action is a
+silent no-op — the notification's own tap-to-open still works, and opening
+the app once fixes it going forward.
 
 **Notification channels are split** so the user can tune each independently in
 Android settings — silence digests while leaving instant alerts audible, without
@@ -286,6 +314,14 @@ Channels are created on first launch and **cannot be changed afterwards** — An
 locks a channel's importance once the user has seen it. Getting the split right the
 first time matters more than it looks; adding a fifth channel later is fine, but
 re-tuning an existing one requires a new channel ID and a migration.
+
+**Only `opportunities` and `deadlines` are created today.** They're the only
+two any code path actually sends to — native push is excluded from the
+digest (section 5's routing table), and there is no channel-failure/budget
+system notice implemented yet to route to `system`. `digests` and `system`
+stay documented here as the reserved next two IDs (see the channel-locking
+note above for why a used-but-wrong ID is worse than an unused one) — create
+them the same way, once something real routes to them.
 
 ### 6.3 Web Push (fallback)
 

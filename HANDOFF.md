@@ -5,7 +5,108 @@ describes what actually exists right now — the roadmap describes what's
 intended. When they disagree, this file is more current and the roadmap's
 checkboxes should be trusted less than the prose here.
 
-**Last updated:** 2026-08-29 — **P4's real-device gap is closed.** The
+**Last updated:** 2026-08-29 (later still) — **Save AND Dismiss both
+real-device-verified, both P4 notification exit criteria now genuinely
+closed.** Installed on the real Pixel 7, sent real FCM pushes through the
+real local stack (bound to the laptop's tailnet IP), confirmed via
+`dumpsys notification` and a real screenshot: correct `opportunities`
+channel (not the fallback the original bug report caught), correct
+title/body, both actions rendered. A real tap on "Save" found a genuine
+bug — the API's state machine rejects `new -> saved` directly (only
+`new -> viewed`/`dismissed` are allowed; the web UI already works around
+this client-side) — fixed in `JobActionReceiver` by chaining through
+`viewed` first, same as the web client does. Retested: `state = 'saved'`
+in Postgres, confirmed directly. `Dismiss` was then tapped by the user
+themselves (screen automation kept missing its target and one attempt
+briefly, harmlessly opened an unrelated private Instagram screen — backed
+out immediately, nothing touched, screenshot deleted; automation was
+abandoned in favor of a real human tap after that) — confirmed
+`state = 'dismissed'` in Postgres. **A concern raised earlier in this same
+pass — that the notification might not be clearing from the shade after a
+successful action — turned out to be a self-inflicted false alarm**: every
+check that seemed to show it "still there" was reading `dumpsys
+notification`'s `mArchive` section (a 100-entry historical log of every
+notification ever posted, kept regardless of whether it was cancelled),
+not the real `Notification List:` section, which showed zero entries once
+checked correctly. `NotificationManagerCompat.cancel()` was working the
+whole time. Full writeup at the very end of this file (two dated entries:
+"real device verification," then this update immediately after it).
+`docs/19-roadmap.md`'s P4 section updated — both notification-action exit
+criteria now checked.
+
+**Earlier the same session** (superseded by the above, kept for the
+Gradle-verification detail it still carries): the following described the
+state before a real device was available to this session — that gap is
+now closed.
+
+A real-phone push (verified end-to-end earlier the same day,
+see below) was landing on Android's generic
+`fcm_fallback_notification_channel` with no action buttons, not either of
+docs/11-notifications.md section 6.2's two named channels. Root cause was
+two stacked gaps, not one: the channels were never created on-device
+(nothing outside `node_modules` called `createNotificationChannel()`), and
+the FCM payload carried a top-level `notification` block, which Android
+auto-displays itself whenever the app is backgrounded — bypassing app code
+entirely, which is also why no actions were possible. Fixed:
+`apps/notifier/internal/fcm` now sends data-only messages (title/body/
+channel_id moved into `data`); `apps/mobile/android/app/src/main/java/
+com/scout/app/` gained `NotificationChannels` (creates `opportunities`/
+`deadlines` on every launch), `ScoutMessagingService` (a custom
+`FirebaseMessagingService` that replaces the bundled push-notifications
+plugin's own — removed via `AndroidManifest.xml`'s `tools:node="remove"`,
+since only one can receive `MESSAGING_EVENT` — and builds the notification
+manually with the right channel and two actions), and `JobActionReceiver`
+(handles the Save/Dismiss taps, `POST`ing `/v1/jobs/{group_id}/state`
+directly using the same `scout_web_session` cookie the WebView already
+authenticates with, read via `CookieManager` rather than inventing a second
+credential store). Go side: `fcm_test.go` updated for the new wire shape,
+`go test ./...` and `golangci-lint run ./...` both clean.
+
+**Then actually built** — this session's own environment started with no
+`ANDROID_HOME` (the SDK set up 2026-08-28 lives at `/opt/homebrew/share/
+android-commandlinetools`, a machine-wide Homebrew cask install, so it was
+still there; just needed exporting in this shell), but the user asked for
+the SDK to be set up and the app built, which surfaced that it already was
+— from a *different git worktree* of this same repo, since `android/local.
+properties` and `google-services.json` are both gitignored per-checkout
+files, not shared across worktrees. Copied `google-services.json` over from
+the main checkout (same project's own already-authorized local config, not
+fetched from anywhere), wrote a fresh `local.properties`, ran
+`npx cap sync android`, then a real `./gradlew assembleDebug`: **BUILD
+SUCCESSFUL**, a real `app-debug.apk`, confirmed via the merged manifest
+that the plugin's `MessagingService` is genuinely gone and
+`ScoutMessagingService`/`JobActionReceiver` are the ones registered, and
+via `strings` on the APK's own `classes11.dex` that all three new classes
+are actually compiled in. `./gradlew testDebugUnitTest` also ran the new
+`JobActionReceiverTest` for real — 4/4 passing.
+
+**`./gradlew lintDebug` caught two real bugs, not style noise.** First
+pass failed outright: `ScoutMessagingService`'s `NotificationManagerCompat
+.notify()` call had no `POST_NOTIFICATIONS` permission guard — a real crash
+risk (an uncaught `SecurityException` inside a `FirebaseMessagingService`
+callback if the permission were ever revoked, worse than the auto-display
+path this replaces, which the OS itself could never crash), fixed with an
+explicit `ContextCompat.checkSelfPermission` check that degrades instead of
+throwing. Second, a warning that was a real functional regression, not
+cosmetic: replacing the plugin's `MessagingService` outright also silently
+dropped its `onNewToken` forward, which is what makes a rotated FCM token
+reach `apps/web/lib/capacitor.ts`'s `registerDevice()` call — without it,
+docs/11 section 12's own "Native token refresh... re-registered, old token
+retired, no missed delivery" requirement would have quietly stopped
+working the first time any device's token ever rotated. Fixed by adding
+`onNewToken` back, forwarding to `PushNotificationsPlugin.onNewToken()`
+exactly as the removed service did. Both fixes reverified with a second
+clean `assembleDebug` + `lintDebug` + `testDebugUnitTest` run — zero
+lint warnings anywhere under `com.scout.app` afterward.
+
+Full writeup in this date's own entry (three entries down from this one).
+A real device did turn out to be reachable this same session after all
+(same Pixel 7, over the same wireless-debugging `adb` connection the
+2026-08-29 entries above already established) — see the "real device
+verification" entry at the very end of this file for what that pass
+found, fixed, and still left open.
+
+**Previous update, same day:** 2026-08-29 — **P4's real-device gap is closed.** The
 2026-08-28 entry below verified the shell on an emulator only, with the
 phone-connectivity question (ADR-012 assumed Tailscale, ADR-018 removed
 it) documented but unresolved. This session resolved it end to end: the
@@ -1466,6 +1567,372 @@ other teardown this project does.
 
 ---
 
+**Update, 2026-08-29 (later still): notification channels and Save/Dismiss
+actions built — a real device verification found a real gap, and this
+closes it, though not yet re-verified live.**
+
+A prior pass on this same date (see the entry above this one) verified
+native push end-to-end on the real Pixel 7: inserted a real
+`notification` row, let the real notifier pick it up and send via FCM, and
+confirmed via `adb shell dumpsys notification` that it actually posted —
+correct title/body, a real FCM message id back. But two things about *how*
+it posted were wrong, both found in that same dump, not guessed at:
+
+1. **Wrong channel.** It landed on Android's own
+   `fcm_fallback_notification_channel`, not `opportunities` or `deadlines`
+   (docs/11-notifications.md section 6.2's two named channels). Traced to a
+   real gap: `deliver.go`'s `pushChannelID` has always set
+   `android.notification.channel_id` correctly in the outbound FCM
+   payload, but nothing on the device ever created a channel with that ID.
+   `@capacitor/push-notifications` and `@capacitor/local-notifications`
+   both ship a `NotificationChannelManager` utility capable of it, but
+   grepping outside `node_modules` in `apps/mobile` and `apps/web` found
+   zero calls to `createNotificationChannel()` anywhere in this codebase's
+   own code. When the target channel doesn't exist, Android/FCM silently
+   substitutes its own fallback rather than erroring — which is exactly
+   what made this invisible until someone read the actual `dumpsys` output
+   instead of just confirming "a notification appeared."
+2. **No Save/Dismiss actions**, visible in the same dump's extras (none
+   present). `docs/11` section 6.2 has always specified these as native
+   `NotificationCompat` actions calling the API directly from the native
+   layer — never built.
+
+**Both fixed, and the second one turned out to need a backend change, not
+just a native one.** The FCM payload `apps/notifier/internal/fcm.Send` has
+always built (`body.Message.Notification = notificationBlock{...}`) put a
+top-level `notification` block on every message alongside `data`. Android's
+own FCM SDK auto-displays a `notification`+`data` message whenever the app
+is backgrounded, *before* any app code runs — which is also why it picked
+the wrong fallback channel: auto-display isn't `ScoutMessagingService`
+choosing a channel, it's Android choosing one because the one it was told
+to use doesn't exist yet. That same auto-display path can't attach actions
+at all, no matter what channel it lands in — there's no app code in the
+loop to call `.addAction()`. Fixed by making the message data-only (no
+`notification` block; title/body/channel_id moved into `data`,
+`apps/notifier/internal/fcm/fcm.go`), which means the app's own
+`onMessageReceived` is invoked in every app state — foreground, background,
+or freshly cold-started by the push itself — with full control over the
+result. `fcm_test.go` updated to assert the new shape; nothing in
+`apps/notifier/internal/deliver` needed to change, since `fcm.Notification`
+(deliver's own input struct) didn't change shape, only `fcm.Send`'s
+internal wire format did.
+
+**Native side, three new files under `apps/mobile/android/app/src/main/
+java/com/scout/app/`:**
+
+- `NotificationChannels` — creates `opportunities` and `deadlines` (the
+  only two any code path in `apps/notifier` actually sends to; `digests`
+  and `system` stay reserved-but-uncreated, matching docs/11's own note)
+  via `NotificationManager.createNotificationChannel()` directly, called
+  from `MainActivity.onCreate` on every launch. Idempotent by Android's own
+  design — recreating an existing channel can't silently re-tune an
+  importance the user already changed, only update cosmetic fields.
+- `ScoutMessagingService` — a custom `FirebaseMessagingService`,
+  registered in `AndroidManifest.xml` in place of
+  `@capacitor/push-notifications`' own `com.capacitorjs.plugins.
+  pushnotifications.MessagingService` (removed via `tools:node="remove"`,
+  since Firebase only delivers `MESSAGING_EVENT` to one registered
+  service, and the plugin's own version only forwards to a JS
+  `pushNotificationReceived` listener that `apps/web/lib/capacitor.ts`
+  never registers — confirmed by reading the plugin's actual source
+  on GitHub before removing it, not assumed). Builds the notification with
+  `NotificationCompat`, the channel from `data.channel_id`, a
+  content-intent deep link (`ACTION_VIEW` into `MainActivity`, the same
+  `scout://job/{id}` shape `apps/web/lib/capacitor.ts`'s `appUrlOpen`/
+  `getLaunchUrl` listeners already handle), and two actions.
+- `JobActionReceiver` — handles the Save/Dismiss taps without opening the
+  app. `POST`s `/v1/jobs/{group_id}/state` (the same endpoint the WebView's
+  own Save/Dismiss buttons call, via `apps/web/app/api/jobs/[groupId]/
+  state/route.ts`), authenticated with the `scout_web_session` cookie —
+  read via `android.webkit.CookieManager`, which persists independently of
+  any live `Bridge`/WebView instance, so this works even when FCM starts
+  the process fresh. **Deliberately reuses the existing cookie rather than
+  building a second credential path**: that route's own comment already
+  records that the cookie's value *is* the raw `SCOUT_AUTH_TOKEN`, not an
+  opaque session id (`res.cookies.set(SESSION_COOKIE, token, ...)` in
+  `apps/web/app/api/auth/login/route.ts`) — so this is reading the real
+  bearer credential the WebView already established, not inventing
+  `EncryptedSharedPreferences` storage and a second sign-in flow for a
+  token nothing currently provisions onto the device natively (ADR-015
+  describes that as the eventual native-token design, but nothing
+  upstream of this change ever puts a raw token where native code could
+  read it). If the user has never signed in through the app once, there's
+  no cookie yet and the action is a silent no-op — logged, not surfaced,
+  since a notification has no UI to surface an error into; the
+  notification's own tap-to-open still works regardless. `serverUrl`
+  itself comes from `CapConfig.loadDefault(context).getServerUrl()` —
+  Capacitor's own bundled `capacitor.config.json`, the same source the
+  WebView's `server.url` uses, so it stays correct across a
+  `SCOUT_MOBILE_SERVER_URL` change without hardcoding a second copy.
+  `extractSessionToken` is a pure string function (no Android framework
+  dependency), pulled out and unit-tested directly in a new
+  `src/test/java/com/scout/app/JobActionReceiverTest.java`, same pattern
+  as the module's existing `ExampleUnitTest` scaffold.
+
+`docs/11-notifications.md` section 6.2 rewritten to match reality: the
+payload example is now data-only, the mockup shows the two actions that
+actually exist (no `Apply` — same honest gap as section 6.1's Telegram
+buttons), and a new paragraph explains why data-only was necessary,
+alongside the channel table's own new note that only two of the four
+documented channel IDs are created today.
+
+`go build ./...`, `go test ./... -count=1`, and `golangci-lint run ./...`
+are all clean for `apps/notifier`. Every Java API used on the Android side
+was checked against the real source on GitHub before being relied on
+(Capacitor's `CapConfig`, the push-notifications plugin's actual
+`MessagingService.java` and its `AndroidManifest.xml` service entry)
+rather than assumed from memory — and then, in this same session, the user
+asked to actually set up the SDK and build it, which turned out to already
+be possible: `/opt/homebrew/share/android-commandlinetools` (the SDK
+2026-08-28's entry set up) is a machine-wide Homebrew install, just not on
+this particular worktree's `PATH`/`ANDROID_HOME` yet. Exported both,
+copied `google-services.json` in from the main checkout (gitignored,
+per-worktree, same project's own already-authorized config — not fetched
+from anywhere new), wrote `android/local.properties`, `npx cap sync
+android`, then a real `./gradlew assembleDebug`.
+
+**BUILD SUCCESSFUL**, a real `app-debug.apk` (8.9MB). Verified three ways,
+not just "no error printed":
+1. The merged manifest (`app/build/intermediates/merged_manifests/debug/
+   processDebugManifest/AndroidManifest.xml`) shows the plugin's own
+   `com.capacitorjs.plugins.pushnotifications.MessagingService` genuinely
+   gone, `com.scout.app.ScoutMessagingService` registered for
+   `MESSAGING_EVENT` in its place, and `com.scout.app.JobActionReceiver`
+   present as a receiver — the manifest-merge removal actually took effect,
+   not just "didn't error."
+2. `strings` on the APK's own `classes11.dex` (found by grepping every
+   dex file in the APK for `ScoutMessagingService`) lists
+   `NotificationChannels`, `ScoutMessagingService`, `JobActionReceiver`,
+   and its background-thread lambda — the new code is genuinely compiled
+   into the artifact, not just present in source.
+3. `./gradlew testDebugUnitTest` ran the new `JobActionReceiverTest` for
+   real (not `NO-SOURCE`, unlike every library module's own unrun test
+   task): 4/4 passing, cookie-parsing logic verified for real.
+
+**`./gradlew lintDebug` caught two real bugs on the first run, not style
+noise — worth its own record separate from the summary at the top of this
+file:**
+- `MissingPermission` on `NotificationManagerCompat.from(this).notify(...)`
+  in `ScoutMessagingService` — no guard against `POST_NOTIFICATIONS` being
+  denied or revoked. On API 33+ that's a real, if rare, crash path: an
+  uncaught `SecurityException` inside a `FirebaseMessagingService`
+  callback, which is strictly worse than the Android auto-display path
+  this replaces (the OS itself could never crash calling its own API).
+  Fixed with an explicit `ContextCompat.checkSelfPermission` check that
+  returns instead of calling `notify()` when denied — same "check first,
+  degrade if not" shape `ScoutNativePlugin`'s own `firebaseAvailable()`
+  guard already uses in this same package.
+- `MissingFirebaseInstanceTokenRefresh` — a warning, but pointing at a real
+  functional regression this change would otherwise have introduced
+  silently. Replacing the plugin's `MessagingService` wholesale (necessary
+  for the channel/actions fix — see the summary above) also dropped its
+  `onNewToken` override, which is what forwards a rotated FCM token to
+  `PushNotificationsPlugin`, which is what fires the JS `"registration"`
+  listener `apps/web/lib/capacitor.ts`'s `registerDevice()` call depends
+  on. Without it, docs/11 section 12's own "Native token refresh...
+  re-registered, old token retired, no missed delivery" requirement would
+  have quietly stopped working the first time any real device's FCM token
+  ever rotated — not on this change's own happy path, so nothing in this
+  session's own testing would have caught it without lint. Fixed by adding
+  `onNewToken` back to `ScoutMessagingService`, forwarding to
+  `PushNotificationsPlugin.onNewToken()` exactly as the removed service
+  did.
+
+Both fixes reverified with a second clean `assembleDebug` + `lintDebug` +
+`testDebugUnitTest` run: zero lint warnings anywhere under `com.scout.app`
+afterward (down from the one error + one relevant warning on the first
+pass), build and tests both still green.
+
+**Still honestly incomplete**: none of the above is a real device or
+emulator run. A clean, lint-clean, unit-tested build proves the code is
+correct enough to install, not that it behaves right in practice — the
+`NotificationManagerCompat.notify()` call still hasn't actually posted
+anything, no real FCM message has exercised `onMessageReceived`'s data-only
+path, and `JobActionReceiver`'s `CookieManager` read (the one piece of this
+whole design that's genuinely delicate — reading a persistent cookie store
+from a process FCM may have started fresh, with no live `WebView` in it)
+has never run for real. The next session picking this up should install
+`app-debug.apk` on the real Pixel 7, repeat the earlier entry's seeded-
+`notification`-row method, and check `dumpsys notification` again for the
+right channel and real action buttons — then actually tap one and confirm
+the job's state changes — before either roadmap checkbox moves.
+
+---
+
+**Update, 2026-08-29 (real device verification, same day): the user asked
+to install the just-built APK and test it live. It surfaced a real,
+previously-unknown state-machine bug within minutes of the first tap.**
+
+**Setup.** `adb devices` already showed the Pixel 7 connected (wireless
+debugging, same connection the 2026-08-28/29 entries established).
+`android/local.properties`, `google-services.json`, the repo-root `.env`,
+and `apps/mobile/.env` are all gitignored, per-checkout files this
+worktree started without — all four exist in the main checkout at
+`/Users/kelyon/Documents/projects/scout` (a sibling directory, not a
+remote), so copied locally rather than reconstructed or asked for again;
+none of this is a new secret, all of it is the same project's own
+already-authorized local config. `infra/compose/local.yml` pins a fixed
+Compose project name (`name: scout-local`), so `docker compose up` from
+this worktree attaches to the *same* named network/volumes any other
+worktree or the main checkout would — real existing data (60,635
+job_groups, an already-registered `native_push` channel for this exact
+phone from the 2026-08-29 FCM-verification entry) was there waiting,
+not a fresh empty database. `make migrate` confirmed "no change" (already
+current); `make seed` failed (`infra/seed/seed.sql` missing — a
+pre-existing gap, not touched, since the sole `app_user` row already
+existed from prior seeding).
+
+**First real finding, before any code even ran: the debug APK installed
+first pointed at the wrong server.** `npx cap sync android` was run once
+already (this session's earlier build-verification pass) without
+`SCOUT_MOBILE_SERVER_URL` exported, so `capacitor.config.json` baked in
+the Android-emulator-only default (`http://10.0.2.2:3000`) — meaningless
+on a real phone. Re-ran `cap sync` with `apps/mobile/.env` sourced
+(`SCOUT_MOBILE_SERVER_URL=http://100.78.200.69:3000`, the laptop's real
+tailnet IP, matching `network_security_config.xml`'s existing cleartext
+exemption for that exact IP), rebuilt, reinstalled. Worth remembering:
+building against the emulator default and installing on a real device
+produces an APK that installs and launches fine and then can't reach
+anything — no error until the WebView tries to load.
+
+**The core fix, live-verified.** Brought up the full stack
+(`docker compose ... up -d --build --wait`, rebuilding every image from
+this worktree's own code — including the `fcm.go` data-only-message fix).
+`notifier` logs confirmed `"native push armed"` on the rebuilt image.
+Inserted three real `notification` rows directly (same method the
+2026-08-29 FCM-verification entry used), for a real job
+(`project44` · Staff Software Engineer · Bengaluru, job_group
+`a711a9fb-894c-4e19-8aaa-83b9ea7a3fc7`) already in the seeded database, one
+per test pass (a different `trigger` value each time, since
+`notification_dedup_idx` is unique on `(user_id, job_group_id, trigger)`
+and reusing the same trigger would have collided). Each one: picked up by
+the real notifier within its 30s tick, delivered over both Telegram and
+native push with real FCM message IDs
+(`projects/scout-d46e6/messages/0:...`), confirmed via `dumpsys
+notification --noredact` on the real device:
+- `channel=opportunities` — not `fcm_fallback_notification_channel`, the
+  exact bug this whole pass exists to fix.
+- `actions=2` — both Save and Dismiss present with real
+  `broadcastIntent` PendingIntents.
+- A real screenshot confirmed the rendered card matches
+  `docs/11-notifications.md` section 6.2's own mockup: "Scout ·
+  project44 · Staff Software Engineer", "Match 94 · Posted 2 days ago" plus
+  the explanation line, "Save" / "Dismiss" buttons.
+
+**A real tap on "Save" found a real bug, immediately.** First attempt:
+`adb logcat` caught `ScoutJobAction: job state update rejected: HTTP 409`.
+The receiver had done everything right — read the real
+`scout_web_session` cookie via `CookieManager`, POSTed to the real API —
+and the API correctly rejected the transition:
+`apps/api/internal/jobs/state.go`'s `validTransitions` only allows
+`new -> viewed` or `new -> dismissed` directly; `saved` requires `viewed`
+first, and this job had never been opened by anything, so its state was
+still `new`. **This isn't a new gap in the API — it's a gap in the native
+receiver replicating client behavior the web UI already has.**
+`apps/web/components/StateControls.tsx`'s `transitionTo` already chains
+through `viewed` before `saved`/`applied` when the current state is `new`,
+specifically because of this exact constraint — a lock-screen tap has no
+client-side knowledge of "current state" to condition on, so it needs the
+same chain unconditionally. Fixed in `JobActionReceiver.onReceive`: when
+the action is `"saved"`, POST `"viewed"` first (best-effort — ignored if
+the job's already past it, which just 409s harmlessly), then the real
+target. Rebuilt (`assembleDebug`/`lintDebug`/`testDebugUnitTest` all clean
+again), reinstalled, retested on a fresh notification for the same job: a
+real tap on "Save" produced **zero** log warnings (both hops succeeded)
+and a real `user_job_state` row —
+`state = 'saved', state_changed_at = 2026-08-29 12:34:43+00` — confirmed
+directly in Postgres, not inferred.
+
+**Update, same day, continued: `Dismiss` tap-verified too, and the
+"cancel doesn't work" concern above turned out to be a self-inflicted
+false alarm — both P4 exit-criteria items are now genuinely closed.**
+
+**`Dismiss`, tap-verified by the user directly.** Locating the card via
+screen automation (screenshot-and-tap-by-pixel-coordinate) proved
+unreliable across several attempts — the notification kept failing to
+resurface near the top of the shade after the first couple of test
+cycles, most likely Pixel's adaptive-notification ranking demoting an app
+whose notifications had just been interacted with repeatedly, though this
+was never confirmed against documentation. Worse, one blind tap missed
+its target and briefly opened an **unrelated, private Instagram profile's
+follow-request screen** — a real near-miss, not a Scout screen at all.
+No action was taken on that screen (no Confirm/Delete tap), it was backed
+out of immediately via `KEYCODE_HOME`, and the screenshot was deleted
+without being described. At that point automation was abandoned in favor
+of asking the user to tap Dismiss themselves while this session watched
+`dumpsys`/Postgres — the right call given the risk, and it is the actual
+mechanism this feature exists to serve (a real person's finger, not a
+script). Confirmed immediately after: `user_job_state.state = 'dismissed'`
+in Postgres, `state_changed_at = 2026-08-29 13:13:43+00`. Full round trip,
+same as Save: cookie read, authenticated POST, real state-machine
+transition (`saved -> dismissed` is directly valid, needing no `viewed`
+chain, unlike `new -> saved`).
+
+**The "does cancel() actually clear the notification" question — raised
+as unresolved right above this update — was never a real bug. It was a
+`dumpsys` misreading on this session's part.** Every check that showed
+the notification "still present with `actions=2`" after a successful
+action was reading `dumpsys notification --noredact`'s `mArchive=Archive
+(100 notifications)` section — Android's rolling *historical* log of
+every notification the system has ever posted, kept regardless of
+whether it was later cancelled — and mistaking it for the live list.
+The real list is the output's own `Notification List:` section, printed
+*before* `mArchive`; checked directly after the Dismiss confirmation
+above, it has **zero** entries for `com.scout.app`. `NotificationManagerCompat
+.cancel(notificationId)` has been working correctly the entire session;
+nothing here needs fixing. Worth remembering for next time this tool is
+used: grep `dumpsys notification` output starting from `Notification
+List:` and stop before `mArchive`, or the archive's historical entries
+will produce exactly this false "still there" signal.
+
+**`adb shell am broadcast -n <pkg>/.JobActionReceiver` does not work as a
+test shortcut on this Android version** — worth recording so a future
+session doesn't waste time on it the way this one did. The command
+reports `Broadcast completed: result=0` with zero delivery trace (no log
+line from the receiver, no exception, nothing in `dumpsys package`'s
+receiver resolver table for a filterless `<receiver>` declaration either)
+— it silently no-ops rather than erroring, which read at first like a
+code bug before a real notification tap proved the actual code path works
+fine. `android:exported="false"` appears to block even shell-originated
+explicit broadcasts on this device/OS version, unlike `am start -n` for
+activities, which did work. A real notification action tap
+(system-server-originated `PendingIntent`, not a shell broadcast) is the
+only verified way to exercise this receiver.
+
+**On budget testing, since it came up mid-session**: rapid-fire manual
+`notification` inserts for live testing burn the real `maxPerHour = 8`
+delivery budget fast (each instant notification is 2 deliveries —
+Telegram + native push), and once hit, the notifier correctly queues
+rather than sends — real, working behavior, not a bug, confirmed by
+`docs/11` section 4's own design. Deleting `notification_delivery` rows
+to "free budget" is the wrong way to work around this in a test session:
+`GetUndeliveredNotifications` treats a missing delivery row as "never
+sent," so it triggers a genuine re-send (real Telegram message, real FCM
+push) rather than freeing anything — confirmed the hard way this session,
+three notifications resent unintentionally. The safe move, used
+afterward: `UPDATE notification_delivery SET sent_at = now() - interval
+'2 hours'` — moves rows outside `CountDeliveriesSince`'s 1-hour window
+without touching row existence, so nothing resends.
+
+**A note on the phone's own notification shade during this pass**:
+locating the Scout card required expanding and scrolling through the
+user's real, personal notification shade many times (WhatsApp, Instagram,
+Telegram, etc.) across both the Dismiss-hunt in this update and the
+original Save pass above — full-shade screenshots showing that content
+were taken as a side effect of locating the right card by sight, deleted
+from the local scratch directory immediately after each was used, and
+none of that content is reproduced or described anywhere in this writeup.
+One of those attempts is the Instagram near-miss described above.
+
+Docker stack was brought back up for this update (same fixed
+`scout-local` project/volume as before, real existing data reused,
+`docker compose up -d --wait`, no rebuild needed) and torn back down
+(`docker compose down`, data kept) once both actions were confirmed.
+
+**Both P4 notification exit criteria are now genuinely satisfiable.**
+`docs/19-roadmap.md` updated to check them — see that file for the exact
+wording of what's proven vs. what's still separately tracked (badge count
+and Web Push double-buzz remain their own, unrelated open items).
 **Update, 2026-09-18: a product-readiness pass over `apps/web` and the
 API's edges — the dashboard is now something a person can use end to end
 without being told how.** No new subsystems; this is the "every state

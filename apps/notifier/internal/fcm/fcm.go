@@ -106,37 +106,34 @@ func oauth2HTTPClient(ctx context.Context, ts oauth2.TokenSource) *http.Client {
 func (c *Client) Enabled() bool { return c.http != nil }
 
 // message is FCM HTTP v1's request body — the subset this notifier needs.
-// docs/11's four notification channels map to FCM's own "notification
-// channel" concept on the Android side (AndroidConfig.notification.channel_id),
-// set by the caller per docs/11 section 2's trigger-to-channel table, not
-// hardcoded here.
+//
+// Deliberately data-only: no top-level "notification" block. A
+// notification+data message is auto-displayed by Android's own FCM SDK
+// whenever the app is backgrounded, which (a) uses whatever channel the
+// device already has cached, silently falling back to Android's own
+// fcm_fallback_notification_channel if the named one doesn't exist yet,
+// and (b) can't carry the Save/Dismiss actions docs/11 section 6.2
+// requires. Data-only messages instead always reach the app's own
+// FirebaseMessagingService.onMessageReceived (com.scout.app.
+// ScoutMessagingService — apps/mobile/android/app/src/main/java/com/scout/
+// app/), which builds the notification itself with the right channel and
+// actions, in every app state. Title/body/channel_id travel inside Data
+// for exactly this reason; see Send below.
 type message struct {
 	Message struct {
-		Token        string            `json:"token"`
-		Notification notificationBlock `json:"notification"`
-		Data         map[string]string `json:"data,omitempty"`
-		Android      *androidConfig    `json:"android,omitempty"`
+		Token   string            `json:"token"`
+		Data    map[string]string `json:"data,omitempty"`
+		Android *androidConfig    `json:"android,omitempty"`
 	} `json:"message"`
 }
 
-type notificationBlock struct {
-	Title string `json:"title"`
-	Body  string `json:"body"`
-}
-
-// androidConfig carries the Android-specific channel routing and priority
-// docs/12-frontend-ux.md's notification-channel design needs — a
-// high-priority bengaluru_match must actually wake the device, which FCM's
-// own priority field (distinct from notification_channel's unrelated
-// "channel" concept) controls.
+// androidConfig carries FCM's own delivery-priority and collapse
+// semantics — distinct from the notification channel, which now travels
+// as an ordinary data field (see message's own comment) since there is no
+// "android.notification" block on a data-only message for it to live in.
 type androidConfig struct {
-	Priority     string           `json:"priority,omitempty"` // "high" or "normal"
-	Notification *androidNotifCfg `json:"notification,omitempty"`
-	CollapseKey  string           `json:"collapse_key,omitempty"`
-}
-
-type androidNotifCfg struct {
-	ChannelID string `json:"channel_id,omitempty"`
+	Priority    string `json:"priority,omitempty"` // "high" or "normal"
+	CollapseKey string `json:"collapse_key,omitempty"`
 }
 
 // Notification is Send's input — a transport-agnostic shape the caller
@@ -179,19 +176,25 @@ func (c *Client) Send(ctx context.Context, deviceToken string, n Notification) (
 		return "", fmt.Errorf("fcm: not configured (no project id or service account)")
 	}
 
+	data := make(map[string]string, len(n.Data)+3)
+	for k, v := range n.Data {
+		data[k] = v
+	}
+	data["title"] = n.Title
+	data["body"] = n.Body
+	if n.ChannelID != "" {
+		data["channel_id"] = n.ChannelID
+	}
+
 	var body message
 	body.Message.Token = deviceToken
-	body.Message.Notification = notificationBlock{Title: n.Title, Body: n.Body}
-	body.Message.Data = n.Data
+	body.Message.Data = data
 
 	android := &androidConfig{CollapseKey: n.CollapseKey}
 	if n.HighPriority {
 		android.Priority = "high"
 	} else {
 		android.Priority = "normal"
-	}
-	if n.ChannelID != "" {
-		android.Notification = &androidNotifCfg{ChannelID: n.ChannelID}
 	}
 	body.Message.Android = android
 
