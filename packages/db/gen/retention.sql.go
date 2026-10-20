@@ -18,16 +18,20 @@ where id in (
     where j.raw_payload <> '{}'::jsonb
         and j.first_seen_at < now() - make_interval(secs => $1::float8)
         and not exists (
-            select 1 from user_job_state as s where s.job_group_id = j.job_group_id
+            select 1 from user_job_state as s
+where s.job_group_id = j.job_group_id
         )
         and not exists (
-            select 1 from user_job_state_event as e where e.job_group_id = j.job_group_id
+            select 1 from user_job_state_event as e
+where e.job_group_id = j.job_group_id
         )
         and not exists (
-            select 1 from notification as n where n.job_group_id = j.job_group_id
+            select 1 from notification as n
+where n.job_group_id = j.job_group_id
         )
         and not exists (
-            select 1 from google_calendar_event as g where g.job_group_id = j.job_group_id
+            select 1 from google_calendar_event as g
+where g.job_group_id = j.job_group_id
         )
     order by j.first_seen_at
     limit $2::int
@@ -87,16 +91,20 @@ where id in (
         < now() - make_interval(secs => $4::float8)
     )
     and not exists (
-        select 1 from user_job_state as s where s.job_group_id = j.job_group_id
+        select 1 from user_job_state as s
+where s.job_group_id = j.job_group_id
     )
     and not exists (
-        select 1 from user_job_state_event as e where e.job_group_id = j.job_group_id
+        select 1 from user_job_state_event as e
+where e.job_group_id = j.job_group_id
     )
     and not exists (
-        select 1 from notification as n where n.job_group_id = j.job_group_id
+        select 1 from notification as n
+where n.job_group_id = j.job_group_id
     )
     and not exists (
-        select 1 from google_calendar_event as g where g.job_group_id = j.job_group_id
+        select 1 from google_calendar_event as g
+where g.job_group_id = j.job_group_id
     )
     order by j.first_seen_at
     limit $5::int
@@ -164,6 +172,7 @@ where id in (
     from river_job as q
     where q.state in ('completed', 'cancelled', 'discarded')
         and q.finalized_at < now() - make_interval(secs => $1::float8)
+    order by q.finalized_at
     limit $2::int
 )
 `
@@ -190,6 +199,7 @@ where id in (
     from river_job as q
     where q.state in ('available', 'retryable', 'scheduled')
         and q.created_at < now() - make_interval(secs => $1::float8)
+    order by q.created_at
     limit $2::int
 )
 `
@@ -215,7 +225,9 @@ const scrubOldObservationPayloads = `-- name: ScrubOldObservationPayloads :execr
 update raw_observation
 set payload = '{}'::jsonb
 where (id, observed_at) in (
-    select o.id, o.observed_at
+    select
+o.id,
+o.observed_at
     from raw_observation as o
     where o.payload <> '{}'::jsonb
         and o.observed_at < now() - make_interval(secs => $1::float8)
@@ -261,9 +273,12 @@ update job_score
 set score_inputs = '{}'::jsonb,
     explanation = NULL
 where (job_id, user_id, weight_version) in (
-    select js.job_id, js.user_id, js.weight_version
+    select
+js.job_id,
+js.user_id,
+js.weight_version
     from job_score as js
-    inner join job as j on j.id = js.job_id
+    inner join job as j on js.job_id = j.id
     where (js.score_inputs <> '{}'::jsonb or js.explanation is not NULL)
     and (
         (j.status <> 'open'
@@ -279,17 +294,22 @@ where (job_id, user_id, weight_version) in (
         < now() - make_interval(secs => $4::float8)
     )
     and not exists (
-        select 1 from user_job_state as s where s.job_group_id = j.job_group_id
+        select 1 from user_job_state as s
+where s.job_group_id = j.job_group_id
     )
     and not exists (
-        select 1 from user_job_state_event as e where e.job_group_id = j.job_group_id
+        select 1 from user_job_state_event as e
+where e.job_group_id = j.job_group_id
     )
     and not exists (
-        select 1 from notification as n where n.job_group_id = j.job_group_id
+        select 1 from notification as n
+where n.job_group_id = j.job_group_id
     )
     and not exists (
-        select 1 from google_calendar_event as g where g.job_group_id = j.job_group_id
+        select 1 from google_calendar_event as g
+where g.job_group_id = j.job_group_id
     )
+    order by j.first_seen_at
     limit $5::int
 )
 `

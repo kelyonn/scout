@@ -8,7 +8,9 @@ import (
 	db "github.com/kelyon/scout/packages/db/gen"
 )
 
-// Retention keeps the hosted database under Neon's free-tier ~0.5 GB
+// RetentionConfig configures how far back cold data is kept before it gets
+// compacted, scrubbed or pruned, keeping the hosted database under Neon's
+// free-tier ~0.5 GB
 // (ADR-019, docs/03-data-model.md section 11). Measured on the local database
 // after one live day: job 805 MB total (720 MB of it TOAST — descriptions and
 // raw_payload), raw_observation 204 MB (160 MB payload), job_score 77 MB,
@@ -136,8 +138,8 @@ func (s *Scheduler) RunRetention(ctx context.Context) (RetentionResult, error) {
 			"size_mb", size>>20, "high_water_mb", RetentionHighWaterBytes>>20)
 	}
 
-	if err := applyRetention(ctx, q, cfg, &res); err != nil {
-		return res, err
+	if applyErr := applyRetention(ctx, q, cfg, &res); applyErr != nil {
+		return res, applyErr
 	}
 
 	if size, err = q.SelectDatabaseSizeBytes(ctx); err == nil {

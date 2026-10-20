@@ -30,7 +30,7 @@ type retentionFixture struct {
 	closedJob, extraColdJob1, extraColdJob2      string
 }
 
-func (f *retentionFixture) job(t *testing.T, ctx context.Context, tx pgx.Tx, company, source, group string, software bool, status, seen string) string {
+func (f *retentionFixture) job(ctx context.Context, t *testing.T, tx pgx.Tx, company, source, group string, software bool, status, seen string) string {
 	t.Helper()
 	var id string
 	err := tx.QueryRow(ctx, `
@@ -57,7 +57,7 @@ func (f *retentionFixture) job(t *testing.T, ctx context.Context, tx pgx.Tx, com
 	return id
 }
 
-func setupRetention(t *testing.T, ctx context.Context, tx pgx.Tx) *retentionFixture {
+func setupRetention(ctx context.Context, t *testing.T, tx pgx.Tx) *retentionFixture {
 	t.Helper()
 	f := &retentionFixture{}
 	var company, source string
@@ -76,13 +76,13 @@ func setupRetention(t *testing.T, ctx context.Context, tx pgx.Tx) *retentionFixt
 		must(tx.QueryRow(ctx, `insert into job_group (company_id) values ($1) returning id`, company).Scan(g))
 	}
 	old := "2000-01-01T00:00:00Z"
-	f.coldJob = f.job(t, ctx, tx, company, source, f.coldGroup, false, "open", old)
-	f.extraColdJob1 = f.job(t, ctx, tx, company, source, f.coldGroup, false, "open", old)
-	f.extraColdJob2 = f.job(t, ctx, tx, company, source, f.coldGroup, false, "open", old)
-	f.closedJob = f.job(t, ctx, tx, company, source, f.coldGroup, true, "closed", old)
-	f.savedJob = f.job(t, ctx, tx, company, source, f.savedGroup, false, "open", old)
-	f.notifiedJob = f.job(t, ctx, tx, company, source, f.notifiedGroup, false, "open", old)
-	f.hotJob = f.job(t, ctx, tx, company, source, f.hotGrp, true, "open", time.Now().UTC().Format(time.RFC3339))
+	f.coldJob = f.job(ctx, t, tx, company, source, f.coldGroup, false, "open", old)
+	f.extraColdJob1 = f.job(ctx, t, tx, company, source, f.coldGroup, false, "open", old)
+	f.extraColdJob2 = f.job(ctx, t, tx, company, source, f.coldGroup, false, "open", old)
+	f.closedJob = f.job(ctx, t, tx, company, source, f.coldGroup, true, "closed", old)
+	f.savedJob = f.job(ctx, t, tx, company, source, f.savedGroup, false, "open", old)
+	f.notifiedJob = f.job(ctx, t, tx, company, source, f.notifiedGroup, false, "open", old)
+	f.hotJob = f.job(ctx, t, tx, company, source, f.hotGrp, true, "open", time.Now().UTC().Format(time.RFC3339))
 
 	must2 := func(_ any, err error) { t.Helper(); must(err) }
 	must2(tx.Exec(ctx, `insert into user_job_state (user_id, job_group_id, state, notes, rating)
@@ -92,7 +92,7 @@ func setupRetention(t *testing.T, ctx context.Context, tx pgx.Tx) *retentionFixt
 	return f
 }
 
-func heavy(t *testing.T, ctx context.Context, tx pgx.Tx, id string) (hasText bool, simhash int64, payload string, score string) {
+func heavy(ctx context.Context, t *testing.T, tx pgx.Tx, id string) (hasText bool, simhash int64, payload string, score string) {
 	t.Helper()
 	var sh *int64
 	if err := tx.QueryRow(ctx, `select description_text is not null or description_html is not null
@@ -118,7 +118,7 @@ func TestRetention_CompactsColdJobsAndNeverProtectedOnes(t *testing.T) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	f := setupRetention(t, ctx, tx)
+	f := setupRetention(ctx, t, tx)
 	var res RetentionResult
 	if err := applyRetention(ctx, db.New(tx), testRetention(), &res); err != nil {
 		t.Fatalf("applyRetention: %v", err)
@@ -130,7 +130,7 @@ func TestRetention_CompactsColdJobsAndNeverProtectedOnes(t *testing.T) {
 		t.Errorf("JobsCompacted = %d, want 4", res.JobsCompacted)
 	}
 	for name, id := range map[string]string{"cold": f.coldJob, "extra1": f.extraColdJob1, "extra2": f.extraColdJob2, "closed": f.closedJob} {
-		has, sim, payload, score := heavy(t, ctx, tx, id)
+		has, sim, payload, score := heavy(ctx, t, tx, id)
 		if has || payload != "{}" || score != "{}" {
 			t.Errorf("%s job not compacted: bulky=%v payload=%s score=%s", name, has, payload, score)
 		}
@@ -140,7 +140,7 @@ func TestRetention_CompactsColdJobsAndNeverProtectedOnes(t *testing.T) {
 	}
 
 	for name, id := range map[string]string{"saved": f.savedJob, "notified": f.notifiedJob, "hot": f.hotJob} {
-		has, _, payload, score := heavy(t, ctx, tx, id)
+		has, _, payload, score := heavy(ctx, t, tx, id)
 		if !has || payload == "{}" || score == "{}" {
 			t.Errorf("%s job must stay whole: bulky=%v payload=%s score=%s", name, has, payload, score)
 		}
@@ -184,7 +184,7 @@ func TestRetention_ProtectionIsByGroup(t *testing.T) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	f := setupRetention(t, ctx, tx)
+	f := setupRetention(ctx, t, tx)
 	if _, err := tx.Exec(ctx, `insert into user_job_state (user_id, job_group_id) values ($1, $2)`, f.user, f.coldGroup); err != nil {
 		t.Fatal(err)
 	}
@@ -206,7 +206,7 @@ func TestRetention_ObservationsScrubbedRowsKept(t *testing.T) {
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	f := setupRetention(t, ctx, tx)
+	f := setupRetention(ctx, t, tx)
 	var source string
 	if err := tx.QueryRow(ctx, `select primary_source_id from job where id=$1`, f.hotJob).Scan(&source); err != nil {
 		t.Fatal(err)
