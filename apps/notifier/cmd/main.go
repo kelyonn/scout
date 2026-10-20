@@ -68,13 +68,14 @@ func main() {
 	}
 
 	setup := flag.Bool("setup", false, "run the one-time Telegram onboarding flow and exit")
+	once := flag.Bool("once", false, "run one evaluate/deliver/digest tick and exit (externally scheduled, ADR-019)")
 	flag.Parse()
 
 	var err error
 	if *setup {
 		err = runSetup(log)
 	} else {
-		err = run(log)
+		err = run(log, *once)
 	}
 	if err != nil {
 		log.Error("exited with error", "err", err)
@@ -115,7 +116,7 @@ func selfCheck(addr string) error {
 	return nil
 }
 
-func run(log *slog.Logger) error {
+func run(log *slog.Logger, once bool) error {
 	pool, err := buildDatabasePool(context.Background())
 	if err != nil {
 		return fmt.Errorf("configure database: %w", err)
@@ -154,6 +155,12 @@ func run(log *slog.Logger) error {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	if once {
+		runTick(ctx, pool, eval, deadlines, deliverer, digester, log)
+		log.Info("notifier run complete")
+		return nil
+	}
 
 	// docs/16-observability.md — no other HTTP surface exists on this
 	// binary for Prometheus to scrape (see packages/metrics' own comment

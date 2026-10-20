@@ -12,7 +12,13 @@ operational specification.
 **Budget: ₹0.** Every choice below is constrained by that and by the fact that
 one person operates this in the evenings.
 
-> **Current default: laptop-only ([ADR-018](adr/ADR-018-laptop-only-hosting.md)).**
+> **Current default: cardless hosted pipeline ([ADR-019](adr/ADR-019-cardless-hosted-pipeline.md)).**
+> GitHub Actions runs collector/brain/notifier against Neon and Upstash; the API
+> is on Render and the web app on Vercel, all without a card. The paragraph below
+> is the ADR-018 laptop-only default it replaces, kept as the local-dev and
+> fallback description.
+>
+> **Previously: laptop-only ([ADR-018](adr/ADR-018-laptop-only-hosting.md)).**
 > Oracle Cloud requires a card for identity verification that isn't available
 > right now, so there is no remote host and no Tailscale today. Sections 2, 3,
 > 6, 7, and 8 below describe the Oracle+Tailscale design from ADR-014 — it is

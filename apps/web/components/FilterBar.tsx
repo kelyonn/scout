@@ -88,7 +88,19 @@ export function FilterBar({
   facets?: FilterFacet[];
 }) {
   const has = (f: FilterFacet) => facets.includes(f);
-  const [expanded, setExpanded] = useState(true);
+  // null = "the viewport's default": open on desktop, collapsed on a phone
+  // (docs/12 section 6 — filters shouldn't push the first job card below
+  // the fold). Decided in CSS rather than from window.matchMedia during
+  // render, so the server and the client's first paint agree; the first
+  // tap makes it explicit either way.
+  const [expanded, setExpanded] = useState<boolean | null>(null);
+  const toggle = () =>
+    setExpanded((prev) => {
+      if (prev !== null) return !prev;
+      return !window.matchMedia("(min-width: 640px)").matches;
+    });
+  const panelClass = expanded === null ? "hidden sm:block" : expanded ? "block" : "hidden";
+  const chevronClass = expanded === null ? "sm:rotate-90" : expanded ? "rotate-90" : "";
   const activeCount =
     (has("seniority") ? filters.seniority.length : 0) +
     (has("roleFamily") ? filters.roleFamily.length : 0) +
@@ -101,10 +113,12 @@ export function FilterBar({
       <div className="flex items-center justify-between px-4 py-3">
         <button
           type="button"
-          onClick={() => setExpanded((e) => !e)}
+          onClick={toggle}
+          aria-expanded={expanded ?? undefined}
+          aria-controls="filter-panel"
           className="flex items-center gap-2 text-label text-text-primary"
         >
-          <span className={`transition-transform duration-150 ${expanded ? "rotate-90" : ""}`}>&#8250;</span>
+          <span aria-hidden className={`transition-transform duration-150 ${chevronClass}`}>&#8250;</span>
           Filters
           {activeCount > 0 && (
             <span className="text-caption rounded-full bg-accent-primary/15 text-accent-primary px-2 py-0.5">
@@ -130,8 +144,8 @@ export function FilterBar({
         </div>
       </div>
 
-      {expanded && (
-        <div className="px-4 pb-4 pt-1 space-y-4 border-t border-border-subtle">
+      {
+        <div id="filter-panel" className={`${panelClass} px-4 pb-4 pt-1 space-y-4 border-t border-border-subtle`}>
           {has("seniority") && (
             <Section title="Seniority">
               <CheckboxGroup
@@ -200,7 +214,7 @@ export function FilterBar({
             </Section>
           )}
         </div>
-      )}
+      }
     </div>
   );
 }

@@ -17,13 +17,129 @@ import type {
   WatchlistResponse,
 } from "./types";
 
-async function getJSON<T>(url: string): Promise<T> {
-  const res = await fetch(url);
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
+// Every call the browser makes goes through here. The Go API's error
+// bodies are `{"error": "…"}` written for a developer reading logs
+// ("invalid transition: saved -> applied"); ApiError carries that as
+// `detail` and exposes a `message` a person can act on.
+export class ApiError extends Error {
+  readonly status: number;
+  /** The server's own error string, when it sent one. */
+  readonly detail: string | null;
+
+  constructor(status: number, message: string, detail: string | null = null) {
+    super(message);
+    this.name = "ApiError";
+    this.status = status;
+    this.detail = detail;
   }
+
+  get isNotFound(): boolean {
+    return this.status === 404;
+  }
+}
+
+export const NETWORK_ERROR_MESSAGE = "Couldn't reach Scout. Check your connection and try again.";
+
+/** Turns anything a query or mutation rejected with into one sentence
+ * fit for the UI. */
+export function errorMessage(err: unknown, fallback = "Something went wrong. Try again."): string {
+  if (err instanceof ApiError) return err.message;
+  if (err instanceof Error && err.message) return err.message;
+  return fallback;
+}
+
+function messageFor(status: number, detail: string | null): string {
+  switch (status) {
+    case 400:
+      return detail ? `The request wasn't valid: ${detail}.` : "The request wasn't valid.";
+    case 401:
+      return "Your session has ended. Sign in again to continue.";
+    case 403:
+      return "You don't have access to that.";
+    case 404:
+      return "That no longer exists — it may have been removed or closed.";
+    case 409:
+      return "That change isn't possible from the current state. Refresh to see the latest.";
+    case 412:
+      return detail ? `${capitalize(detail)}.` : "Something needs to be set up first.";
+    case 413:
+      return "That file is too large.";
+    case 422:
+      return detail ? `${capitalize(detail)}.` : "The server couldn't process that input.";
+    case 429:
+      return "Too many attempts. Wait a moment and try again.";
+    case 502:
+    case 503:
+    case 504:
+      return detail ?? "Scout's API isn't reachable right now.";
+    default:
+      return "Something went wrong on the server. Try again in a moment.";
+  }
+}
+
+function capitalize(s: string): string {
+  return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+async function readDetail(res: Response): Promise<string | null> {
+  const text = await res.text().catch(() => "");
+  if (!text) return null;
+  try {
+    const parsed: unknown = JSON.parse(text);
+    if (parsed && typeof parsed === "object" && "error" in parsed && typeof parsed.error === "string") {
+      return parsed.error;
+    }
+  } catch {
+    // Not JSON (an HTML error page from something in between) — never
+    // surface markup to the user.
+  }
+  return null;
+}
+
+// A 401 means the session cookie is gone or the token was rotated. Every
+// screen would otherwise show the same dead-end error, so the client
+// sends the browser back through /login once, preserving where it was.
+let redirectingToLogin = false;
+function redirectToLogin(): void {
+  if (typeof window === "undefined" || redirectingToLogin) return;
+  if (window.location.pathname.startsWith("/login")) return;
+  redirectingToLogin = true;
+  const next = window.location.pathname + window.location.search;
+  // A full navigation on purpose, not router.push: the client router's
+  // cache still holds the pages that just 401'd, and /login's own
+  // redirect back needs a fresh server render to see the new cookie.
+  // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- see above
+  window.location.href = `/login?next=${encodeURIComponent(next)}`;
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  let res: Response;
+  try {
+    res = await fetch(url, init);
+  } catch {
+    throw new ApiError(0, NETWORK_ERROR_MESSAGE);
+  }
+
+  if (!res.ok) {
+    const detail = await readDetail(res);
+    if (res.status === 401) redirectToLogin();
+    throw new ApiError(res.status, messageFor(res.status, detail), detail);
+  }
+
+  if (res.status === 204) return undefined as T;
   return res.json() as Promise<T>;
+}
+
+function getJSON<T>(url: string): Promise<T> {
+  return request<T>(url);
+}
+
+function postJSON<T>(url: string, body?: unknown): Promise<T> {
+  return request<T>(url, {
+    method: "POST",
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
 }
 
 export function fetchJobs(params: {
@@ -56,7 +172,7 @@ export function fetchCompanies(query?: string): Promise<CompaniesResponse> {
 }
 
 export function fetchCompanyDetail(id: string): Promise<CompanyDetail> {
-  return getJSON<CompanyDetail>(`/api/companies/${id}`);
+  return getJSON<CompanyDetail>(`/api/companies/${encodeURIComponent(id)}`);
 }
 
 export function fetchWatchlist(): Promise<WatchlistResponse> {
@@ -64,44 +180,23 @@ export function fetchWatchlist(): Promise<WatchlistResponse> {
 }
 
 export async function addToWatchlist(companyId: string, notifyAnyRole = true): Promise<void> {
-  const res = await fetch("/api/watchlist", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ company_id: companyId, notify_any_role: notifyAnyRole }),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
-  }
+  await postJSON<void>("/api/watchlist", { company_id: companyId, notify_any_role: notifyAnyRole });
 }
 
 export async function removeFromWatchlist(companyId: string): Promise<void> {
-  const res = await fetch(`/api/watchlist/${companyId}`, { method: "DELETE" });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
-  }
+  await request<void>(`/api/watchlist/${encodeURIComponent(companyId)}`, { method: "DELETE" });
 }
 
 export function fetchGoogleCalendarStatus(): Promise<GoogleCalendarStatus> {
   return getJSON<GoogleCalendarStatus>("/api/integrations/google/status");
 }
 
-export async function syncGoogleCalendar(): Promise<GoogleCalendarSyncResult> {
-  const res = await fetch("/api/integrations/google/sync", { method: "POST" });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
-  }
-  return res.json() as Promise<GoogleCalendarSyncResult>;
+export function syncGoogleCalendar(): Promise<GoogleCalendarSyncResult> {
+  return postJSON<GoogleCalendarSyncResult>("/api/integrations/google/sync");
 }
 
 export async function disconnectGoogleCalendar(): Promise<void> {
-  const res = await fetch("/api/integrations/google/disconnect", { method: "POST" });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
-  }
+  await postJSON<void>("/api/integrations/google/disconnect");
 }
 
 export function fetchGoogleCalendarEvents(): Promise<GoogleCalendarEventsResponse> {
@@ -109,28 +204,19 @@ export function fetchGoogleCalendarEvents(): Promise<GoogleCalendarEventsRespons
 }
 
 export function fetchJobDetail(groupId: string): Promise<JobDetail> {
-  return getJSON<JobDetail>(`/api/jobs/${groupId}`);
+  return getJSON<JobDetail>(`/api/jobs/${encodeURIComponent(groupId)}`);
 }
 
-export async function updateJobState(
+export function updateJobState(
   groupId: string,
   params: { state: ApplicationState; foundElsewhereFirst?: boolean; notes?: string; rating?: number },
 ): Promise<StateResponse> {
-  const res = await fetch(`/api/jobs/${groupId}/state`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      state: params.state,
-      found_elsewhere_first: params.foundElsewhereFirst,
-      notes: params.notes,
-      rating: params.rating,
-    }),
+  return postJSON<StateResponse>(`/api/jobs/${encodeURIComponent(groupId)}/state`, {
+    state: params.state,
+    found_elsewhere_first: params.foundElsewhereFirst,
+    notes: params.notes,
+    rating: params.rating,
   });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
-  }
-  return res.json() as Promise<StateResponse>;
 }
 
 export function fetchApplications(states?: ApplicationState[]): Promise<ApplicationsResponse> {
@@ -155,26 +241,12 @@ export function fetchResumeStatus(): Promise<ResumeStatus> {
   return getJSON<ResumeStatus>("/api/resume");
 }
 
-export async function uploadResume(file: File): Promise<ResumeUploadResponse> {
+export function uploadResume(file: File): Promise<ResumeUploadResponse> {
   const form = new FormData();
   form.set("resume", file);
-  const res = await fetch("/api/resume", { method: "POST", body: form });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
-  }
-  return res.json() as Promise<ResumeUploadResponse>;
+  return request<ResumeUploadResponse>("/api/resume", { method: "POST", body: form });
 }
 
-export async function registerDevice(req: RegisterDeviceRequest): Promise<RegisterDeviceResponse> {
-  const res = await fetch("/api/push/register-device", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(req),
-  });
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`${res.status}: ${body}`);
-  }
-  return res.json() as Promise<RegisterDeviceResponse>;
+export function registerDevice(req: RegisterDeviceRequest): Promise<RegisterDeviceResponse> {
+  return postJSON<RegisterDeviceResponse>("/api/push/register-device", req);
 }

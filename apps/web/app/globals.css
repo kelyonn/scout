@@ -1,44 +1,44 @@
 @import "tailwindcss";
 
 /*
- * Design tokens — docs/12-frontend-ux.md section 2, updated for the
- * 2026-08 Gruvbox retheme. Standard Gruvbox Dark (medium contrast)
- * palette, replacing the cream/olive light theme.
+ * Design tokens — Swiss brutalist retheme (replaces the 2026-08 Gruvbox
+ * dark theme). Paper ground, ink type and rules, one quiet pink tint.
+ * Flat: no gradients, no shadows, no rounded corners, no grain.
  *
- * "The interface should be boring and the data should be interesting."
- * One accent color, a restrained neutral ramp, no gradients or
- * glassmorphism — the job content is the product.
+ * Token roles are unchanged so components keep working:
+ *   accent-primary  ink — primary fills (white label on ink), links,
+ *                   emphasis text and borders
+ *   accent-subtle   the pink tint, an opaque fill for active/selected
+ *                   states and highlights
  */
 
 :root {
-  --bg-base: #282828; /* bg0 */
-  --bg-surface: #3c3836; /* bg1 */
-  --bg-elevated: #504945; /* bg2 */
-  --border-subtle: #504945; /* bg2 */
-  --border-strong: #665c54; /* bg3 */
-  --text-muted: #a89984; /* fg4 */
-  --text-faint: #7c6f64; /* bg4 */
-  --text-secondary: #d5c4a1; /* fg2 */
-  --text-primary: #ebdbb2; /* fg1 */
+  --bg-base: #eeede8; /* paper */
+  --bg-surface: #f6f5f1; /* raised paper */
+  --bg-elevated: #e2e0d8; /* inset / hover */
+  --border-subtle: #0a0a0a; /* ink rules */
+  --border-strong: #0a0a0a;
+  --text-muted: #5b5b57;
+  --text-faint: #8a8a84;
+  --text-secondary: #2b2b28;
+  --text-primary: #0a0a0a; /* ink */
 
-  --accent-primary: #fe8019; /* bright orange */
-  --accent-hover: #d65d0e; /* neutral orange */
-  --accent-subtle: rgba(254, 128, 25, 0.14);
+  --accent-primary: #0a0a0a;
+  --accent-hover: #2b2b28;
+  --accent-subtle: #e2b9bb; /* the pink tint */
 
-  --success: #b8bb26; /* bright green */
-  --warning: #fabd2f; /* bright yellow */
-  --danger: #fb4934; /* bright red */
-  --info: #83a598; /* bright blue */
+  --success: #1c7a47;
+  --warning: #8a6200;
+  --danger: #c0281c;
+  --info: #2b5d8a;
 
-  /* Score band colors — docs/12's one deliberate exception to the
-     single-accent rule: score is the primary scanning dimension.
-     Gruvbox's own bright accents read as a green-to-red scan, rather
-     than a single desaturating hue. */
-  --score-exceptional: #b8bb26; /* 90-100 — bright green */
-  --score-strong: #8ec07c; /* 80-89 — bright aqua */
-  --score-good: #fabd2f; /* 70-79 — bright yellow */
-  --score-moderate: #fe8019; /* 60-69 — bright orange */
-  --score-weak: #fb4934; /* <60 — bright red */
+  /* Score band colors — kept as the one multi-hue exception (score is the
+     primary scanning dimension), darkened to read on paper. */
+  --score-exceptional: #1c7a47; /* 90-100 */
+  --score-strong: #2f7f6e; /* 80-89 */
+  --score-good: #8a6200; /* 70-79 */
+  --score-moderate: #b4540a; /* 60-69 */
+  --score-weak: #c0281c; /* <60 */
 
   /* Spacing — 4px base scale */
   --space-1: 4px;
@@ -52,10 +52,15 @@
   --space-24: 96px;
   --space-32: 128px;
 
-  --radius-input: 6px;
-  --radius-card: 8px;
-  --radius-modal: 8px;
-  --radius-pill: 999px;
+  /* Mobile bottom tab bar (components/Shell.tsx) — docs/12 section 6's
+     48px touch targets plus label. Main content and the toast viewport
+     pad by this so nothing hides under the bar. */
+  --bottom-nav-height: 56px;
+
+  --radius-input: 0px;
+  --radius-card: 0px;
+  --radius-modal: 0px;
+  --radius-pill: 0px;
 
   --ease-instant: cubic-bezier(0.2, 0, 0, 1);
   --ease-quick: cubic-bezier(0.2, 0, 0, 1);
@@ -88,8 +93,8 @@
   --color-score-moderate: var(--score-moderate);
   --color-score-weak: var(--score-weak);
 
-  --font-sans: var(--font-inter);
-  --font-mono: var(--font-jetbrains-mono);
+  --font-sans: var(--font-archivo);
+  --font-mono: var(--font-space-mono);
 
   --radius-input: var(--radius-input);
   --radius-card: var(--radius-card);
@@ -97,12 +102,15 @@
   --radius-pill: var(--radius-pill);
 }
 
-* {
-  border-color: var(--border-subtle);
+/* In the base layer so utilities like border-transparent can override it. */
+@layer base {
+  * {
+    border-color: var(--border-subtle);
+  }
 }
 
 html {
-  color-scheme: dark;
+  color-scheme: light;
 }
 
 body {
@@ -112,28 +120,47 @@ body {
   font-size: 14px;
   line-height: 20px;
   -webkit-font-smoothing: antialiased;
-  position: relative;
 }
 
-/* Grain — a feTurbulence noise tile laid flat over the whole app at low
-   opacity with normal (not blended) compositing. An earlier version used
-   mix-blend-mode: overlay, which on this theme's near-black bg-base
-   crushes toward multiply and makes the noise nearly invisible — plain
-   opacity over the content is the simple, reliably-visible version.
-   Fixed + pointer-events: none so it never intercepts clicks or scroll. */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: 999;
-  pointer-events: none;
-  opacity: 0.18;
-  background-image: url("data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHdpZHRoPSIxNjAiIGhlaWdodD0iMTYwIj48ZmlsdGVyIGlkPSJuIj48ZmVUdXJidWxlbmNlIHR5cGU9ImZyYWN0YWxOb2lzZSIgYmFzZUZyZXF1ZW5jeT0iMC43IiBudW1PY3RhdmVzPSIzIiBzdGl0Y2hUaWxlcz0ic3RpdGNoIi8+PGZlQ29sb3JNYXRyaXggdHlwZT0ic2F0dXJhdGUiIHZhbHVlcz0iMCIvPjwvZmlsdGVyPjxyZWN0IHdpZHRoPSIxMDAlIiBoZWlnaHQ9IjEwMCUiIGZpbHRlcj0idXJsKCNuKSIvPjwvc3ZnPg==");
-  background-repeat: repeat;
+/* Square corners everywhere, pills and dots included.
+   Utilities like rounded-lg are single-class rules, so this needs
+   !important to win; scoped to elements that actually ask for rounding. */
+[class*="rounded"] {
+  border-radius: 0 !important;
 }
 
 ::selection {
-  background: rgba(254, 128, 25, 0.28);
+  background: #e2b9bb;
+  color: #0a0a0a;
+}
+
+/* Keyboard focus is visible everywhere, on the accent, without showing
+   a ring on mouse clicks. Inputs keep their own border treatment
+   (focus:border-accent-primary) so they don't get both. */
+:where(a, button, select, summary, [role="button"], [tabindex]):focus-visible {
+  outline: 3px solid var(--accent-primary);
+  outline-offset: 2px;
+}
+:where(input, textarea):focus-visible {
+  outline: none;
+  border-color: var(--accent-primary);
+}
+
+/* Page frame — every routed screen uses this instead of a hardcoded
+   px-10 py-10, so phones get a usable gutter and desktops keep the
+   spec's rhythm. */
+.page {
+  padding: var(--space-6) var(--space-4);
+}
+@media (min-width: 640px) {
+  .page {
+    padding: var(--space-8) var(--space-6);
+  }
+}
+@media (min-width: 1024px) {
+  .page {
+    padding: var(--space-12) var(--space-12);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -147,22 +174,26 @@ body::before {
 
 /* Type scale — docs/12 section 2, 1.2 ratio / 14px body base */
 .text-display {
-  font-size: 28px;
-  line-height: 34px;
-  letter-spacing: -0.02em;
-  font-weight: 600;
+  font-size: 40px;
+  line-height: 38px;
+  letter-spacing: -0.035em;
+  font-weight: 900;
+  font-stretch: 90%;
+  text-transform: uppercase;
 }
 .text-title {
-  font-size: 20px;
-  line-height: 26px;
-  letter-spacing: -0.01em;
-  font-weight: 600;
+  font-size: 30px;
+  line-height: 30px;
+  letter-spacing: -0.03em;
+  font-weight: 900;
+  font-stretch: 90%;
+  text-transform: uppercase;
 }
 .text-heading {
   font-size: 16px;
   line-height: 22px;
   letter-spacing: -0.01em;
-  font-weight: 600;
+  font-weight: 800;
 }
 .text-body {
   font-size: 14px;
@@ -172,7 +203,7 @@ body::before {
 .text-label {
   font-size: 13px;
   line-height: 18px;
-  font-weight: 500;
+  font-weight: 700;
 }
 .text-caption {
   font-size: 12px;
@@ -181,10 +212,11 @@ body::before {
   font-weight: 400;
 }
 .text-micro {
+  font-family: var(--font-mono), ui-monospace, monospace;
   font-size: 11px;
   line-height: 14px;
-  letter-spacing: 0.02em;
-  font-weight: 500;
+  letter-spacing: 0.04em;
+  font-weight: 400;
   text-transform: uppercase;
 }
 

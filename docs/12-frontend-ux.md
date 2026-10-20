@@ -40,45 +40,46 @@ appearance.
 
 ### Color
 
-A single accent on a carefully built neutral ramp. As of the 2026-08 Gruvbox
-retheme, the shell runs standard Gruvbox Dark (medium contrast) rather than
-the cream/olive light palette that preceded it — dark-default again, this
-time for the theme's own identity rather than the original "user works
-evenings" reasoning. Reopen if a light variant turns out to matter more than
-staying faithful to the reference palette.
+A single quiet tint on a paper-and-ink neutral ramp. As of the Swiss
+brutalist retheme, the shell is light: a paper ground, black type and rules,
+flat fills, square corners, no shadows, no gradients and no grain. This
+replaces the 2026-08 Gruvbox Dark theme. Token names are unchanged so
+components did not need rewriting; only their values moved.
 
 ```
 Neutral ramp
- bg-base        #282828   page background, sidebar   (gruvbox bg0)
- bg-surface     #3C3836   cards                       (bg1)
- bg-elevated    #504945   chips/pills nested in a card (bg2)
- border-subtle  #504945                                (bg2)
- border-strong  #665C54                                (bg3)
- text-muted     #A89984                                (fg4)
- text-faint     #7C6F64   nav index numbers, stage-duration micro-labels (bg4)
- text-secondary #D5C4A1                                (fg2)
- text-primary   #EBDBB2                                (fg1)
+ bg-base        #EEEDE8   page background, sidebar   (paper)
+ bg-surface     #F6F5F1   cards
+ bg-elevated    #E2E0D8   chips nested in a card, hover
+ border-subtle  #0A0A0A   1px ink rules
+ border-strong  #0A0A0A
+ text-muted     #5B5B57
+ text-faint     #8A8A84
+ text-secondary #2B2B28
+ text-primary   #0A0A0A                               (ink)
 
 Accent (single, used sparingly)
- accent-primary #FE8019   bright orange — interactive, focus, primary action
- accent-hover   #D65D0E   neutral orange
- accent-subtle  #FE801924            rgba(254,128,25,0.14)
+ accent-primary #0A0A0A   ink — primary fills (white label), links, focus
+ accent-hover   #2B2B28
+ accent-subtle  #E2B9BB   the pink tint — active/selected states, highlights
 
 Semantic
- success #B8BB26    warning #FABD2F    danger #FB4934    info #83A598
+ success #1C7A47    warning #8A6200    danger #C0281C    info #2B5D8A
 ```
+
+The pink is a fill, never a text colour: it is too light to carry text on
+paper. Interactive emphasis is carried by ink, and selection by the tint.
 
 **Score colors are a deliberate exception** — the one place a full ramp is
-justified, because score is the primary scanning dimension. Gruvbox's own
-bright accents give a natural green-to-red scan instead of the previous
-theme's single desaturating hue:
+justified, because score is the primary scanning dimension. The bands are
+darkened so they read on paper:
 
 ```
-90-100  #B8BB26  exceptional  bright green
-80-89   #8EC07C  strong       bright aqua
-70-79   #FABD2F  good         bright yellow
-60-69   #FE8019  moderate     bright orange
-< 60    #FB4934  weak         bright red
+90-100  #1C7A47  exceptional  green
+80-89   #2F7F6E  strong       teal
+70-79   #8A6200  good         ochre
+60-69   #B4540A  moderate     burnt orange
+< 60    #C0281C  weak         red
 ```
 
 Every foreground/background pair should be verified at 4.5:1 minimum before
@@ -88,15 +89,15 @@ presently a spot-check discipline, not an enforced gate.
 ### Type
 
 ```
-UI:   Inter Variable        (system fallback: -apple-system, Segoe UI)
-Mono: JetBrains Mono        (code, IDs, compensation figures)
+UI:   Archivo (variable width) (system fallback: -apple-system, Segoe UI)
+Mono: Space Mono            (scores, labels, IDs, compensation figures)
 
 Scale (1.2 ratio, 14px base — smaller than typical, for density)
-  display  28px / 34  −0.02em  600
-  title    20px / 26  −0.01em  600
-  heading  16px / 22  −0.01em  600
+  display  40px / 38  −0.035em 900 uppercase, 90% width
+  title    30px / 30  −0.03em  900 uppercase, 90% width
+  heading  16px / 22  −0.01em  800
   body     14px / 20   0       400
-  label    13px / 18   0       500
+  label    13px / 18   0       700
   caption  12px / 16   0.01em  400
   micro    11px / 14   0.02em  500  uppercase
 ```
@@ -376,7 +377,7 @@ thumb's resting position.
 
 ## 7. PWA
 
-**Manifest:** standalone display, dark theme color, maskable icons at all
+**Manifest:** standalone display, paper theme color (#EEEDE8), maskable icons at all
 required sizes, shortcuts to Latest/Saved/Search, and a share target so a job URL
 shared from any app is ingested by Scout.
 
@@ -537,7 +538,49 @@ network is what counts.
 
 ---
 
-## 10. Component inventory
+## 10. Build status (2026-09-18)
+
+What `apps/web` actually implements of this document today, so the gap
+between the spec and the shipped screens is written down rather than
+inferred. Everything listed as built has been walked through in a real
+browser against a real database, on a desktop and a 375px viewport.
+
+**Built:** sections 4.1–4.6 as single-column list views (Home with first-run
+setup guidance, Opportunities with URL-state filters and cursor pagination,
+job detail with all thirteen scores, private notes, and a "view original
+listing" link, the Pipeline board with drag-and-drop between columns (legal single
+hops only; Archive outcomes via the `<select>` state menu, which is also
+the keyboard/touch path) and horizontal snap-scroll on phones, Saved/Applied lists, keyword Search with
+the query in the URL, Calendar with a month grid, Companies with a
+watchlist, Insights, Resume upload with client-side validation, Settings).
+Section 6's bottom tab bar (five items, 56px, safe-area padded) and stacked
+layouts. Section 8's basics: semantic landmarks, labels on every input, a
+skip link, visible `:focus-visible` rings, `aria-live` toasts and status
+regions, no interactive controls nested inside links. Every screen has
+distinct loading (skeleton), empty (with a next step), error (with Retry),
+and not-found states; an offline banner; 401s redirect to `/login`;
+route-level and root error boundaries; a PWA manifest and icon (section 7's
+installable subset).
+
+**Also built (2026-10):** the Opportunities list is virtualized
+(`@tanstack/react-virtual`, window scroller, auto-fetches the next page near
+the end) with keyboard triage — `j`/`k` move, `x` select, `s` save, `d`
+dismiss (acts on the selection, else the focused card), `Enter` open, `Esc`
+clear; ignored while typing in a field. `a` (apply) is not bound: Apply opens
+the "found elsewhere first" prompt and an external tab, which does not belong
+on a single keystroke. Job cards support touch swipe (right = save, left =
+dismiss, Undo toast); `touch-action: pan-y` keeps vertical scroll native and
+mouse input is never treated as a swipe. All state changes go through
+`lib/useJobActions.ts` (hop chaining, optimistic update, rollback).
+
+**Not built:** the service worker and offline reading (7), the command
+palette (3), `packages/ui`/shadcn/Storybook (11 — components live in
+`apps/web/components`, hand-written), Prep screens, the Sources/System
+admin screens, and the light theme.
+
+---
+
+## 11. Component inventory
 
 Built in `packages/ui`, all customized from shadcn primitives or written from
 scratch:

@@ -157,9 +157,7 @@ test: ## Run all tests, all languages
 	go test -count=1 ./...
 	cd apps/brain && uv run pytest
 	cd packages/riverpy && uv run pytest
-	@# TypeScript (P3) test invocations join this target with the milestone
-	@# that introduces them. Adding an empty one now would make a green
-	@# `make test` mean less than it does today.
+	cd apps/web && pnpm run test
 
 .PHONY: lint
 lint: lint-go lint-sql lint-py lint-web ## Run every linter
@@ -194,6 +192,15 @@ lint-py: ## Run ruff and mypy --strict over apps/brain, evals, and packages/rive
 lint-web: ## Run eslint and tsc --noEmit over apps/web
 	cd apps/web && pnpm run lint
 	cd apps/web && pnpm run typecheck
+
+.PHONY: test-web
+test-web: ## Run apps/web's unit tests (vitest)
+	cd apps/web && pnpm run test
+
+.PHONY: web-dev
+web-dev: ## Run the Next.js dev server natively against `make dev`'s API (copies apps/web/.env.example on first run)
+	@test -f apps/web/.env.local || { echo "no apps/web/.env.local; copying .env.example"; cp apps/web/.env.example apps/web/.env.local; }
+	cd apps/web && pnpm install --frozen-lockfile && pnpm run dev
 
 .PHONY: fmt
 fmt: ## Format Go code

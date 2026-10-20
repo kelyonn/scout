@@ -22,3 +22,44 @@ export function isValidToken(presented: string): boolean {
   const want = createHash("sha256").update(expected).digest();
   return timingSafeEqual(got, want);
 }
+
+// Optional convenience for a single-user install: SCOUT_LOGIN_PASSCODE (set
+// in apps/web/.env.local, never committed) is a short code that can be
+// typed in place of the 32+ character token. It is exchanged for the real
+// token server-side, so the cookie and every API call still carry the long
+// secret and the Go API's minimum-length rule is untouched. The login
+// route's rate limit (10 wrong tries per 15 minutes per client) is what
+// makes a short code acceptable.
+export function resolveLoginToken(presented: string): string | null {
+  if (isValidToken(presented)) return presented;
+  const passcode = process.env.SCOUT_LOGIN_PASSCODE;
+  const real = process.env.SCOUT_AUTH_TOKEN;
+  if (!passcode || !real || !presented) return null;
+  const got = createHash("sha256").update(presented).digest();
+  const want = createHash("sha256").update(passcode).digest();
+  return timingSafeEqual(got, want) ? real : null;
+}
+
+// One definition of the cookie's attributes, shared by login (set) and
+// logout (clear) — a clear whose attributes differ from the set is
+// silently ignored by the browser, which is how "Sign out" stops working.
+//
+// Secure is keyed on SCOUT_ENV, not NODE_ENV: `next build`/`next start`
+// set NODE_ENV=production unconditionally, in the local Compose stack
+// too, and a Secure cookie issued over plain HTTP is never stored — every
+// login would appear to succeed and then immediately not be signed in.
+// SCOUT_ENV is the same variable apps/api/cmd/main.go uses for exactly
+// this local-vs-production distinction.
+export function sessionCookieOptions() {
+  return {
+    httpOnly: true,
+    secure: process.env.SCOUT_ENV === "production",
+    sameSite: "strict" as const,
+    path: "/",
+    // One year. Rotation is the revocation mechanism (ADR-015), not
+    // expiry — a short lifetime would mean re-typing the token on every
+    // device on a schedule, which buys nothing when the same secret is
+    // what gets re-typed.
+    maxAge: 365 * 24 * 60 * 60,
+  };
+}

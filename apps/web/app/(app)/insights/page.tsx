@@ -2,14 +2,16 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { fetchApplications, fetchJobs } from "@/lib/api";
-
-const SENIORITY_FILTER = ["internship", "new_grad", "entry", "unknown"];
+import { EmptyState, ErrorNotice, PageHeader, Skeleton } from "@/components/ui";
+import { formatRoleFamily } from "@/lib/taxonomy";
 
 function Bar({ label, count, total, color }: { label: string; count: number; total: number; color: string }) {
   const pct = total > 0 ? (count / total) * 100 : 0;
   return (
     <div className="flex items-center gap-3">
-      <span className="text-caption text-text-secondary w-32 shrink-0 truncate">{label}</span>
+      <span className="text-caption text-text-secondary w-28 sm:w-36 shrink-0 truncate" title={label}>
+        {label}
+      </span>
       <div className="flex-1 h-2 rounded-full bg-bg-elevated overflow-hidden">
         <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${pct}%`, background: color }} />
       </div>
@@ -37,15 +39,17 @@ function topN<T extends string>(counts: Record<T, number>, n: number): [T, numbe
 // against a real corpus) is explicitly P5 scope in docs/19-roadmap.md;
 // this is the honest subset that's free with data already in hand.
 export default function InsightsPage() {
-  const { data: jobsData, isLoading: jobsLoading } = useQuery({
-    queryKey: ["jobs", SENIORITY_FILTER, "insights"],
-    queryFn: () => fetchJobs({ minPriority: 1, seniority: SENIORITY_FILTER, limit: 100 }),
+  const jobsQuery = useQuery({
+    queryKey: ["jobs", "insights"],
+    queryFn: () => fetchJobs({ minPriority: 1, limit: 100 }),
   });
-
-  const { data: applicationsData, isLoading: applicationsLoading } = useQuery({
+  const applicationsQuery = useQuery({
     queryKey: ["applications"],
     queryFn: () => fetchApplications(),
   });
+  const { data: jobsData, isPending: jobsLoading } = jobsQuery;
+  const { data: applicationsData, isPending: applicationsLoading } = applicationsQuery;
+  const failed = jobsQuery.isError ? jobsQuery : applicationsQuery.isError ? applicationsQuery : null;
 
   const jobs = jobsData?.data ?? [];
   const applications = applicationsData?.data ?? [];
@@ -76,15 +80,29 @@ export default function InsightsPage() {
   const funnelMax = Math.max(1, ...funnel.map((f) => f.count));
 
   return (
-    <div className="max-w-4xl mx-auto px-10 py-10">
-      <div className="mb-8">
-        <h1 className="text-title text-text-primary">Insights</h1>
-        <p className="text-caption text-text-muted mt-1.5">Computed from the {jobs.length} jobs currently in your feed.</p>
-      </div>
+    <div className="max-w-4xl mx-auto page">
+      <PageHeader
+        title="Insights"
+        subtitle={loading ? "Loading…" : `Computed from the top ${jobs.length} jobs in your feed and everything in your pipeline.`}
+      />
 
-      {loading && <p className="text-body text-text-muted">Loading…</p>}
+      {failed && <ErrorNotice error={failed.error} fallback="Couldn't load insights." onRetry={() => void failed.refetch()} />}
 
-      {!loading && (
+      {loading && (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4" role="status" aria-label="Loading">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="h-48" />
+          ))}
+        </div>
+      )}
+
+      {!loading && !failed && jobs.length === 0 && applications.length === 0 && (
+        <EmptyState title="Nothing to chart yet" action={{ label: "Browse opportunities", href: "/opportunities" }}>
+          Insights fill in once the feed has jobs and you&rsquo;ve started saving or applying.
+        </EmptyState>
+      )}
+
+      {!loading && !failed && (jobs.length > 0 || applications.length > 0) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <Panel title="Score distribution">
             <div className="space-y-3">
@@ -105,7 +123,7 @@ export default function InsightsPage() {
           <Panel title="Top role families">
             <div className="space-y-3">
               {topN(roleFamilies, 6).map(([label, count]) => (
-                <Bar key={label} label={label.replace(/_/g, " ")} count={count} total={jobs.length} color="var(--success)" />
+                <Bar key={label} label={formatRoleFamily(label)} count={count} total={jobs.length} color="var(--success)" />
               ))}
             </div>
           </Panel>

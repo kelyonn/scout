@@ -192,3 +192,31 @@ func TestStatusRecorderForwardsFlush(t *testing.T) {
 		t.Errorf("inner.flushes = %d, want 2 — Flush() is not reaching the underlying ResponseWriter", inner.flushes)
 	}
 }
+
+// TestUnknownRouteIsJSON404 pins the error-body contract: an authenticated
+// caller hitting a path that doesn't exist gets the same {"error": ...}
+// shape every handler uses, not net/http's text/plain default — the web
+// frontend renders the JSON message and would otherwise show "404 page
+// not found" verbatim.
+func TestUnknownRouteIsJSON404(t *testing.T) {
+	a, err := auth.New(testToken, true)
+	if err != nil {
+		t.Fatalf("auth.New: %v", err)
+	}
+	h := routes(slog.New(slog.NewTextHandler(io.Discard, nil)), a, testResumeHandler(), testJobsHandler(), testSearchHandler(), testStreamHandler(), testCompaniesHandler(), testGoogleCalendarHandler(), testPushHandler())
+
+	r := httptest.NewRequestWithContext(context.Background(), http.MethodGet, "/v1/does-not-exist", nil)
+	r.Header.Set("Authorization", "Bearer "+testToken)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", ct)
+	}
+	if !strings.Contains(w.Body.String(), `"error"`) {
+		t.Errorf("body = %q, want an {\"error\": ...} object", w.Body.String())
+	}
+}
