@@ -398,7 +398,7 @@ exception rather than how every adapter is driven.
 | Milestone | Adapters | Cumulative company coverage |
 | --- | --- | --- |
 | P1 | Greenhouse, Lever, Ashby, HN, RSS/Atom | ~250 |
-| P2 | JSON-LD, sitemap, Workable, SmartRecruiters, GitHub, YC | ~600 |
+| P2 | JSON-LD, sitemap (**covered 2026-10-20**, `adapters/web/careerpage`), Workable, SmartRecruiters, GitHub, YC | ~600 |
 | P3 | Email alerts, **Workday**, Rippling, BambooHR, Recruitee, GCC seed list | ~900 |
 | P5 | **SuccessFactors, Darwinbox, Keka, Zoho Recruit**, iCIMS, Jobvite, Indian services portals, campus platforms, Reddit, VC portfolios, funding feeds | ~1,500 |
 | P5+ | Taleo, Telegram, Discord, hackathons | ~2,000+ |

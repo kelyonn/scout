@@ -41,6 +41,7 @@ import (
 	"github.com/kelyon/scout/adapters/ats/workable"
 	"github.com/kelyon/scout/adapters/ats/workday"
 	"github.com/kelyon/scout/adapters/ats/zohorecruit"
+	"github.com/kelyon/scout/adapters/web/careerpage"
 	"github.com/kelyon/scout/apps/collector/internal/emailalert"
 	"github.com/kelyon/scout/apps/collector/internal/heartbeat"
 	"github.com/kelyon/scout/apps/collector/internal/politeness"
@@ -309,6 +310,8 @@ func buildPipeline(fetcher *fetch.Fetcher) *scheduler.Pipeline {
 			padapter.SourceKindWorkday:         workday.New(fetcher),
 			padapter.SourceKindKeka:            keka.New(fetcher),
 			padapter.SourceKindZohoRecruit:     zohorecruit.New(fetcher),
+			padapter.SourceKindSitemap:         careerpage.NewSitemap(fetcher),
+			padapter.SourceKindHTMLPage:        careerpage.NewHTMLPage(fetcher),
 		},
 		Gazetteer:    taxonomy.LoadGazetteer(),
 		Roles:        taxonomy.LoadRolePatterns(),

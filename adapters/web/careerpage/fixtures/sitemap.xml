@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url><loc>https://careers.acme.example/jobs/old</loc><lastmod>2026-08-01</lastmod></url>
+  <url><loc>https://careers.acme.example/jobs/new</loc><lastmod>2026-10-10T08:00:00Z</lastmod></url>
+  <url><loc>https://careers.acme.example/jobs/nolastmod</loc></url>
+  <url><loc>https://evil.example/jobs/offsite</loc><lastmod>2026-10-11</lastmod></url>
+  <url><loc>https://careers.acme.example/about</loc><lastmod>2026-10-12</lastmod></url>
+</urlset>

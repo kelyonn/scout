@@ -108,6 +108,42 @@ clean, machine-readable job data in a `<script type="application/ld+json">` tag.
 Parsing it is trivial and it is far more stable than CSS selectors. The
 normalization adapter checks for it before anything else.
 
+**Implemented (2026-10-20): `adapters/web/careerpage`, source kinds `sitemap` and
+`html_page`.** It covers methods 2 and 3 above with one implementation.
+
+- *Extraction.* Every `<script type="application/ld+json">` block is parsed
+  leniently (raw newlines inside strings, as real sites emit them, are
+  tolerated); `JobPosting` nodes are found at the top level, in `@graph`, in
+  arrays and inside `ItemList`s. Entity-encoded HTML descriptions are decoded.
+  `baseSalary` is rendered as text the normalizer's compensation parser reads
+  (`INR 800000 - 1200000 per year`); free-text salaries (`8-12 LPA`,
+  `₹5 lakh`, `1,00,000`) pass through untouched, so lakh/crore/LPA
+  interpretation stays in one place, `normalize.ParseCompensation`. Pinned by
+  `apps/collector/internal/normalize/careerpage_comp_test.go`.
+- *Requests.* One poll is many requests (sitemap, child sitemaps, each job
+  page), so the adapter is an `OwnFetcher`. The scheduler clears `Source.URL`
+  through `PolitenessGate.Allow` as for every source; every other request goes
+  through `adapter.Source.Gate` (`scheduler.NewRequestGate`), which is the same
+  gate evaluated for that URL — robots.txt for the real path, rate budget,
+  crawl-delay, legal posture. A `prohibited` source is refused before the first
+  byte; a nil gate fails closed. Follow-up URLs must be on the source's own
+  registered domain.
+- *Change detection.* The sitemap is fetched conditionally (a 304 ends the poll
+  after one request). Job pages are visited newest-`<lastmod>` first up to
+  `adapter_config.max_pages` (default 40, hard cap 200); `<lastmod>` stands in
+  for `datePosted` when a page omits it, flagged `PostedAtEstimated`. Sitemaps
+  without `<lastmod>` (e.g. Accenture's 27,878-URL India list) cannot be
+  prioritised and are not seeded.
+- *Config.* `url_include`, `sitemap_include` (regexps), `max_pages`,
+  `company_name`.
+- *India caveat, measured.* Global employers' sitemaps cannot be narrowed to
+  India by URL (locale segments are languages), so these are breadth sources:
+  2/12, 1/12 and 1/8 of the newest pages were India-located for Ericsson, HPE
+  and Nutanix, none for the others. See `infra/seed/careerpage_sources.sql`
+  for the verified list and what was probed and rejected. Verify a candidate
+  with `go run ./apps/collector/cmd/sourceprobe -kind sitemap -url ... -config '{...}'`
+  before seeding — it runs the real adapter through the real gate.
+
 **Rendered HTML policy.** Headless browsing is capped at 20 sources, each
 requiring explicit justification recorded in `source.notes`. Each render costs
 roughly 200x a plain fetch in CPU and memory. This is a budget, enforced by a
