@@ -61,15 +61,17 @@ type Querier interface {
 	//     noted, rated, notified. Protection is by group, so every member of a
 	//     protected group is kept whole.
 	//   * Compaction never touches the notifier's inputs (status, priority,
-	//     notified_at, is_software, paid, ...), so it cannot create or suppress a
+	//     notified_at, in_scope, paid, ...), so it cannot create or suppress a
 	//     notification (rule 3).
 	//   * Only dedup-input columns are cleared, and clearing them can only make
 	//     Stage 2/3 find fewer matches, i.e. under-merge (rule 4).
 	// A job is cold when nothing will read its bulky columns again:
 	//   * closed/expired/filled for longer than closed_grace_secs;
-	//   * not a software role (never shown in the feed — feed.sql hard-filters
-	//     is_software) and older than irrelevant_grace_secs, which leaves recent
-	//     descriptions available for dedup and boilerplate learning;
+	//   * out of scope entirely (never shown in the feed — feed.sql hard-filters
+	//     in_scope; ADR-020 widened what's admitted beyond pure software, but a
+	//     genuinely unmatched job is still never shown) and older than
+	//     irrelevant_grace_secs, which leaves recent descriptions available for
+	//     dedup and boilerplate learning;
 	//   * still 'open' but first posted more than stale_open_age_secs ago —
 	//     beyond the 45-day dedup window and with a near-zero freshness
 	//     multiplier;
@@ -465,7 +467,7 @@ type Querier interface {
 	// the near future — docs/11 section 6.5's "Closing soon" section.
 	SelectDigestClosingSoon(ctx context.Context, arg SelectDigestClosingSoonParams) ([]SelectDigestClosingSoonRow, error)
 	// Same eligibility filter as SelectJobFeed (packages/db/queries/feed.sql):
-	// is_software, open, paid-or-high-confidence-unknown. `since` is the
+	// in_scope, open, paid-or-high-confidence-unknown. `since` is the
 	// previous digest's 08:00 IST boundary, computed in Go.
 	SelectDigestOvernightJobs(ctx context.Context, arg SelectDigestOvernightJobsParams) ([]SelectDigestOvernightJobsRow, error)
 	SelectDigestPipelineCounts(ctx context.Context, userID pgtype.UUID) (SelectDigestPipelineCountsRow, error)
@@ -510,9 +512,10 @@ type Querier interface {
 	//
 	// Filters follow the same hard-eligibility pattern
 	// packages/db/queries/notification.sql's SelectUnnotifiedJobGroups
-	// established: is_software and status='open' are not optional (this
-	// product is software internships/new-grad roles, full stop), the rest
-	// are optional narg()s that pass through when NULL.
+	// established: in_scope and status='open' are not optional (ADR-020 widened
+	// what's in scope beyond pure software — product/consulting/business roles
+	// now admit too — but an unmatched/excluded job never shows regardless), the
+	// rest are optional narg()s that pass through when NULL.
 	//
 	// role_family/seniority/work_mode filters are cast through ::text[] then
 	// ::role_family[]/::seniority[]/::work_mode[] rather than bound directly

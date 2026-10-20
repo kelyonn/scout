@@ -137,6 +137,18 @@ func TestClassifyRole(t *testing.T) {
 		{"generic swe", "software engineer intern", "", schema.RoleSWEGeneral, true},
 		{"sre", "site reliability engineer", "", schema.RoleSWEInfraSRE, true},
 		{"unrelated title", "marketing manager", "", schema.RoleSWEOther, false},
+
+		// Beyond software (ADR-020) — every new family must set
+		// IsSoftware: false, the exact bug this change fixes (Tier 0 used
+		// to hardcode true for any matched family regardless of which).
+		{"product manager", "associate product manager intern", "", schema.RoleProductManagement, false},
+		{"product designer", "product designer intern", "", schema.RoleProductDesign, false},
+		{"product analyst", "product analyst intern", "", schema.RoleProductAnalyst, false},
+		{"strategy consultant", "strategy consulting intern", "", schema.RoleConsultingStrategy, false},
+		{"technology consultant", "technology consulting intern", "", schema.RoleConsultingTechnology, false},
+		{"corporate strategy", "corporate strategy intern", "", schema.RoleBusinessStrategy, false},
+		{"business operations", "business operations intern", "", schema.RoleBusinessOperations, false},
+		{"business analyst", "business analyst intern", "", schema.RoleBusinessGeneral, false},
 	}
 
 	for _, c := range cases {
@@ -158,6 +170,33 @@ func TestClassifyRole_NegativeVeto(t *testing.T) {
 	got := ClassifyRole("backend team recruiter", "", families, skillOntology)
 	if got.Family == schema.RoleSWEBackend {
 		t.Error("negative pattern should veto swe.backend for a recruiter title")
+	}
+}
+
+// TestClassifyRole_TechnicalConsultantStaysAdvocacy is ADR-020's own boundary
+// concern: "technical consultant" is advocacy.solutions' own strong pattern
+// (hands-on technical building, gated on real evidence), not
+// consulting.technology (advisory-not-hands-on). File order — advocacy.*
+// families are declared before consulting.technology in roles.yaml — must
+// keep resolving this in advocacy.solutions' favor, escalating to Tier 2 if
+// the description lacks the technical-evidence gate's proof, never silently
+// falling through to the new, ungated consulting family instead.
+func TestClassifyRole_TechnicalConsultantStaysAdvocacy(t *testing.T) {
+	families := taxonomy.LoadRolePatterns()
+	skillOntology := taxonomy.LoadSkills()
+
+	got := ClassifyRole("technical consultant", "writing Python integrations for customer deployments", families, skillOntology)
+	if got.Family != schema.RoleAdvocacySolutions {
+		t.Errorf("ClassifyRole(%q).Family = %q, want %q", "technical consultant", got.Family, schema.RoleAdvocacySolutions)
+	}
+	if !got.IsSoftware {
+		t.Error("a technical consultant with real technical evidence should be IsSoftware: true")
+	}
+
+	gotNoEvidence := ClassifyRole("technical consultant", "advising clients on process improvements", families, skillOntology)
+	if gotNoEvidence.Family != schema.RoleSWEOther || !gotNoEvidence.NeedsTier2Escalation {
+		t.Errorf("ClassifyRole(%q) without technical evidence = %+v, want swe.other + NeedsTier2Escalation",
+			"technical consultant", gotNoEvidence)
 	}
 }
 

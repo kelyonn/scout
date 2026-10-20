@@ -538,6 +538,7 @@ func (s *Scheduler) buildNormalizedJob(p schema.Posting) (nj schema.NormalizedJo
 		RoleConfidence:         role.Confidence,
 		Seniority:              seniority,
 		IsSoftware:             role.IsSoftware,
+		InScope:                role.InScope,
 		Skills:                 extractedSkills,
 		LocationRaw:            p.LocationRaw,
 		LocationCity:           loc.City,

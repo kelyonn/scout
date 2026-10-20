@@ -69,16 +69,28 @@ def _write_embedding(
 
 
 def _write_role_classification(
-    conn: psycopg.Connection, job_id: str, role_family: str, confidence: float
+    conn: psycopg.Connection,
+    job_id: str,
+    role_family: str,
+    confidence: float,
+    is_software: bool,
 ) -> None:
+    # is_software and in_scope (ADR-020) both get written here now — a
+    # real pre-existing bug this fix closes: this call used to leave
+    # whatever Tier 0 had set (always False, since Tier 1 only ever runs
+    # on Tier 0's swe.other/confidence-0 residue), so a job Tier 1 correctly
+    # promoted out of swe.other stayed silently excluded from the feed.
+    # Every family Tier 1 can resolve to is a real, matched family, so
+    # in_scope is unconditionally True here — only is_software varies.
     with conn.cursor() as cur:
         cur.execute(
             """
             UPDATE job
-            SET role_family = %s, role_confidence = %s, updated_at = now()
+            SET role_family = %s, role_confidence = %s,
+                is_software = %s, in_scope = TRUE, updated_at = now()
             WHERE id = %s
             """,
-            (role_family, confidence, job_id),
+            (role_family, confidence, is_software, job_id),
         )
     conn.commit()
 
@@ -140,7 +152,7 @@ class EmbedConsumer:
         if tier1 is None:
             return
         _write_role_classification(
-            self._conn, job_id, tier1.role_family, tier1.confidence
+            self._conn, job_id, tier1.role_family, tier1.confidence, tier1.is_software
         )
         logger.info(
             "embed: tier1 revised job %s role_family to %s (confidence %.2f)",

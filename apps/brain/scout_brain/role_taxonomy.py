@@ -46,10 +46,27 @@ def load_exemplars(path: Path = _DEFAULT_ROLES_YAML) -> dict[str, list[str]]:
     }
 
 
+def load_is_software_map(path: Path = _DEFAULT_ROLES_YAML) -> dict[str, bool]:
+    """Every family's is_software value (ADR-020) — default True when the
+    `is_software` key is absent, same semantics as Go's roles.go loader, so
+    the two languages can never drift. embed_consumer.py's Tier 1 revision
+    uses this to set is_software/in_scope correctly on the family it just
+    picked, rather than leaving Tier 0's stale swe.other-era values in
+    place (the exact bug ADR-020's own migration found and backfilled).
+    """
+    with path.open() as f:
+        raw = yaml.safe_load(f)
+    return {family: data.get("is_software", True) for family, data in raw.items()}
+
+
 @dataclass(frozen=True)
 class Tier1Result:
     role_family: str
     confidence: float
+    # is_software (ADR-020) — looked up from roles.yaml's own per-family
+    # config, not guessed, so Tier 1 can never disagree with Tier 0 about
+    # what a given family means.
+    is_software: bool
 
 
 class RoleExemplarIndex:
@@ -63,9 +80,15 @@ class RoleExemplarIndex:
     """
 
     def __init__(
-        self, embedder: Embedder, exemplars: dict[str, list[str]] | None = None
+        self,
+        embedder: Embedder,
+        exemplars: dict[str, list[str]] | None = None,
+        is_software_map: dict[str, bool] | None = None,
     ) -> None:
         exemplars = exemplars if exemplars is not None else load_exemplars()
+        self._is_software_map = (
+            is_software_map if is_software_map is not None else load_is_software_map()
+        )
         self._families: list[str] = []
         vectors: list[list[float]] = []
         for family, titles in exemplars.items():
@@ -94,4 +117,9 @@ class RoleExemplarIndex:
         best_score = float(similarities[best_idx])
         if best_score < ACCEPT_COSINE_THRESHOLD:
             return None
-        return Tier1Result(role_family=self._families[best_idx], confidence=best_score)
+        family = self._families[best_idx]
+        return Tier1Result(
+            role_family=family,
+            confidence=best_score,
+            is_software=self._is_software_map.get(family, True),
+        )

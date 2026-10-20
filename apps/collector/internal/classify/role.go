@@ -19,7 +19,19 @@ const (
 type RoleResult struct {
 	Family     schema.RoleFamily
 	Confidence float32
+	// IsSoftware is the literal, honest signal (ADR-020): true only for
+	// swe.*/advocacy.* families, false for product.*/consulting.*/
+	// business.* too. It is NOT the feed-admission gate — see InScope.
 	IsSoftware bool
+	// InScope is whether this job should ever be shown to the user —
+	// true for any family that matched at all (regardless of IsSoftware),
+	// false only for the genuine catch-all/unmatched swe.other state. This
+	// is what every feed-surfacing query filters on (ADR-020); before
+	// in_scope existed, is_software was overloaded to mean this, which
+	// only worked because advocacy.* (not literally software either) also
+	// set it true — nothing distinguished "software" from "admitted"
+	// until a real non-software-but-admitted family existed.
+	InScope bool
 	// NeedsTier2Escalation is true when a strong/weak title match landed on
 	// a requires:technical_evidence family (advocacy.*) but the
 	// description-level gate failed — docs/07 section 4's own "~25%
@@ -50,7 +62,7 @@ func ClassifyRole(normalizedTitle, descriptionText string, families []taxonomy.R
 	if result, matched := classifyPass(normalizedTitle, descriptionText, families, skillOntology, weakConfidence, false); matched {
 		return result
 	}
-	return RoleResult{Family: schema.RoleSWEOther, Confidence: 0, IsSoftware: false}
+	return RoleResult{Family: schema.RoleSWEOther, Confidence: 0, IsSoftware: false, InScope: false}
 }
 
 func classifyPass(
@@ -69,9 +81,9 @@ func classifyPass(
 			continue
 		}
 		if f.RequiresTechnicalEvidence && !HasTechnicalEvidence(descriptionText, skillOntology) {
-			return RoleResult{Family: schema.RoleSWEOther, Confidence: 0, IsSoftware: false, NeedsTier2Escalation: true}, true
+			return RoleResult{Family: schema.RoleSWEOther, Confidence: 0, IsSoftware: false, InScope: false, NeedsTier2Escalation: true}, true
 		}
-		return RoleResult{Family: schema.RoleFamily(f.FamilyName), Confidence: confidence, IsSoftware: true}, true
+		return RoleResult{Family: schema.RoleFamily(f.FamilyName), Confidence: confidence, IsSoftware: f.IsSoftware, InScope: true}, true
 	}
 	return RoleResult{}, false
 }

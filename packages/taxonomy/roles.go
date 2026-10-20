@@ -15,6 +15,12 @@ type rolePatternSet struct {
 	Weak     []string `yaml:"weak"`
 	Negative []string `yaml:"negative"`
 	Requires string   `yaml:"requires"`
+	// IsSoftware is a pointer so an absent key defaults to true (every
+	// family declared before 2026-10-21 is software-adjacent and has no
+	// reason to carry this key) while an explicit `is_software: false`
+	// (the non-software families added that date — product.*,
+	// consulting.*, business.*) is distinguishable from "not set".
+	IsSoftware *bool `yaml:"is_software"`
 }
 
 // RoleFamily is one Tier 0 pattern set, compiled once at load time.
@@ -30,6 +36,10 @@ type RoleFamily struct {
 	// ("requires: technical_evidence" in roles.yaml) — false for every
 	// swe.* family.
 	RequiresTechnicalEvidence bool
+	// IsSoftware is the job.is_software value a Tier 0 match on this family
+	// should set — true for every swe.*/advocacy.* family, false for
+	// product.*/consulting.*/business.* (docs/01 section 4.3, ADR-020).
+	IsSoftware bool
 }
 
 // LoadRolePatterns returns the ordered list of Tier 0 role-family pattern
@@ -61,6 +71,7 @@ func LoadRolePatterns() []RoleFamily {
 			Weak:                      compileAll(set.Weak),
 			Negative:                  compileAll(set.Negative),
 			RequiresTechnicalEvidence: set.Requires == "technical_evidence",
+			IsSoftware:                set.IsSoftware == nil || *set.IsSoftware,
 		})
 	}
 	return families

@@ -17,7 +17,7 @@ const spaceMono = Space_Mono({
 
 export const metadata: Metadata = {
   title: { default: "Scout", template: "%s · Scout" },
-  description: "Internship and new-grad software roles, found and ranked for you.",
+  description: "Internship and new-grad roles across software, product, consulting, and business, found and ranked for you.",
   applicationName: "Scout",
   manifest: "/manifest.webmanifest",
   appleWebApp: { capable: true, title: "Scout", statusBarStyle: "black-translucent" },

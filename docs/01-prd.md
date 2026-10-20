@@ -142,6 +142,11 @@ choice is evaluated against that wall. See
 - Source registry with 400+ configured sources across ATS, feeds, and community.
 - Polite, change-detecting ingestion with per-source scheduling.
 - Canonical job normalization with role, location, and compensation extraction.
+  Scope widened 2026-10-21 beyond pure software engineering to Product,
+  Management/Technology Consulting, and general Business roles
+  ([ADR-020](adr/ADR-020-expand-beyond-software-roles.md)) — superseding this
+  section's own earlier "non-software internships are out of scope by
+  definition" line.
 - Three-stage deduplication across sources.
 - Scoring with hand-tuned weights and written explanations.
 - Instant notifications via Telegram and native push; **daily digest via
@@ -182,9 +187,8 @@ are the only ones worth writing.
 | WhatsApp notifications | The official Cloud API needs a dedicated phone number that cannot be the user's own, plus Meta verification and template approval — disproportionate setup for a third copy of a notification. Unofficial libraries are prohibited outright. See [ADR-013](adr/ADR-013-whatsapp-channel.md). |
 | Publishing to the App Store or Play Store | Personal app, sideloaded. No review, no fee on Android. Revisit only if Scout becomes multi-tenant. |
 | Being a public job board | Different product, different legal posture, different economics. Scout is a personal agent. |
-| Non-software internships | Out of scope by definition. Filtered at classification. |
 | Developer marketing, community management, technical recruiting | Adjacent to the advocacy family and deliberately excluded. Advocacy roles must show concrete technical evidence to be admitted — see [07](07-normalization-taxonomy.md). |
-| Non-technical consulting roles | `advocacy.solutions` covers technical pre-sales and delivery engineering. A sales role with a quota and no technical requirement is not in scope. |
+| Sales roles with a quota and no technical or product/strategy substance | `advocacy.solutions` covers technical pre-sales and delivery engineering; `consulting.technology` and `business.*` cover advisory and operational substance. A pure quota-carrying sales role with none of that is still not in scope. |
 | Salary negotiation advice | High liability, low confidence, better sources exist. |
 | CAPTCHA solving or bot-detection evasion | A bright line. If a site does not want automated access, we do not take it. |
 

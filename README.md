@@ -1,12 +1,12 @@
 # Scout
 
-Scout is an autonomous discovery platform for software engineering internships
-and new-grad roles. It continuously monitors the sources where these positions
-are announced, normalizes each posting into a canonical job record, ranks it
-against a candidate profile, and delivers a notification within minutes of
-discovery.
+Scout is an autonomous discovery platform for internship and new-grad roles
+across software engineering, product, consulting, and business. It continuously
+monitors the sources where these positions are announced, normalizes each
+posting into a canonical job record, ranks it against a candidate profile, and
+delivers a notification within minutes of discovery.
 
-> Never miss a relevant internship or new-grad software engineering role.
+> Never miss a relevant internship or new-grad role.
 
 Scout is not a job board — it does not wait to be searched. It runs a
 discovery loop on a schedule, applies a scoring model to what it finds, and

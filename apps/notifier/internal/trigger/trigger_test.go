@@ -171,10 +171,10 @@ func insertTestJobFixtureWithPaid(
 	err = pool.QueryRow(ctx, `
 		insert into job (
 			job_group_id, company_id, primary_source_id, canonical_url, canonical_url_hash,
-			content_hash, title, normalized_title, apply_url, is_software, paid, status, location_tier
+			content_hash, title, normalized_title, apply_url, is_software, in_scope, paid, status, location_tier
 		) values (
 			$1::uuid, $2::uuid, $3::uuid, $4::text, digest($4::text, 'sha256'),
-			digest($4::text, 'sha256'), 'Test Job', 'test job', $4::text, TRUE, $6::paid_signal, 'open', $5::smallint
+			digest($4::text, 'sha256'), 'Test Job', 'test job', $4::text, TRUE, TRUE, $6::paid_signal, 'open', $5::smallint
 		)
 		returning id
 	`, groupID, companyID, sourceID, canonicalURL, locationTier, paid).Scan(&jobID)

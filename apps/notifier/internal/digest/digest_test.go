@@ -219,7 +219,7 @@ func slug(t *testing.T) string {
 }
 
 // insertEligibleJob inserts a company/source/job_group/job tuple that
-// clears SelectDigestOvernightJobs' eligibility bar (open, is_software,
+// clears SelectDigestOvernightJobs' eligibility bar (open, in_scope,
 // paid), with a controllable first_seen_at.
 func insertEligibleJob(t *testing.T, pool *pgxpool.Pool, firstSeenAt time.Time, deadlineAt *time.Time) (groupID pgtype.UUID, jobID pgtype.UUID) {
 	t.Helper()
@@ -259,10 +259,10 @@ func insertEligibleJob(t *testing.T, pool *pgxpool.Pool, firstSeenAt time.Time, 
 	err := pool.QueryRow(ctx, `
 		insert into job (
 			job_group_id, company_id, primary_source_id, canonical_url, canonical_url_hash,
-			content_hash, title, normalized_title, apply_url, is_software, paid, status, deadline_at
+			content_hash, title, normalized_title, apply_url, is_software, in_scope, paid, status, deadline_at
 		) values (
 			$1::uuid, $2::uuid, $3::uuid, $4, digest($4, 'sha256'),
-			digest($4, 'sha256'), 'Backend Engineering Intern', 'backend engineering intern', $4, TRUE, 'paid', 'open', $5
+			digest($4, 'sha256'), 'Backend Engineering Intern', 'backend engineering intern', $4, TRUE, TRUE, 'paid', 'open', $5
 		) returning id
 	`, groupID, companyID, sourceID, canonicalURL, deadlineAt).Scan(&jobID)
 	if err != nil {
