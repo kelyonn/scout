@@ -206,7 +206,8 @@ func run(log *slog.Logger) error {
 	fetcher := fetch.New(contactURL, operatorEmail)
 	sched := scheduler.New(pool, gate, fetcher, log).
 		WithPipeline(buildPipeline(fetcher)).
-		WithQueue(queueClient)
+		WithQueue(queueClient).
+		WithRetention(scheduler.DefaultRetention())
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

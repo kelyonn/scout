@@ -122,7 +122,7 @@ rather than a lawyer, and that only works if we actually answer.
 | R9 | Embedding version drift corrupting dedup | 2×4=8 | Version column, comparisons scoped to one version, staged migration with eval verification |
 | R10 | Postgres queue contention at scale | 2×3=6 | River benchmarks 14x our peak. NATS migration documented behind an interface. |
 | R11 | Memory exhaustion on a single node | 3×3=9 | Per-container limits, 85% alerting, vertical upgrade path is a reboot |
-| R12 | Disk fills, writes fail | 3×4=12 | Alert at **70%**, auto-prune at 85%, partition drops. Thresholds lowered because **no volume resize is available on a free tier** — the paid escape hatch is gone, so the warning has to come earlier. |
+| R12 | Disk fills, writes fail | 3×4=12 | Alert at **70%**, auto-prune at 85%, partition drops. Thresholds lowered because **no volume resize is available on a free tier** — the paid escape hatch is gone, so the warning has to come earlier. On Neon free (~0.5 GB) this is R39. |
 | R13 | Slow memory leak over weeks | 3×3=9 | 24h soak test in CI, container memory limits so one leak restarts one service |
 | R14 | Migration locks a large table in production | 2×4=8 | Every migration tested against a prod-sized snapshot with a 30s ceiling; `CONCURRENTLY` above 100k rows |
 | R15 | SSRF via attacker-controlled URLs | 2×5=10 | Resolve-then-check-then-pin, private range blocking at every redirect hop, dedicated test corpus |
@@ -166,6 +166,7 @@ rather than a lawyer, and that only works if we actually answer.
 | R30 | Single operator unavailable during an incident | 3×3=9 | Runbooks written for a tired reader; system degrades rather than collapses; notifications survive dashboard failure |
 | R31 | Documentation drifts from implementation | 4×2=8 | ADRs are immutable; specs updated in the same PR as the code; requirement IDs referenced from tests |
 | R32 | Alert fatigue on the operator side | 3×3=9 | Deliberately scarce alerts; every alert has a runbook; alerts without action get deleted |
+| R39 | Hosted database exceeds Neon free's ~0.5 GB and writes start failing ([ADR-019](adr/ADR-019-cardless-hosted-pipeline.md)) | 4×4=16 | **Measured, not hypothetical:** one live day of collection was 1.2 GB locally (`job` 805 MB, `raw_observation` 204 MB). Mitigated by bounded retention ([03](03-data-model.md) §11, `scheduler/retention.go`, run every maintenance pass): cold jobs are *compacted* (bulky columns cleared, identity kept), observation payloads scrubbed after 2 days, queue rows pruned, raw partitions dropped after 2 months. Settles at ~200 MB for ~38k jobs; above 380 MB the aggressive windows engage and a warning is logged. **Residual:** the hot set (open software postings, ~25 KB each) scales with the real new-posting rate, which one burst-sweep day cannot show — re-measure after a week of steady state. Dead space is not returned to the OS by plain vacuum; if the size warning persists, run `VACUUM FULL job` once. The initial sweep must be bounded per cycle or it can overshoot before the first retention pass. |
 
 ---
 
