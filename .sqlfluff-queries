@@ -1,10 +1,18 @@
 # Application queries: lowercase keywords, per AGENTS.md.
 # Migrations use uppercase and are configured in .sqlfluff.
+#
+# RF03 added 2026-10-20: sqlfluff's raw templater has no notion of sqlc's
+# `sqlc.arg(name)` parameter syntax — `name` is a bare parameter identifier,
+# not a column — so in any query that aliases its table (`from job as j`),
+# RF03 sees that bare name next to `j.`-qualified columns and calls it an
+# "inconsistent" unqualified reference. False positive, and it will recur
+# for any future aliased single-table query using sqlc.arg (first hit:
+# packages/db/queries/retention.sql).
 [sqlfluff]
 dialect = postgres
 templater = raw
 max_line_length = 100
-exclude_rules = RF04, ST06, AM04, RF02, LT02
+exclude_rules = RF04, ST06, AM04, RF02, LT02, RF03
 
 [sqlfluff:rules:capitalisation.keywords]
 capitalisation_policy = lower
