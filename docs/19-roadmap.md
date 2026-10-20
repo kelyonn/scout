@@ -426,8 +426,18 @@ category.
 **Exit criteria**
 
 - [ ] Installed on the actual phone, delivering FCM with correct icon, working
-      actions, and badge count
-- [ ] Save/Dismiss work from the lock screen
+      actions, and badge count — installed/FCM/icon/actions all real-device
+      verified 2026-08-29 (see HANDOFF.md); **badge count is the one piece
+      left unchecked** — `notification_count` was never wired to anything
+      real (docs/11 section 6.2's own mockup field, unimplemented)
+- [x] Save/Dismiss work from the lock screen — real-device verified
+      2026-08-29: a real tap on Save (after a state-machine fix this same
+      pass) and a real tap on Dismiss both produced real, correct
+      `user_job_state` rows, confirmed directly in Postgres. See
+      HANDOFF.md's "real device verification" entry and its immediate
+      follow-up for the full writeup, including a false-alarm about
+      notification-clearing that turned out to be a `dumpsys` misreading,
+      not a real bug.
 - [ ] Web Push does **not** double-buzz a device already reached by FCM
 - [ ] WebView feed scrolls without jank on the real device
 
@@ -481,15 +491,81 @@ correctly treating a full-access server credential as more sensitive than
 the Android app config.
 
 **Still open:**
-- An actual push *delivered* through the registered token — registration
-  is proven, delivery through a real trigger event isn't yet.
 - The biometric-auth and local-notification plugins are installed but not
   wired into any UI yet.
-- This milestone's exit criteria: "installed on the actual phone,
-  delivering FCM" needs the delivery check above; "Save/Dismiss work from
-  the lock screen" and "no Web Push double-buzz" follow once that's
-  confirmed. WebView scroll performance hasn't been specifically
-  stress-tested yet either.
+- "No Web Push double-buzz" — unbuilt; Web Push itself isn't implemented yet
+  (docs/11 section 5 lists it as fallback-only, still on the P5+ list).
+- WebView scroll performance hasn't been specifically stress-tested yet.
+- **2026-08-29, later: the two notification channels and Save/Dismiss
+  actions are built, Gradle-verified, and now fully real-device-verified
+  — both notification-action exit criteria above are checked.** See
+  HANDOFF.md's own entries for that date for the full writeup — the short
+  version: a real push was landing on Android's generic fallback channel
+  with no actions at all (found via `adb shell dumpsys notification` on
+  the real Pixel 7), traced to two gaps (`docs/11-notifications.md`
+  section 6.2's own channels were never created on-device, and the FCM
+  payload was a `notification`+`data` message, which Android auto-displays
+  — bypassing app code, and with it any possibility of actions — whenever
+  the app is backgrounded). Both fixed: `apps/notifier/internal/fcm` now
+  sends data-only messages, and `apps/mobile/android/app/src/main/java/
+  com/scout/app/` gained `NotificationChannels` (creates `opportunities`/
+  `deadlines` on launch), `ScoutMessagingService` (replaces the bundled
+  plugin's own FirebaseMessagingService, builds the notification with the
+  right channel and two actions), and `JobActionReceiver` (handles the
+  taps, calling `POST /v1/jobs/{group_id}/state` directly). Go-side tests
+  pass (`go test ./...`, `golangci-lint run ./...`, both clean).
+  **Then a real `./gradlew assembleDebug` ran** (the SDK from 2026-08-28
+  turned out to already exist machine-wide, just needed exporting into
+  this worktree's shell): BUILD SUCCESSFUL, confirmed via the merged
+  manifest and the APK's own dex bytecode that the new classes are really
+  in there, plus a real `testDebugUnitTest` pass (4/4). `lintDebug` caught
+  two real bugs on its first run — a missing `POST_NOTIFICATIONS` guard
+  that could crash `onMessageReceived`, and a dropped `onNewToken` forward
+  that would have silently broken FCM token-rotation re-registration — both
+  fixed and reverified clean.
+
+  **Then actually device-verified, same day.** Installed the debug APK on
+  the real Pixel 7, brought up the full local stack bound to the laptop's
+  tailnet IP, and sent three real notifications through the real notifier
+  for a real job. Confirmed via `dumpsys notification` and a real
+  screenshot: lands on the `opportunities` channel (not the fallback
+  channel the original bug report caught), correct title/body, both
+  Save/Dismiss actions present. **A real tap on the real "Save" button
+  found a genuine bug**: the state machine
+  (`apps/api/internal/jobs/state.go`) only allows `new -> viewed` or
+  `new -> dismissed` directly — `new -> saved` 409s. The web UI already
+  works around this (`apps/web/components/StateControls.tsx`'s
+  `transitionTo` chains through `viewed` client-side, since it knows the
+  card's current state), but a lock-screen tap has no equivalent context.
+  Fixed in `JobActionReceiver`: a "saved" action now sends `viewed` first
+  (best-effort, ignored if already past it) before the real target,
+  mirroring the web client's own logic. Rebuilt, reinstalled, retested:
+  a real Save tap now produces a real `user_job_state` row with
+  `state = 'saved'`, confirmed directly in Postgres.
+
+  **`Dismiss` closed the same day, right after.** Screen automation
+  (screenshot-and-tap-by-coordinate) kept losing track of the card as the
+  shade re-sorted between attempts, and one blind tap missed and briefly,
+  harmlessly opened an unrelated private Instagram screen — backed out of
+  immediately, nothing touched. Automation was dropped in favor of the
+  user tapping Dismiss directly while this session watched Postgres:
+  `state = 'dismissed'`, confirmed. Full round trip proven for both
+  actions now.
+
+  **The one open question from the Save pass — whether the notification
+  actually clears from the shade after a successful action — turned out
+  to be a false alarm, not a bug.** Every check that seemed to show it
+  "still there" was reading `dumpsys notification`'s `mArchive` section
+  (a 100-entry historical log of every notification ever posted, kept
+  regardless of cancellation), not the real `Notification List:` section,
+  which showed zero entries once checked correctly.
+  `NotificationManagerCompat.cancel()` was working the entire time.
+
+  Also confirmed, useful for next time: `adb shell am broadcast -n` at a
+  non-exported receiver silently no-ops on this Android version (no
+  delivery, no exception) — it is not a valid way to simulate a
+  notification-action tap; only a real tap on the real button exercises
+  this code path.
 
 ---
 
