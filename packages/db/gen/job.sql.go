@@ -34,6 +34,7 @@ select
     role_confidence,
     seniority,
     is_software,
+    in_scope,
     skills,
     tech_stack,
     location_raw,
@@ -100,6 +101,7 @@ type FindJobByATSIDRow struct {
 	RoleConfidence         float32            `db:"role_confidence" json:"role_confidence"`
 	Seniority              Seniority          `db:"seniority" json:"seniority"`
 	IsSoftware             bool               `db:"is_software" json:"is_software"`
+	InScope                bool               `db:"in_scope" json:"in_scope"`
 	Skills                 []string           `db:"skills" json:"skills"`
 	TechStack              []string           `db:"tech_stack" json:"tech_stack"`
 	LocationRaw            *string            `db:"location_raw" json:"location_raw"`
@@ -160,6 +162,7 @@ func (q *Queries) FindJobByATSID(ctx context.Context, arg FindJobByATSIDParams) 
 		&i.RoleConfidence,
 		&i.Seniority,
 		&i.IsSoftware,
+		&i.InScope,
 		&i.Skills,
 		&i.TechStack,
 		&i.LocationRaw,
@@ -221,6 +224,7 @@ select
     role_confidence,
     seniority,
     is_software,
+    in_scope,
     skills,
     tech_stack,
     location_raw,
@@ -281,6 +285,7 @@ type FindJobByCanonicalURLHashRow struct {
 	RoleConfidence         float32            `db:"role_confidence" json:"role_confidence"`
 	Seniority              Seniority          `db:"seniority" json:"seniority"`
 	IsSoftware             bool               `db:"is_software" json:"is_software"`
+	InScope                bool               `db:"in_scope" json:"in_scope"`
 	Skills                 []string           `db:"skills" json:"skills"`
 	TechStack              []string           `db:"tech_stack" json:"tech_stack"`
 	LocationRaw            *string            `db:"location_raw" json:"location_raw"`
@@ -356,6 +361,7 @@ func (q *Queries) FindJobByCanonicalURLHash(ctx context.Context, canonicalUrlHas
 		&i.RoleConfidence,
 		&i.Seniority,
 		&i.IsSoftware,
+		&i.InScope,
 		&i.Skills,
 		&i.TechStack,
 		&i.LocationRaw,
@@ -416,6 +422,7 @@ select
     role_confidence,
     seniority,
     is_software,
+    in_scope,
     skills,
     tech_stack,
     location_raw,
@@ -478,6 +485,7 @@ type FindJobByContentHashRow struct {
 	RoleConfidence         float32            `db:"role_confidence" json:"role_confidence"`
 	Seniority              Seniority          `db:"seniority" json:"seniority"`
 	IsSoftware             bool               `db:"is_software" json:"is_software"`
+	InScope                bool               `db:"in_scope" json:"in_scope"`
 	Skills                 []string           `db:"skills" json:"skills"`
 	TechStack              []string           `db:"tech_stack" json:"tech_stack"`
 	LocationRaw            *string            `db:"location_raw" json:"location_raw"`
@@ -540,6 +548,7 @@ func (q *Queries) FindJobByContentHash(ctx context.Context, contentHash []byte) 
 		&i.RoleConfidence,
 		&i.Seniority,
 		&i.IsSoftware,
+		&i.InScope,
 		&i.Skills,
 		&i.TechStack,
 		&i.LocationRaw,
@@ -600,6 +609,7 @@ select
     role_confidence,
     seniority,
     is_software,
+    in_scope,
     skills,
     tech_stack,
     location_raw,
@@ -659,6 +669,7 @@ type GetJobByIDRow struct {
 	RoleConfidence         float32            `db:"role_confidence" json:"role_confidence"`
 	Seniority              Seniority          `db:"seniority" json:"seniority"`
 	IsSoftware             bool               `db:"is_software" json:"is_software"`
+	InScope                bool               `db:"in_scope" json:"in_scope"`
 	Skills                 []string           `db:"skills" json:"skills"`
 	TechStack              []string           `db:"tech_stack" json:"tech_stack"`
 	LocationRaw            *string            `db:"location_raw" json:"location_raw"`
@@ -719,6 +730,7 @@ func (q *Queries) GetJobByID(ctx context.Context, id pgtype.UUID) (GetJobByIDRow
 		&i.RoleConfidence,
 		&i.Seniority,
 		&i.IsSoftware,
+		&i.InScope,
 		&i.Skills,
 		&i.TechStack,
 		&i.LocationRaw,
@@ -763,7 +775,7 @@ insert into job (
     canonical_url, canonical_url_hash, ats_platform, ats_job_id, content_hash,
     title, normalized_title, description_html, description_text, description_stripped,
     requirements_text, apply_url,
-    role_family, role_confidence, seniority, is_software, skills,
+    role_family, role_confidence, seniority, is_software, in_scope, skills,
     location_raw, location_city, location_region, location_country,
     location_tier, work_mode, visa_sponsorship,
     paid, comp_min, comp_max, comp_currency, comp_period,
@@ -780,18 +792,19 @@ insert into job (
     $13::text,
     $14::text, $15::text,
     $16::role_family, $17::real,
-    $18::seniority, $19::boolean, $20::text [],
-    $21::text, $22::text,
-    $23::text, $24::bpchar,
-    $25::smallint, $26::work_mode,
-    $27::boolean,
-    $28::paid_signal, $29::numeric, $30::numeric,
-    $31::bpchar, $32::text,
-    $33::numeric, $34::real,
-    $35::boolean,
-    $36::timestamptz, $37::boolean,
-    $38::timestamptz,
-    $39::bigint, $40::jsonb
+    $18::seniority, $19::boolean,
+    $20::boolean, $21::text [],
+    $22::text, $23::text,
+    $24::text, $25::bpchar,
+    $26::smallint, $27::work_mode,
+    $28::boolean,
+    $29::paid_signal, $30::numeric, $31::numeric,
+    $32::bpchar, $33::text,
+    $34::numeric, $35::real,
+    $36::boolean,
+    $37::timestamptz, $38::boolean,
+    $39::timestamptz,
+    $40::bigint, $41::jsonb
 )
 returning
     id,
@@ -814,6 +827,7 @@ returning
     role_confidence,
     seniority,
     is_software,
+    in_scope,
     skills,
     tech_stack,
     location_raw,
@@ -870,6 +884,7 @@ type InsertJobParams struct {
 	RoleConfidence         float32            `db:"role_confidence" json:"role_confidence"`
 	Seniority              Seniority          `db:"seniority" json:"seniority"`
 	IsSoftware             bool               `db:"is_software" json:"is_software"`
+	InScope                bool               `db:"in_scope" json:"in_scope"`
 	Skills                 []string           `db:"skills" json:"skills"`
 	LocationRaw            *string            `db:"location_raw" json:"location_raw"`
 	LocationCity           *string            `db:"location_city" json:"location_city"`
@@ -914,6 +929,7 @@ type InsertJobRow struct {
 	RoleConfidence         float32            `db:"role_confidence" json:"role_confidence"`
 	Seniority              Seniority          `db:"seniority" json:"seniority"`
 	IsSoftware             bool               `db:"is_software" json:"is_software"`
+	InScope                bool               `db:"in_scope" json:"in_scope"`
 	Skills                 []string           `db:"skills" json:"skills"`
 	TechStack              []string           `db:"tech_stack" json:"tech_stack"`
 	LocationRaw            *string            `db:"location_raw" json:"location_raw"`
@@ -971,6 +987,7 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (InsertJob
 		arg.RoleConfidence,
 		arg.Seniority,
 		arg.IsSoftware,
+		arg.InScope,
 		arg.Skills,
 		arg.LocationRaw,
 		arg.LocationCity,
@@ -1015,6 +1032,7 @@ func (q *Queries) InsertJob(ctx context.Context, arg InsertJobParams) (InsertJob
 		&i.RoleConfidence,
 		&i.Seniority,
 		&i.IsSoftware,
+		&i.InScope,
 		&i.Skills,
 		&i.TechStack,
 		&i.LocationRaw,

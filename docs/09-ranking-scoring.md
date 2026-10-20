@@ -57,6 +57,15 @@ the scoring path.
 
 ## 3. Score definitions
 
+**ADR-020 note:** `company_quality` (3.3)'s tech-stack-keyword and
+domain-interest terms, `competition_estimate` (3.9)'s rare-skill bonus, and
+`learning_opportunity` (3.5)'s deep-domain pattern are all tuned for
+`swe.*` and have no `product.*`/`consulting.*`/`business.*` equivalent yet
+— they degrade to their neutral default for these families rather than
+erroring or misscoring. An acknowledged v1 gap, not a bug; extend them the
+same way `swe.*`'s own patterns were extended, from real postings, once
+there are enough to show the need (docs/07 section 4).
+
 ### 3.1 Skill match (`SCOUT-RANK-002`)
 
 Overlap between required skills and user skills, weighted by requirement strength

@@ -15,7 +15,7 @@ const countDigestEligibleJobsSince = `-- name: CountDigestEligibleJobsSince :one
 select count(*) from job_group as jg
 inner join job as j on jg.representative_job_id = j.id
 where j.status = 'open'
-    and j.is_software = TRUE
+    and j.in_scope = TRUE
     and (j.paid = 'paid' or j.paid = 'unknown')
     and jg.first_seen_at >= $1::timestamptz
 `
@@ -160,7 +160,7 @@ left join job_score as js on j.id = js.job_id
     and js.user_id = $1::uuid
     and js.weight_version = $2::text
 where j.status = 'open'
-    and j.is_software = TRUE
+    and j.in_scope = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and coalesce(js.priority, 0) >= 92))
     and jg.first_seen_at >= $3::timestamptz
 order by coalesce(js.priority, 0) desc
@@ -185,7 +185,7 @@ type SelectDigestOvernightJobsRow struct {
 }
 
 // Same eligibility filter as SelectJobFeed (packages/db/queries/feed.sql):
-// is_software, open, paid-or-high-confidence-unknown. `since` is the
+// in_scope, open, paid-or-high-confidence-unknown. `since` is the
 // previous digest's 08:00 IST boundary, computed in Go.
 func (q *Queries) SelectDigestOvernightJobs(ctx context.Context, arg SelectDigestOvernightJobsParams) ([]SelectDigestOvernightJobsRow, error) {
 	rows, err := q.db.Query(ctx, selectDigestOvernightJobs,

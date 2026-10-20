@@ -152,11 +152,27 @@ swe/
 │   └── solutions        Solutions Engineer, Sales Engineer, Field Engineer,
 │                        Forward Deployed Engineer, Technical Consultant
 └── other                Software but unclassified
+
+product/                 Beyond software (ADR-020, 2026-10-21) — see below
+├── management           Product Manager, Associate PM, Product Owner
+├── design               Product Designer, UX/UI Designer
+└── analyst              Product Analyst, Product Operations Analyst
+
+consulting/
+├── strategy             Management Consultant, Strategy Consultant
+└── technology           Technology/Digital Consulting, advisory-not-hands-on
+
+business/
+├── strategy             Corporate Strategy, Strategy & Ops, Chief of Staff
+├── operations           Business Operations, BizOps
+└── general              Business Analyst, Business Development — the catch-all
 ```
 
-**All twenty leaves are in scope for this user.** The taxonomy exists to enable
-differentiated skill matching, not to filter — a backend role should be scored
-against backend skills, and a systems role against systems skills.
+**All twenty-eight leaves are in scope for this user.** The taxonomy exists to
+enable differentiated skill matching, not to filter — a backend role should be
+scored against backend skills, a systems role against systems skills, and (as
+of ADR-020) a product-management role against product skills rather than
+being excluded outright.
 
 ### The advocacy family
 
@@ -187,6 +203,46 @@ infrastructure, sample applications, developer portals. It sits closest to
 deployments, integrations. **This is the family that makes consultancies and
 enterprise vendors legible**, since a large share of their technical intern roles
 are effectively solutions work under a different name.
+
+### Beyond software: Product, Consulting, Business
+
+`ADR-020`. Three new top-level branches, none carrying `requires:
+technical_evidence` — unlike `advocacy.*`, a Product/Consulting/Business
+title is non-technical by the title itself, with no description-level gate
+needed, so Tier 0's deterministic pattern match resolves these directly and
+Tier 2's LLM escalation (which only `advocacy.*` ever triggers) never sees
+them.
+
+`consulting.technology` (advisory-not-hands-on: scoping or delivering a
+technology-enabled business change without writing the implementation) is
+deliberately distinct from `advocacy.solutions` (hands-on technical building,
+gated on real evidence) — `roles.yaml`'s file order keeps `advocacy.*`
+checked first, so a genuinely hands-on "Technical Consultant" title still
+resolves to `advocacy.solutions`, not `consulting.technology`.
+
+`consulting.strategy` and `business.general` are scoped tightly: "business
+analyst" alone strong-matches only `business.general`, never
+`consulting.strategy`, since that title is at least as common at a product
+company as at a consulting firm — admitting it under `consulting.strategy`
+would misclassify the former.
+
+**`is_software` and `in_scope` are two different columns, not one.**
+`is_software` is the literal signal — `true` only for `swe.*`/`advocacy.*`,
+`false` here too. `in_scope` is the actual feed-admission gate every
+surfacing query filters on — `true` for any of these families (they are
+all, genuinely, in scope for this user), `false` only for the real
+catch-all/unmatched `swe.other` state. Before ADR-020, `is_software` was
+overloaded to mean both at once, which only worked because `advocacy.*`
+(not literally software engineering either) also set it `true` — nothing
+before a real non-software-but-admitted family existed ever needed telling
+the two apart.
+
+**Skill matching and scoring for these families is an acknowledged v1 gap,
+not a bug.** [09](09-ranking-scoring.md)'s SWE-tuned subscores (tech-stack
+keyword match, rare-skill bonus, deep-domain pattern) have no Product/
+Consulting/Business equivalent yet and degrade to their neutral default —
+extend them the same way `swe.*`'s own patterns were extended, from real
+postings, once there are enough to show the need.
 
 ### Two classification hazards, both handled explicitly
 

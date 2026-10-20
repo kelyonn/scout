@@ -110,12 +110,12 @@ func insertCompanyWithJob(t *testing.T, pool *pgxpool.Pool, name, jobStatus stri
 	err = pool.QueryRow(ctx, `
 		insert into job (
 			job_group_id, company_id, primary_source_id, canonical_url, canonical_url_hash,
-			content_hash, title, normalized_title, apply_url, is_software, paid, status,
+			content_hash, title, normalized_title, apply_url, is_software, in_scope, paid, status,
 			role_family, seniority, work_mode
 		) values (
 			$1::uuid, $2::uuid, $3::uuid, $4, digest($4, 'sha256'),
 			digest($4, 'sha256'), 'Software Engineering Intern', 'software engineering intern', $4,
-			TRUE, 'paid', $5, 'swe.general', 'internship', 'remote'
+			TRUE, TRUE, 'paid', $5, 'swe.general', 'internship', 'remote'
 		) returning id
 	`, groupID, companyID, sourceID, canonicalURL, jobStatus).Scan(&jobID)
 	if err != nil {

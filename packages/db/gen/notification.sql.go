@@ -457,7 +457,7 @@ inner join job_score as js on j.id = js.job_id
 inner join user_profile as up on $1::uuid = up.user_id
 left join watchlist as w on w.user_id = $1::uuid and j.company_id = w.company_id
 where jg.notified_at is NULL
-    and j.is_software = TRUE
+    and j.in_scope = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and js.priority >= 92))
     and j.status = 'open'
     and src.status <> 'pending_review'
