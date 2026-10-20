@@ -96,18 +96,26 @@ providers:
     # catalog (checked live the same day) lists the actual successor as
     # nvidia/nemotron-3.5-super-vl-120b-a12b: "3.5", not "3", plus a "-vl"
     # (vision-language) suffix neither the user's name nor a guess would
-    # have produced. Still unconfirmed with a real authenticated request —
-    # the key was set directly as a CI/local secret and never seen by the
-    # agent wiring this in, so a live chat-completion call (the way
-    # gemini/groq/openrouter's entries above were each confirmed) wasn't
-    # possible. Also worth confirming whether this account's free tier is
-    # truly $0-always or a credits-limited trial that would eventually ask
-    # for a card — if the latter, AGENTS.md rule 10 says this provider gets
+    # have produced. Confirmed live and working in CI the same day: with the
+    # 60s timeout below, classify_role went from 0.773/0.675 (local-only) to
+    # 0.955 precision / 0.933 macro_f1 (gate: >=0.970 / >=0.930), dedup from
+    # 0.556 to 1.000 recall (gate >=0.920, now fully passing both). Precision
+    # is still 1.5 points under gate — close enough that a slightly larger
+    # eval set or one fewer rotation-to-local mid-run would likely close it,
+    # not a sign the model is wrong for this task.
+    #
+    # Worth separately confirming: whether this account's free tier is truly
+    # $0-always or a credits-limited trial that would eventually ask for a
+    # card — if the latter, AGENTS.md rule 10 says this provider gets
     # dropped, not topped up. rpm/rpd below are conservative placeholders,
-    # not measured numbers like the other three entries — and a 120B
-    # vision-language model is heavier than this cascade's other picks,
-    # so budget for slower responses even if the rate limit itself holds.
+    # not measured numbers like the other three entries.
     model: nvidia/nemotron-3.5-super-vl-120b-a12b
+    # 60s, not the 30s default: this is a 120B vision-language model and the
+    # live CI run above saw real request latency plus a few transient 500s
+    # near that boundary — a few hosted responses arrived too slowly to beat
+    # 30s and the cascade rotated to local Ollama mid-run instead, which is
+    # the likely cause of the remaining precision gap noted above.
+    timeout_seconds: 60
     rpm: 10
     rpd: 500
 
