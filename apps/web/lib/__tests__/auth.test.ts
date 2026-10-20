@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isValidToken, sessionCookieOptions } from "../auth";
+import { isValidToken, resolveLoginToken, sessionCookieOptions } from "../auth";
 
 const TOKEN = "test-token-0123456789abcdef0123456789abcdef";
 
@@ -39,5 +39,32 @@ describe("isValidToken", () => {
     expect(sessionCookieOptions().secure).toBe(true);
     expect(sessionCookieOptions().httpOnly).toBe(true);
     expect(sessionCookieOptions().sameSite).toBe("strict");
+  });
+});
+
+describe("resolveLoginToken", () => {
+  const original = {
+    token: process.env.SCOUT_AUTH_TOKEN,
+    passcode: process.env.SCOUT_LOGIN_PASSCODE,
+  };
+  beforeEach(() => {
+    process.env.SCOUT_AUTH_TOKEN = TOKEN;
+    process.env.SCOUT_LOGIN_PASSCODE = "246810";
+  });
+  afterEach(() => {
+    process.env.SCOUT_AUTH_TOKEN = original.token;
+    process.env.SCOUT_LOGIN_PASSCODE = original.passcode;
+  });
+
+  it("returns the real token for the real token or the passcode", () => {
+    expect(resolveLoginToken(TOKEN)).toBe(TOKEN);
+    expect(resolveLoginToken("246810")).toBe(TOKEN);
+  });
+
+  it("rejects anything else, and the passcode when none is configured", () => {
+    expect(resolveLoginToken("246811")).toBeNull();
+    expect(resolveLoginToken("")).toBeNull();
+    process.env.SCOUT_LOGIN_PASSCODE = "";
+    expect(resolveLoginToken("246810")).toBeNull();
   });
 });
