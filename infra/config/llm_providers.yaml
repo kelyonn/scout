@@ -90,18 +90,17 @@ providers:
     kind: openai_compatible
     api_key_env: SCOUT_BRAIN_NVIDIA_API_KEY
     base_url: https://integrate.api.nvidia.com/v1
-    # UNVERIFIED — added 2026-10-20 without a live call against this
-    # account's own key (the key was set directly as a CI/local secret,
-    # never seen by the agent that wired this in, so it could not be
-    # probed the way gemini/groq/openrouter's entries above were).
-    # Before trusting this in production: confirm the model id still
-    # resolves on https://build.nvidia.com/explore/discover, and confirm
-    # whether this account's free tier is truly $0-always or a
-    # credits-limited trial that would eventually ask for a card — if
-    # the latter, AGENTS.md rule 10 says this provider gets dropped, not
-    # topped up. rpm/rpd below are conservative placeholders, not
-    # measured numbers like the other three entries.
-    model: meta/llama-3.1-70b-instruct
+    # Model id given directly by the user (2026-10-20), not independently
+    # probed by the agent that wired this in — the key was set directly as
+    # a CI/local secret and never seen here, so a live call to confirm it
+    # resolves the way gemini/groq/openrouter's entries above were
+    # confirmed was not possible. Still worth confirming whether this
+    # account's free tier is truly $0-always or a credits-limited trial
+    # that would eventually ask for a card — if the latter, AGENTS.md
+    # rule 10 says this provider gets dropped, not topped up. rpm/rpd
+    # below are conservative placeholders, not measured numbers like the
+    # other three entries.
+    model: nvidia/nemotron-3-super-120b-a12b
     rpm: 10
     rpd: 500
 
