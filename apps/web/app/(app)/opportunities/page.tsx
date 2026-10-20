@@ -1,21 +1,28 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { fetchApplications, fetchJobs } from "@/lib/api";
-import { JobCard } from "@/components/JobCard";
+import { VirtualJobList } from "@/components/VirtualJobList";
 import { FilterBar } from "@/components/FilterBar";
 import { CardListSkeleton, EmptyState, ErrorNotice, PageHeader } from "@/components/ui";
 import { useLiveFeed } from "@/lib/useLiveFeed";
+import { isInteractiveTarget, isTypingTarget, moveIndex, triageKey } from "@/lib/keyboardTriage";
+import { useJobActions } from "@/lib/useJobActions";
 import { useJobFilters, type JobFilters } from "@/lib/useJobFilters";
 import type { ApplicationItem, JobFeedItem } from "@/lib/types";
 
 // The starting filter this page always used before FilterBar existed —
 // seeded into the URL on first visit (useJobFilters.seedDefaults), not
 // hardcoded into the fetch itself, so it's a starting point the user can
-// see and change, not an invisible floor they can't get past.
+// see and change, not an invisible floor they can't get past. No
+// seniority restriction: Scout collects mid/senior/staff roles too, and
+// hiding them by default silently threw away real, already-ranked
+// results — narrowing to a seniority is the user's own choice via
+// FilterBar, not a baked-in assumption about who's using this.
 const DEFAULT_FILTERS: JobFilters = {
-  seniority: ["internship", "new_grad", "entry", "unknown"],
+  seniority: [],
   roleFamily: [],
   workMode: [],
   locationTier: [],
@@ -104,8 +111,69 @@ export default function OpportunitiesPage() {
   // from under someone mid-read is worse than a one-tap banner.
   useLiveFeed(() => setNewSinceMount((n) => n + 1));
 
-  const jobs = data?.pages.flatMap((p) => p.data) ?? [];
+  const jobs = useMemo(() => data?.pages.flatMap((p) => p.data) ?? [], [data]);
   const applications = applicationsData?.data ?? [];
+
+  // docs/12-frontend-ux.md section 4.4 keyboard triage. State lives by job id,
+  // not index, so a refetch or a new page never moves the cursor.
+  const router = useRouter();
+  const actions = useJobActions();
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
+  const [scrollTo, setScrollTo] = useState<{ id: string; n: number } | null>(null);
+
+  const onNearEnd = useCallback(() => {
+    if (hasNextPage && !isFetchingNextPage) void fetchNextPage();
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.defaultPrevented || e.repeat) return;
+      const key = triageKey(e);
+      if (!key) return;
+      const target = e.target as HTMLElement | null;
+      if (isTypingTarget(target)) return;
+      if ((key === "open" || key === "clear") && isInteractiveTarget(target)) return;
+      if (key === "clear" && selected.size === 0) return;
+
+      const idx = jobs.findIndex((j) => j.job_group_id === activeId);
+      const active = idx >= 0 ? jobs[idx] : null;
+
+      if (key === "next" || key === "prev") {
+        const next = jobs[moveIndex(idx, key === "next" ? 1 : -1, jobs.length)];
+        if (!next) return;
+        e.preventDefault();
+        setActiveId(next.job_group_id);
+        setScrollTo((p) => ({ id: next.job_group_id, n: (p?.n ?? 0) + 1 }));
+        return;
+      }
+      if (key === "clear") {
+        setSelected(new Set());
+        return;
+      }
+      if (!active && selected.size === 0) return;
+      e.preventDefault();
+
+      if (key === "select" && active) {
+        setSelected((prev) => {
+          const next = new Set(prev);
+          if (!next.delete(active.job_group_id)) next.add(active.job_group_id);
+          return next;
+        });
+      } else if (key === "open" && active) {
+        router.push(`/opportunities/${active.job_group_id}`);
+      } else if (key === "save" || key === "dismiss") {
+        const targets = selected.size > 0 ? jobs.filter((j) => selected.has(j.job_group_id)) : active ? [active] : [];
+        void actions.bulk(
+          key,
+          targets.map((j) => ({ groupId: j.job_group_id, state: j.state })),
+        );
+        setSelected(new Set());
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [jobs, activeId, selected, actions, router]);
 
   return (
     <div className="max-w-4xl mx-auto page">
@@ -156,11 +224,19 @@ export default function OpportunitiesPage() {
         </EmptyState>
       )}
 
-      <div className="space-y-4">
-        {jobs.map((job) => (
-          <JobCard key={job.job_group_id} job={job} />
-        ))}
-      </div>
+      {selected.size > 0 && (
+        <p role="status" className="mb-3 text-caption text-text-secondary">
+          {selected.size} selected — <kbd className="font-mono">s</kbd> save · <kbd className="font-mono">d</kbd> dismiss · <kbd className="font-mono">Esc</kbd> clear
+        </p>
+      )}
+
+      <VirtualJobList jobs={jobs} activeId={activeId} selectedIds={selected} scrollToId={scrollTo} onNearEnd={onNearEnd} />
+
+      {jobs.length > 0 && (
+        <p className="hidden md:block mt-4 text-micro text-text-faint" aria-hidden>
+          j/k move · x select · s save · d dismiss · Enter open
+        </p>
+      )}
 
       {hasNextPage && (
         <button

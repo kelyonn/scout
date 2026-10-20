@@ -26,6 +26,9 @@ const nextConfig: NextConfig = {
   // The token never reaches the browser, so nothing here needs to know
   // it — and the `X-Powered-By: Next.js` banner is free information.
   poweredByHeader: false,
+  // Hides Next's floating dev-mode badge (bottom-left). It never ships in
+  // production builds; this only quiets `next dev`, including on the phone.
+  devIndicators: false,
   async headers() {
     return [{ source: "/(.*)", headers: securityHeaders }];
   },

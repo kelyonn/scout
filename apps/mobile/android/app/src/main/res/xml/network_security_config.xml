@@ -21,5 +21,7 @@
              so emulator-based development (no Tailscale needed) keeps
              working without editing this file. -->
         <domain includeSubdomains="false">10.0.2.2</domain>
+        <!-- adb reverse tcp:3000 tcp:3000 dev loop: phone localhost -> laptop dev server. -->
+        <domain includeSubdomains="false">localhost</domain>
     </domain-config>
 </network-security-config>

@@ -156,7 +156,7 @@ services:
       # User-Agent), so it is fixed here rather than pulled from the
       # SOPS-encrypted environment file the way SCOUT_COLLECTOR_OPERATOR_EMAIL
       # is — one fewer secret to rotate for a value that was never secret.
-      SCOUT_COLLECTOR_CONTACT_URL: https://github.com/kelyon/scout
+      SCOUT_COLLECTOR_CONTACT_URL: https://github.com/kelyonn/scout
       # SCOUT_COLLECTOR_OPERATOR_EMAIL comes from the environment file: it is
       # the operator's real address, not a value this public repository pins.
     healthcheck:

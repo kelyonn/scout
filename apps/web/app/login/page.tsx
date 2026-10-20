@@ -50,13 +50,10 @@ function LoginForm() {
         <div className="flex items-center gap-3 mb-5">
           <span
             aria-hidden
-            className="w-9 h-9 rounded-lg flex items-center justify-center"
-            style={{ background: "color-mix(in srgb, var(--accent-primary) 16%, transparent)" }}
+            className="w-12 h-12 flex items-center justify-center bg-accent-subtle border border-border-strong"
           >
-            <svg width="18" height="18" viewBox="0 0 20 20" fill="none" stroke="var(--accent-primary)" strokeWidth="1.6">
-              <circle cx="10" cy="10" r="6.5" />
-              <circle cx="10" cy="10" r="3" />
-              <circle cx="10" cy="10" r="0.6" fill="var(--accent-primary)" stroke="none" />
+            <svg width="32" height="32" viewBox="0 0 64 64">
+              <path d="M5 32a27 27 0 1 0 54 0a27 27 0 1 0 -54 0ZM46.14 17.86L37.66 37.66L17.86 46.14L26.34 26.34Z" fill="currentColor" fillRule="evenodd" />
             </svg>
           </span>
           <div>
@@ -66,7 +63,7 @@ function LoginForm() {
         </div>
 
         <label htmlFor="token" className="block text-label text-text-secondary mb-1.5">
-          Access token
+          Passcode
         </label>
         <input
           id="token"

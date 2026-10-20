@@ -20,6 +20,7 @@ const NAV_SECTIONS: { label: string; icon: string; href: string }[] = [
   { label: "Calendar", icon: "calendar", href: "/calendar" },
   { label: "Insights", icon: "insights", href: "/insights" },
   { label: "Companies", icon: "companies", href: "/companies" },
+  { label: "Profile", icon: "profile", href: "/profile" },
   { label: "Resume", icon: "resume", href: "/resume" },
   { label: "Settings", icon: "settings", href: "/settings" },
 ];
@@ -71,7 +72,10 @@ export function Shell({ children, initialCollapsed }: { children: React.ReactNod
       >
         <div className={`flex items-center pt-8 pb-6 ${collapsed ? "justify-center px-0" : "justify-between px-6"}`}>
           {!collapsed && (
-            <Link href="/" className="text-[18px] font-semibold tracking-[-0.01em] text-text-primary whitespace-nowrap">
+            <Link href="/" className="flex items-center gap-2.5 text-[22px] font-black uppercase tracking-[-0.03em] text-text-primary whitespace-nowrap">
+              <span aria-hidden className="inline-flex items-center justify-center w-7 h-7 bg-accent-subtle border border-border-strong">
+                <svg width="18" height="18" viewBox="0 0 64 64"><path d="M5 32a27 27 0 1 0 54 0a27 27 0 1 0 -54 0ZM46.14 17.86L37.66 37.66L17.86 46.14L26.34 26.34Z" fill="currentColor" fillRule="evenodd" /></svg>
+              </span>
               Scout
             </Link>
           )}
@@ -106,7 +110,7 @@ export function Shell({ children, initialCollapsed }: { children: React.ReactNod
                 aria-current={active ? "page" : undefined}
                 className={`text-label py-2.5 rounded-lg flex items-center transition-colors duration-100 ${
                   collapsed ? "justify-center px-0" : "gap-3 px-3.5"
-                } ${active ? "bg-bg-elevated text-text-primary" : "text-text-secondary hover:bg-bg-elevated hover:text-text-primary"}`}
+                } ${active ? "bg-accent-subtle text-text-primary border border-border-strong" : "border border-transparent text-text-secondary hover:bg-bg-elevated hover:text-text-primary"}`}
               >
                 <NavIcon name={item.icon} className={`shrink-0 ${active ? "text-accent-primary" : ""}`} />
                 {!collapsed && item.label}
@@ -119,7 +123,10 @@ export function Shell({ children, initialCollapsed }: { children: React.ReactNod
       <div className="flex-1 min-w-0 flex flex-col">
         {/* Mobile header */}
         <header className="md:hidden sticky top-0 z-40 flex items-center justify-between border-b border-border-subtle bg-bg-base/95 backdrop-blur px-4 pt-[env(safe-area-inset-top)] h-[calc(52px+env(safe-area-inset-top))]">
-          <Link href="/" className="text-[17px] font-semibold tracking-[-0.01em] text-text-primary">
+          <Link href="/" className="flex items-center gap-2 text-[20px] font-black uppercase tracking-[-0.03em] text-text-primary">
+            <span aria-hidden className="inline-flex items-center justify-center w-6 h-6 bg-accent-subtle border border-border-strong">
+                <svg width="18" height="18" viewBox="0 0 64 64"><path d="M5 32a27 27 0 1 0 54 0a27 27 0 1 0 -54 0ZM46.14 17.86L37.66 37.66L17.86 46.14L26.34 26.34Z" fill="currentColor" fillRule="evenodd" /></svg>
+              </span>
             Scout
           </Link>
           <Link
