@@ -4,6 +4,7 @@ import { SENIORITY_LABEL } from "@/lib/taxonomy";
 import { ScoreBadge } from "./ScoreBadge";
 import { StateControls } from "./StateControls";
 import { CompanyAvatar } from "./CompanyAvatar";
+import { SwipeRow } from "./SwipeRow";
 
 function timeAgo(iso?: string): string | null {
   if (!iso) return null;
@@ -115,69 +116,71 @@ export function JobCard({ job }: { job: JobFeedItem }) {
   }
 
   return (
-    <article
-      className={`group relative block rounded-[var(--radius-card)] border bg-bg-surface px-4 pt-5 pb-4 sm:px-7 sm:pt-7 sm:pb-6 transition-all duration-100 hover:border-border-strong hover:-translate-y-px ${
-        job.state === "saved" ? "border-border-subtle border-l-2 border-l-accent-primary" : "border-border-subtle"
-      }`}
-    >
-      <div className="flex items-start justify-between gap-4 sm:gap-5">
-        <div className="flex items-start gap-3 sm:gap-3.5 min-w-0 flex-1">
-          <CompanyAvatar id={job.company.id} name={job.company.name} />
-          <div className="min-w-0 flex-1 pt-0.5">
-            <div className="flex items-center gap-2 min-w-0">
-              <h3 className="text-[15px] leading-5 font-semibold text-text-primary truncate min-w-0">
-                <Link href={href} className={CARD_LINK}>
-                  {job.title}
-                </Link>
-              </h3>
-              {job.state === "saved" && (
-                <span className="text-[9px] font-semibold tracking-[0.04em] uppercase text-accent-primary border border-accent-primary/30 bg-accent-subtle rounded shrink-0 px-1.5 py-px">
-                  Saved
+    <SwipeRow groupId={job.job_group_id} state={job.state}>
+      <article
+        className={`group relative block rounded-[var(--radius-card)] border bg-bg-surface px-4 pt-5 pb-4 sm:px-7 sm:pt-7 sm:pb-6 transition-all duration-100 hover:border-border-strong hover:-translate-y-px ${
+          job.state === "saved" ? "border-border-subtle border-l-2 border-l-accent-primary" : "border-border-subtle"
+        }`}
+      >
+        <div className="flex items-start justify-between gap-4 sm:gap-5">
+          <div className="flex items-start gap-3 sm:gap-3.5 min-w-0 flex-1">
+            <CompanyAvatar id={job.company.id} name={job.company.name} />
+            <div className="min-w-0 flex-1 pt-0.5">
+              <div className="flex items-center gap-2 min-w-0">
+                <h3 className="text-[15px] leading-5 font-semibold text-text-primary truncate min-w-0">
+                  <Link href={href} className={CARD_LINK}>
+                    {job.title}
+                  </Link>
+                </h3>
+                {job.state === "saved" && (
+                  <span className="text-[9px] font-semibold tracking-[0.04em] uppercase text-accent-primary border border-accent-primary/30 bg-accent-subtle rounded shrink-0 px-1.5 py-px">
+                    Saved
+                  </span>
+                )}
+              </div>
+              <p className="text-caption font-medium text-text-secondary mt-1">
+                {job.company.name}
+                <span className="text-text-muted font-normal">
+                  {" "}
+                  · {seniority && `${seniority} · `}
+                  {locationLabel(job.location)}
                 </span>
-              )}
+              </p>
             </div>
-            <p className="text-caption font-medium text-text-secondary mt-1">
-              {job.company.name}
-              <span className="text-text-muted font-normal">
-                {" "}
-                · {seniority && `${seniority} · `}
-                {locationLabel(job.location)}
+          </div>
+          <ScoreBadge score={job.priority} />
+        </div>
+
+        {(job.skills.length > 0 || deadline) && (
+          <div className="flex flex-wrap items-center gap-1.5 mt-4">
+            {deadline && (
+              <span
+                className={`text-[10px] font-medium px-2.5 py-1 rounded-full border ${
+                  deadline.urgent ? "border-warning/40 bg-warning/10 text-warning" : "border-border-subtle bg-bg-elevated text-text-secondary"
+                }`}
+              >
+                {deadline.label}
               </span>
-            </p>
+            )}
+            {job.skills.slice(0, 6).map((skill) => (
+              <span key={skill} className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-bg-elevated text-text-secondary">
+                {skill.replace(/_/g, " ")}
+              </span>
+            ))}
+          </div>
+        )}
+
+        <div className="flex items-center justify-between gap-3 mt-5">
+          {/* suppressHydrationWarning: posted is Date.now()-relative — see the
+              other timeAgo() call site's own comment above. */}
+          <span className="text-caption text-text-muted truncate" suppressHydrationWarning>
+            {[comp, posted].filter(Boolean).join(" · ")}
+          </span>
+          <div className="relative z-10 shrink-0">
+            <StateControls groupId={job.job_group_id} state={job.state} applyUrl={job.apply_url} size="sm" />
           </div>
         </div>
-        <ScoreBadge score={job.priority} />
-      </div>
-
-      {(job.skills.length > 0 || deadline) && (
-        <div className="flex flex-wrap items-center gap-1.5 mt-4">
-          {deadline && (
-            <span
-              className={`text-[10px] font-medium px-2.5 py-1 rounded-full border ${
-                deadline.urgent ? "border-warning/40 bg-warning/10 text-warning" : "border-border-subtle bg-bg-elevated text-text-secondary"
-              }`}
-            >
-              {deadline.label}
-            </span>
-          )}
-          {job.skills.slice(0, 6).map((skill) => (
-            <span key={skill} className="text-[10px] font-medium px-2.5 py-1 rounded-full bg-bg-elevated text-text-secondary">
-              {skill.replace(/_/g, " ")}
-            </span>
-          ))}
-        </div>
-      )}
-
-      <div className="flex items-center justify-between gap-3 mt-5">
-        {/* suppressHydrationWarning: posted is Date.now()-relative — see the
-            other timeAgo() call site's own comment above. */}
-        <span className="text-caption text-text-muted truncate" suppressHydrationWarning>
-          {[comp, posted].filter(Boolean).join(" · ")}
-        </span>
-        <div className="relative z-10 shrink-0">
-          <StateControls groupId={job.job_group_id} state={job.state} applyUrl={job.apply_url} size="sm" />
-        </div>
-      </div>
-    </article>
+      </article>
+    </SwipeRow>
   );
 }
