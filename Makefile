@@ -115,6 +115,10 @@ seed-sources: $(ENV_FILE) ## Seed the starter list of real, verified source boar
 seed-gcc-sources: $(ENV_FILE) ## Seed real, verified GCC/enterprise source boards (Workday/SmartRecruiters)
 	@ENV_FILE=$(ENV_FILE) ./infra/scripts/seed-gcc-sources.sh
 
+.PHONY: seed-careerpage-sources
+seed-careerpage-sources: $(ENV_FILE) ## Seed verified direct company career sites (sitemap + JSON-LD JobPosting)
+	@ENV_FILE=$(ENV_FILE) ./infra/scripts/seed-careerpage-sources.sh
+
 .PHONY: discover-sources
 discover-sources: $(ENV_FILE) ## Find new ATS-hosted companies worth adding (pending_review) — safe to run repeatedly, e.g. from cron
 	@set -a; . $(ENV_FILE); set +a; go run ./apps/collector/cmd/discover
