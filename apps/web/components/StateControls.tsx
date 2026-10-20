@@ -1,9 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { errorMessage, updateJobState } from "@/lib/api";
 import { useToast } from "@/components/Toast";
+import { useJobActions } from "@/lib/useJobActions";
 import type { ApplicationState } from "@/lib/types";
 
 // docs/12-frontend-ux.md section 4.2's job-card action row: Save,
@@ -24,58 +23,19 @@ export function StateControls({
   applyUrl: string;
   size?: "sm" | "md";
 }) {
-  const queryClient = useQueryClient();
   const { toast } = useToast();
+  const actions = useJobActions();
   const [showElsewherePrompt, setShowElsewherePrompt] = useState(false);
   const [pending, setPending] = useState(false);
 
-  const invalidate = () => {
-    queryClient.invalidateQueries({ queryKey: ["jobs"] });
-    queryClient.invalidateQueries({ queryKey: ["job-detail", groupId] });
-    queryClient.invalidateQueries({ queryKey: ["applications"] });
-  };
-
-  const mutate = useMutation({
-    mutationFn: (params: { state: ApplicationState; foundElsewhereFirst?: boolean }) =>
-      updateJobState(groupId, params),
-    onSuccess: invalidate,
-  });
-
-  // Chains through the intermediate states a single click needs to
-  // cross — the state machine (apps/api/internal/jobs/state.go) validates
-  // every hop server-side regardless, but a card seen for the first time
-  // is still in `new`, and "Save" or "Apply" from `new` needs to pass
-  // through `viewed` (and `saved`, for Apply) first rather than 409ing on
-  // a jump the user experiences as a single action.
-  //
-  // Returns whether the whole chain committed. A failure anywhere shows
-  // one toast and stops; the server's row is whatever the last
-  // successful hop left it, and the invalidated queries re-render that.
+  // Each click is one user gesture, possibly several server hops (new →
+  // viewed → saved → applied); see useJobActions.transition. A failure
+  // shows one toast and the invalidated queries re-render the server's row.
   async function transitionTo(target: ApplicationState, foundElsewhereFirst?: boolean): Promise<boolean> {
     if (pending) return false;
     setPending(true);
     try {
-      let current = state;
-      const path: ApplicationState[] = [];
-      if (current === "new" && (target === "saved" || target === "applied" || target === "dismissed")) {
-        if (target !== "dismissed") path.push("viewed");
-      }
-      if ((current === "new" || current === "viewed") && target === "applied") {
-        path.push("saved");
-      }
-      path.push(target);
-
-      for (const step of path) {
-        await mutate.mutateAsync({
-          state: step,
-          foundElsewhereFirst: step === target ? foundElsewhereFirst : undefined,
-        });
-        current = step;
-      }
-      return true;
-    } catch (err) {
-      toast(errorMessage(err, "Couldn't update this job. Try again."), { kind: "error" });
-      return false;
+      return await actions.transition(groupId, state, target, { foundElsewhereFirst });
     } finally {
       setPending(false);
     }
@@ -84,7 +44,7 @@ export function StateControls({
   async function dismiss() {
     if (await transitionTo("dismissed")) {
       toast("Dismissed", {
-        action: { label: "Undo", onClick: () => void transitionTo("saved") },
+        action: { label: "Undo", onClick: () => void actions.transition(groupId, "dismissed", "saved") },
       });
     }
   }
@@ -98,14 +58,14 @@ export function StateControls({
     if (await transitionTo("applied", foundElsewhereFirst)) {
       toast("Marked as applied", {
         kind: "success",
-        action: { label: "Undo", onClick: () => void transitionTo("saved") },
+        action: { label: "Undo", onClick: () => void actions.transition(groupId, "applied", "saved") },
       });
     }
   }
 
   const pad = size === "sm" ? "px-2.5 py-1.5 sm:py-1" : "px-3 py-1.5";
   const text = size === "sm" ? "text-caption" : "text-label";
-  const busy = pending || mutate.isPending;
+  const busy = pending;
   const base = `${text} ${pad} rounded-[var(--radius-input)] transition-colors duration-100 disabled:opacity-50 disabled:cursor-not-allowed`;
   const secondary = `${base} border border-border-subtle text-text-secondary hover:text-text-primary hover:border-border-strong`;
   const muted = `${base} border border-border-subtle text-text-muted hover:text-text-primary hover:border-border-strong`;
