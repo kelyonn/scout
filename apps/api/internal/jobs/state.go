@@ -93,6 +93,17 @@ var validStates = func() map[string]db.ApplicationState {
 	return m
 }()
 
+// Bounds on the optional per-job fields — rating mirrors
+// user_job_state's own CHECK (rating BETWEEN 1 AND 5); notes has no
+// schema bound, so this is the only one. 4000 bytes is a generous
+// paragraph or two, and apps/web's notes editor enforces the same
+// number client-side.
+const (
+	minRating     = 1
+	maxRating     = 5
+	maxNotesBytes = 4000
+)
+
 type stateTransitionRequest struct {
 	State               string  `json:"state"`
 	FoundElsewhereFirst *bool   `json:"found_elsewhere_first,omitempty"`
@@ -132,6 +143,19 @@ func (h *Handler) State(w http.ResponseWriter, r *http.Request) {
 	target, ok := validStates[req.State]
 	if !ok {
 		writeError(w, http.StatusUnprocessableEntity, "unknown state: "+req.State)
+		return
+	}
+	// The schema enforces both of these too (a CHECK on rating, and
+	// notes is unbounded text) — but a constraint violation surfaces as
+	// a 500 "internal error" with the real reason only in the server
+	// log, and an unbounded notes column is an unbounded request body.
+	// Validate here so the caller gets a 422 that says what to fix.
+	if req.Rating != nil && (*req.Rating < minRating || *req.Rating > maxRating) {
+		writeError(w, http.StatusUnprocessableEntity, "rating must be between 1 and 5")
+		return
+	}
+	if req.Notes != nil && len(*req.Notes) > maxNotesBytes {
+		writeError(w, http.StatusUnprocessableEntity, "notes must be at most 4000 characters")
 		return
 	}
 

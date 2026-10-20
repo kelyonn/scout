@@ -225,6 +225,16 @@ func routes(
 	protected.HandleFunc("GET /v1/integrations/google/events", googleCalendarHandler.Events)
 	protected.HandleFunc("POST /v1/push/register-device", pushHandler.RegisterDevice)
 
+	// Anything authenticated that matches no route above. ServeMux's
+	// default is a text/plain "404 page not found", which the web
+	// frontend would otherwise show verbatim; every other error this
+	// API produces is {"error": "..."}, and this one should be too.
+	protected.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = fmt.Fprintln(w, `{"error":"not found"}`)
+	})
+
 	root := http.NewServeMux()
 
 	// Shallow liveness only: the process is up and can serve a request. It is

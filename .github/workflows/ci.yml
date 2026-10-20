@@ -281,12 +281,14 @@ jobs:
       - run: cd packages/riverpy && uv run pytest
 
   web:
-    name: web lint, typecheck, build
+    name: web lint, test, typecheck, build
     runs-on: ubuntu-latest
-    # No Go API or Postgres here — apps/web's own tests don't exist yet
-    # (P4/P5 scope), so this job covers what doesn't need a running
-    # backend: eslint, tsc --noEmit, and a real `next build` (catches
-    # server/client boundary violations tsc alone misses).
+    # No Go API or Postgres here — apps/web's unit tests (vitest, lib/**)
+    # mock fetch and cover the pure logic: token comparison, the login
+    # redirect sanitizer, the API error mapping, the rate limiter, and the
+    # proxy helper's failure modes. Plus eslint, tsc --noEmit, and a real
+    # `next build` (catches server/client boundary violations tsc alone
+    # misses).
     defaults:
       run:
         working-directory: apps/web
@@ -300,6 +302,7 @@ jobs:
           version: 9.15.0
       - run: pnpm install --frozen-lockfile
       - run: pnpm run lint
+      - run: pnpm run test
       # build before typecheck, not after: `tsc --noEmit` needs the ambient
       # ".next/types" ClientProps/LayoutProps/PageProps declarations
       # tsconfig.json's own "include" references — those are written by
@@ -347,6 +350,7 @@ jobs:
           SCOUT_BRAIN_GEMINI_API_KEY: ${{ secrets.SCOUT_BRAIN_GEMINI_API_KEY }}
           SCOUT_BRAIN_GROQ_API_KEY: ${{ secrets.SCOUT_BRAIN_GROQ_API_KEY }}
           SCOUT_BRAIN_OPENROUTER_API_KEY: ${{ secrets.SCOUT_BRAIN_OPENROUTER_API_KEY }}
+          SCOUT_BRAIN_NVIDIA_API_KEY: ${{ secrets.SCOUT_BRAIN_NVIDIA_API_KEY }}
         run: make evals
 
   sql-lint:

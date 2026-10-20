@@ -39,3 +39,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# The committed template for .env.local (see README.md); .env* above would otherwise hide it.
+!.env.example
+
+# Personal data shown on /profile — never commit (the repo is public)
+/.local/

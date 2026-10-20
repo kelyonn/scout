@@ -1,10 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { fetchApplications } from "@/lib/api";
 import { StateMenu } from "@/components/StateMenu";
-import { PIPELINE_COLUMNS } from "@/lib/stateMachine";
+import { EmptyState, ErrorNotice, PageHeader, Skeleton } from "@/components/ui";
+import { PIPELINE_COLUMNS, STATE_LABEL, pipelineDropTarget } from "@/lib/stateMachine";
+import { useJobActions } from "@/lib/useJobActions";
 import type { ApplicationItem } from "@/lib/types";
 
 const STALE_DAYS = 14;
@@ -19,96 +22,159 @@ function staleNudge(item: ApplicationItem): string | null {
   if (item.state !== "applied" && item.state !== "screening" && item.state !== "interviewing") return null;
   const days = daysSince(item.state_changed_at);
   if (days <= STALE_DAYS) return null;
-  return `${capitalize(item.state)} ${days} days ago — no response. Follow up?`;
+  return `${STATE_LABEL[item.state]} ${days} days ago — no response. Follow up?`;
 }
 
-function capitalize(s: string): string {
-  return s.charAt(0).toUpperCase() + s.slice(1);
-}
-
-function PipelineCard({ item }: { item: ApplicationItem }) {
+function PipelineCard({
+  item,
+  dragging,
+  onDragStart,
+  onDragEnd,
+}: {
+  item: ApplicationItem;
+  dragging: boolean;
+  onDragStart: () => void;
+  onDragEnd: () => void;
+}) {
   const nudge = staleNudge(item);
   return (
-    <div className="rounded-[8px] border border-border-subtle bg-bg-surface p-4">
+    <article
+      // Drag is a desktop convenience; the StateMenu below is the accessible
+      // path (keyboard, screen reader, touch).
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.effectAllowed = "move";
+        e.dataTransfer.setData("text/plain", item.job_group_id);
+        onDragStart();
+      }}
+      onDragEnd={onDragEnd}
+      className={`rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-4 sm:cursor-grab active:cursor-grabbing transition-opacity duration-100 ${
+        dragging ? "opacity-40" : ""
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
-        <Link
-          href={`/opportunities/${item.job_group_id}`}
-          className="min-w-0 text-[13px] font-semibold text-text-primary hover:text-accent-primary transition-colors duration-100 truncate"
-        >
-          {item.title}
-        </Link>
+        <h3 className="min-w-0 text-[13px] font-semibold text-text-primary truncate">
+          <Link href={`/opportunities/${item.job_group_id}`} draggable={false} className="hover:text-accent-primary transition-colors duration-100">
+            {item.title}
+          </Link>
+        </h3>
         <StateMenu groupId={item.job_group_id} state={item.state} />
       </div>
       <p className="text-caption text-text-muted mt-1 truncate">{item.company.name}</p>
       <p className="text-[10px] uppercase tracking-[0.03em] text-text-faint mt-2">
-        {daysSince(item.state_changed_at)}d in {item.state}
+        {daysSince(item.state_changed_at)}d in {STATE_LABEL[item.state]}
         {item.job_status !== "open" && <span> · listing {item.job_status}</span>}
       </p>
+      {item.notes && (
+        <p className="text-caption text-text-secondary mt-2 line-clamp-2" title={item.notes}>
+          {item.notes}
+        </p>
+      )}
       {nudge && (
-        <p className="text-[11px] text-text-secondary mt-2 rounded-[5px] bg-bg-elevated border border-border-subtle px-2 py-[5px] normal-case tracking-normal">
+        <p className="text-[11px] text-text-secondary mt-2 rounded-[5px] bg-bg-elevated border border-border-subtle px-2 py-[5px]">
           {nudge}
         </p>
       )}
-    </div>
+    </article>
   );
 }
 
 export default function PipelinePage() {
-  const { data, isLoading, isError, error } = useQuery({
+  const { data, isPending, isSuccess, isError, error, refetch } = useQuery({
     queryKey: ["applications"],
     queryFn: () => fetchApplications(),
   });
 
   const items = data?.data ?? [];
+  const actions = useJobActions();
+  const [dragged, setDragged] = useState<ApplicationItem | null>(null);
+  const [overColumn, setOverColumn] = useState<string | null>(null);
 
   return (
-    <div className="px-10 py-10">
-        <div className="mb-6">
-          <h1 className="text-title text-text-primary">Pipeline</h1>
-          <p className="text-caption text-text-muted mt-1">
-            {isLoading ? "Loading…" : `${items.length} tracked`}
-          </p>
+    <div className="page">
+      <PageHeader title="Pipeline" subtitle={isPending ? "Loading…" : isError ? undefined : `${items.length} tracked`} />
+
+      {isError && <ErrorNotice error={error} fallback="Couldn't load your pipeline." onRetry={() => void refetch()} />}
+
+      {isPending && (
+        <div className="flex gap-5 overflow-hidden" role="status" aria-label="Loading">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Skeleton key={i} className="w-72 sm:w-80 h-40 shrink-0" />
+          ))}
         </div>
+      )}
 
-        {isError && (
-          <div className="text-body text-danger rounded-[var(--radius-card)] border border-danger/30 bg-danger/10 p-4">
-            Failed to load pipeline: {error instanceof Error ? error.message : "unknown error"}
-          </div>
-        )}
+      {isSuccess && items.length === 0 && (
+        <div className="max-w-xl">
+          <EmptyState title="Nothing tracked yet" action={{ label: "Browse opportunities", href: "/opportunities" }}>
+            Save a job and it lands here. Move it along as you apply, interview, and hear back.
+          </EmptyState>
+        </div>
+      )}
 
-        {!isLoading && !isError && items.length === 0 && (
-          <div className="text-body text-text-secondary rounded-[var(--radius-card)] border border-border-subtle bg-bg-surface p-8 text-center max-w-xl">
-            Nothing tracked yet. Save a job from Opportunities to start your pipeline.
-          </div>
-        )}
-
-        {!isLoading && items.length > 0 && (
-          <div className="flex gap-5 overflow-x-auto pb-4">
-            {PIPELINE_COLUMNS.map((col) => {
-              const colItems = items
-                .filter((it) => col.states.includes(it.state))
-                .sort((a, b) => new Date(b.state_changed_at).getTime() - new Date(a.state_changed_at).getTime());
-              return (
-                <div key={col.label} className="w-80 shrink-0">
-                  <div className="flex items-center justify-between mb-3 px-0.5">
-                    <h2 className="text-label text-text-secondary">{col.label}</h2>
-                    <span className="text-micro text-text-muted">{colItems.length}</span>
-                  </div>
-                  <div className="space-y-2.5">
-                    {colItems.map((item) => (
-                      <PipelineCard key={item.job_group_id} item={item} />
-                    ))}
-                    {colItems.length === 0 && (
-                      <div className="text-micro text-text-muted rounded-[var(--radius-card)] border border-dashed border-border-subtle p-3 text-center">
-                        Empty
-                      </div>
-                    )}
-                  </div>
+      {!isPending && items.length > 0 && (
+        // docs/12 section 6: horizontal snap-scroll between columns on a
+        // phone. Negative margin lets the first and last column reach the
+        // screen edge while the page keeps its gutter.
+        <div className="flex gap-4 sm:gap-5 overflow-x-auto pb-4 -mx-4 px-4 sm:mx-0 sm:px-0 snap-x snap-mandatory sm:snap-none">
+          {PIPELINE_COLUMNS.map((col) => {
+            const colItems = items
+              .filter((it) => col.states.includes(it.state))
+              .sort((a, b) => new Date(b.state_changed_at).getTime() - new Date(a.state_changed_at).getTime());
+            const droppable = dragged !== null && pipelineDropTarget(dragged.state, col.label) !== null;
+            return (
+              <section
+                key={col.label}
+                aria-label={col.label}
+                onDragOver={(e) => {
+                  if (!dragged || !droppable) return;
+                  e.preventDefault();
+                  e.dataTransfer.dropEffect = "move";
+                  if (overColumn !== col.label) setOverColumn(col.label);
+                }}
+                onDragLeave={(e) => {
+                  if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setOverColumn(null);
+                }}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const target = dragged ? pipelineDropTarget(dragged.state, col.label) : null;
+                  const moving = dragged;
+                  setDragged(null);
+                  setOverColumn(null);
+                  if (moving && target) void actions.move(moving.job_group_id, moving.state, target);
+                }}
+                className={`w-[82vw] sm:w-80 shrink-0 snap-start rounded-[var(--radius-card)] transition-colors duration-100 ${
+                  overColumn === col.label ? "bg-accent-subtle outline-2 outline-dashed outline-accent-primary/60 outline-offset-4" : ""
+                } ${dragged && !droppable && !col.states.includes(dragged.state) ? "opacity-50" : ""}`}
+              >
+                <div className="flex items-center justify-between mb-3 px-0.5">
+                  <h2 className="text-label text-text-secondary">{col.label}</h2>
+                  <span className="text-micro text-text-muted">{colItems.length}</span>
                 </div>
-              );
-            })}
-          </div>
-        )}
+                <div className="space-y-2.5">
+                  {colItems.map((item) => (
+                    <PipelineCard
+                      key={item.job_group_id}
+                      item={item}
+                      dragging={dragged?.job_group_id === item.job_group_id}
+                      onDragStart={() => setDragged(item)}
+                      onDragEnd={() => {
+                        setDragged(null);
+                        setOverColumn(null);
+                      }}
+                    />
+                  ))}
+                  {colItems.length === 0 && (
+                    <div className="text-micro text-text-muted rounded-[var(--radius-card)] border border-dashed border-border-subtle p-3 text-center">
+                      Empty
+                    </div>
+                  )}
+                </div>
+              </section>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }

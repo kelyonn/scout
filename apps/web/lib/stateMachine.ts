@@ -50,3 +50,28 @@ export const PIPELINE_COLUMNS: { label: string; states: ApplicationState[] }[] =
 export function nextStatesFrom(state: ApplicationState): ApplicationState[] {
   return VALID_TRANSITIONS[state] ?? [];
 }
+
+// The hops a single user gesture has to cross. A card first seen in `new`
+// can't jump straight to `saved` or `applied`: the server validates every
+// hop (apps/api/internal/jobs/state.go), so Save from `new` goes through
+// `viewed`, and Apply goes through `viewed` and `saved`. Dismiss from `new`
+// is a direct hop.
+export function transitionPath(current: ApplicationState, target: ApplicationState): ApplicationState[] {
+  const path: ApplicationState[] = [];
+  if (current === "new" && (target === "saved" || target === "applied")) path.push("viewed");
+  if ((current === "new" || current === "viewed") && target === "applied") path.push("saved");
+  path.push(target);
+  return path;
+}
+
+// Where a card dropped on a Pipeline column lands, or null when the drop
+// isn't a legal single hop. Archive is deliberately not a drop target: it
+// bundles rejected / withdrawn / dismissed / ..., and picking one of them
+// for the user on a drag would silently record the wrong outcome — the
+// state menu names the exact outcome instead.
+export function pipelineDropTarget(from: ApplicationState, columnLabel: string): ApplicationState | null {
+  const col = PIPELINE_COLUMNS.find((c) => c.label === columnLabel);
+  if (!col || col.states.length !== 1) return null;
+  const target = col.states[0];
+  return nextStatesFrom(from).includes(target) ? target : null;
+}

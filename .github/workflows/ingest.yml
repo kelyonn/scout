@@ -1,0 +1,80 @@
+# The always-on pipeline (ADR-019): collector -> brain -> notifier, run as
+# bounded one-shot jobs on GitHub's schedule against hosted Neon (Postgres) and
+# Upstash (Redis), so nothing depends on the laptop being awake.
+#
+# Free because the repository is public (unlimited Actions minutes). Scheduled
+# runs are best-effort and can start late, which is fine: every source tracks
+# its own next_poll_at in Postgres, so a late or skipped run only delays work.
+#
+# Requires repository secrets (never commit these; docs/13 section 3):
+#   SCOUT_DATABASE_URL, SCOUT_REDIS_URL, SCOUT_COLLECTOR_OPERATOR_EMAIL,
+#   SCOUT_NOTIFIER_TELEGRAM_BOT_TOKEN
+# Optional: SCOUT_FCM_PROJECT_ID, SCOUT_FCM_SERVICE_ACCOUNT_JSON,
+#   SCOUT_BRAIN_GEMINI_API_KEY, SCOUT_BRAIN_GROQ_API_KEY,
+#   SCOUT_BRAIN_OPENROUTER_API_KEY
+# Optional repository variable: SCOUT_FIXTURES_ONLY (set to "false" to fetch
+# live sources; anything else keeps fetching off).
+#
+# Never runs on pull requests: a fork must not reach these secrets.
+
+name: ingest
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SCOUT_DATABASE_URL: ${{ secrets.SCOUT_DATABASE_URL }}
+      SCOUT_REDIS_URL: ${{ secrets.SCOUT_REDIS_URL }}
+      SCOUT_COLLECTOR_CONTACT_URL: https://github.com/kelyonn/scout
+      SCOUT_COLLECTOR_OPERATOR_EMAIL: ${{ secrets.SCOUT_COLLECTOR_OPERATOR_EMAIL }}
+      SCOUT_FIXTURES_ONLY: ${{ vars.SCOUT_FIXTURES_ONLY || 'true' }}
+      SCOUT_NOTIFIER_TELEGRAM_BOT_TOKEN: ${{ secrets.SCOUT_NOTIFIER_TELEGRAM_BOT_TOKEN }}
+      SCOUT_FCM_PROJECT_ID: ${{ secrets.SCOUT_FCM_PROJECT_ID }}
+      SCOUT_FCM_SERVICE_ACCOUNT_JSON: ${{ secrets.SCOUT_FCM_SERVICE_ACCOUNT_JSON }}
+      SCOUT_BRAIN_GEMINI_API_KEY: ${{ secrets.SCOUT_BRAIN_GEMINI_API_KEY }}
+      SCOUT_BRAIN_GROQ_API_KEY: ${{ secrets.SCOUT_BRAIN_GROQ_API_KEY }}
+      SCOUT_BRAIN_OPENROUTER_API_KEY: ${{ secrets.SCOUT_BRAIN_OPENROUTER_API_KEY }}
+      SCOUT_ONCE_MAX_DURATION: 10m
+      SCOUT_ONCE_MAX_SECONDS: '900'
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Cache embedding model
+        uses: actions/cache@v4
+        with:
+          path: /tmp/fastembed_cache
+          key: fastembed-bge-small-en-v1.5
+
+      - name: Build collector and notifier
+        run: |
+          go build -o bin/collector ./apps/collector/cmd
+          go build -o bin/notifier ./apps/notifier/cmd
+
+      - name: Collect
+        run: ./bin/collector -once
+
+      - name: Process (embed, classify, dedup, score)
+        working-directory: apps/brain
+        run: uv run python -m scout_brain.worker --once
+
+      - name: Notify
+        run: ./bin/notifier -once

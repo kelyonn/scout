@@ -41,6 +41,7 @@ class ProviderConfig:
     base_url: str | None
     rpm: int | None
     rpd: int | None
+    timeout_seconds: float
 
 
 @dataclass(frozen=True)
@@ -83,6 +84,10 @@ def load_llm_config(path: Path = DEFAULT_LLM_PROVIDERS_PATH) -> LLMConfig:
                 base_url=entry.get("base_url"),
                 rpm=entry.get("rpm"),
                 rpd=entry.get("rpd"),
+                # 30s fits every provider measured against a real account so
+                # far (gemini/groq/openrouter); a provider entry can raise it
+                # for a model slow enough to need more (see llm_providers.yaml).
+                timeout_seconds=float(entry.get("timeout_seconds", 30.0)),
             )
         )
 

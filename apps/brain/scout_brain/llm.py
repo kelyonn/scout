@@ -420,13 +420,15 @@ def build_cascade_client(
 
 def _build_provider(cfg: ProviderConfig) -> RateLimitedProvider:
     if cfg.kind == "gemini":
-        send = GeminiProvider(cfg.api_key, cfg.model).send
+        send = GeminiProvider(cfg.api_key, cfg.model, cfg.timeout_seconds).send
     elif cfg.kind == "openai_compatible":
         if not cfg.base_url:
             raise ValueError(
                 f"llm provider {cfg.name!r}: openai_compatible requires base_url"
             )
-        send = OpenAICompatibleProvider(cfg.base_url, cfg.api_key, cfg.model).send
+        send = OpenAICompatibleProvider(
+            cfg.base_url, cfg.api_key, cfg.model, cfg.timeout_seconds
+        ).send
     else:
         raise ValueError(f"llm provider {cfg.name!r}: unknown kind {cfg.kind!r}")
     return RateLimitedProvider(cfg.name, cfg.model, send, cfg.rpm, cfg.rpd)

@@ -112,8 +112,12 @@ milestone means and its annotated exit criteria.
 **Delivery**
 - Telegram notifier with `bengaluru_match`/`high_score` triggers, quiet
   hours, and exactly-once delivery
-- A Next.js dashboard with a feed, job detail (including an AI-generated
-  summary and a personalized match explanation), and a resume page
+- A Next.js dashboard — ranked feed with URL-state filters, job detail (AI
+  summary, personalized match explanation, full score breakdown, private
+  notes), save/apply/dismiss with undo, a pipeline board, search, calendar,
+  companies and watchlist, insights, resume upload, and settings. Responsive
+  down to a phone (bottom tab bar), with first-run guidance, handled
+  loading/empty/error/offline/not-found states, and toasts for every action
 
 This has been verified end-to-end against a real Postgres and Redis instance,
 not only with unit tests.
@@ -129,18 +133,57 @@ milestone.
 
 ## Getting started
 
+**Prerequisites:** Docker Desktop (or Docker + Compose), `make`, Go 1.25+,
+Node 22 with `pnpm` (`corepack enable`), and Python 3.12 with `uv`. Go, Node,
+and Python are only needed to run tests or a service natively — `make dev`
+builds every service inside Docker.
+
 ```bash
 git clone https://github.com/kelyonn/scout.git && cd scout
-make dev      # starts the full local stack, migrated, from a clean clone
+make dev      # starts the full local stack, migrated and seeded, from a clean clone
 make test     # runs the full test suite, including database-backed tests
 ```
 
-Local development never reaches the live internet — `SCOUT_FIXTURES_ONLY=true`
-is the default, and the collector's scheduler will not start without it being
-explicitly disabled. See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the full
-command reference and
+Then open **http://127.0.0.1:3000** and sign in with the access token —
+locally that is the placeholder `SCOUT_AUTH_TOKEN` in `.env.example`, which
+`make dev` copied into `.env`. You type it once per device; it stays signed in.
+
+A fresh database has no postings yet. The Home page walks you through the two
+setup steps: upload a resume (`/resume`) and let the collector run. Locally,
+`make seed-sources` loads the curated source list and `make live-run` runs
+the collector against real sources for one bounded window (see
+[ADR-018](docs/adr/ADR-018-laptop-only-hosting.md)).
+
+Local development never reaches the live internet unless you ask it to —
+`SCOUT_FIXTURES_ONLY=true` is the default, and the collector's scheduler will
+not start without it being explicitly disabled. See
+[`CONTRIBUTING.md`](CONTRIBUTING.md) for the full command reference and
 [`docs/15-infrastructure-deployment.md`](docs/15-infrastructure-deployment.md)
 for how the pieces fit together in production.
+
+### Configuration
+
+Everything is configured through environment variables, documented inline in
+[`.env.example`](.env.example) (the stack) and
+[`apps/web/.env.example`](apps/web/.env.example) (only for running the web app
+natively with `make web-dev`). Every integration is optional and degrades
+cleanly when unset:
+
+| Variable | Purpose |
+| --- | --- |
+| `SCOUT_AUTH_TOKEN` | The single access token (32+ chars). Rotating it signs every device out. |
+| `SCOUT_DATABASE_URL`, `SCOUT_REDIS_URL` | Postgres (with pgvector) and Redis. |
+| `SCOUT_FIXTURES_ONLY` | `true` (default) replays fixtures; `false` fetches real sources. |
+| `SCOUT_USER_EMAIL` | The sole user's email, seeded by `make seed`. |
+| `SCOUT_NOTIFIER_TELEGRAM_BOT_TOKEN` | Telegram job notifications. |
+| `SCOUT_FCM_PROJECT_ID`, `SCOUT_FCM_SERVICE_ACCOUNT_JSON` | Native Android push. |
+| `SCOUT_GOOGLE_CLIENT_ID`, `SCOUT_GOOGLE_CLIENT_SECRET` | Google Calendar sync (Settings page). |
+| `SCOUT_BRAIN_*_API_KEY` | Hosted LLM tiers for classification and summaries; local Ollama otherwise. |
+| `SCOUT_EMAIL_IMAP_*` | Email-alert ingestion (LinkedIn/Indeed/Glassdoor/Handshake). |
+| `SCOUT_HOST_BIND_ADDR` | Bind API/web to a tailnet IP so the Android app can reach them. |
+
+Secrets never go in the repository — the repo is public, which is what makes CI
+free. See [`docs/13-security-privacy.md`](docs/13-security-privacy.md).
 
 ---
 
@@ -199,7 +242,9 @@ treated as a bug in one of them.
 
 CI runs on every push and pull request: a dependency compliance scan, Go
 build/vet/test, `golangci-lint`, migration validation against a real
-Postgres instance, SQL linting, and `shellcheck` over the operational scripts.
+Postgres instance, SQL linting, Python lint/type-check/tests, the web app's
+eslint/vitest/tsc/production build, the eval harness, and `shellcheck` over
+the operational scripts.
 Tests that require Postgres or Redis run against real instances rather than
 mocks — the query correctness and Redis wire-format behavior they verify are
 exactly what a mock would hide.
