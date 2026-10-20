@@ -23,6 +23,23 @@ export function isValidToken(presented: string): boolean {
   return timingSafeEqual(got, want);
 }
 
+// Optional convenience for a single-user install: SCOUT_LOGIN_PASSCODE (set
+// in apps/web/.env.local, never committed) is a short code that can be
+// typed in place of the 32+ character token. It is exchanged for the real
+// token server-side, so the cookie and every API call still carry the long
+// secret and the Go API's minimum-length rule is untouched. The login
+// route's rate limit (10 wrong tries per 15 minutes per client) is what
+// makes a short code acceptable.
+export function resolveLoginToken(presented: string): string | null {
+  if (isValidToken(presented)) return presented;
+  const passcode = process.env.SCOUT_LOGIN_PASSCODE;
+  const real = process.env.SCOUT_AUTH_TOKEN;
+  if (!passcode || !real || !presented) return null;
+  const got = createHash("sha256").update(presented).digest();
+  const want = createHash("sha256").update(passcode).digest();
+  return timingSafeEqual(got, want) ? real : null;
+}
+
 // One definition of the cookie's attributes, shared by login (set) and
 // logout (clear) — a clear whose attributes differ from the set is
 // silently ignored by the browser, which is how "Sign out" stops working.
