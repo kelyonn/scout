@@ -79,7 +79,10 @@ export function profilePath(): string {
 
 export async function loadProfile(): Promise<Profile | null> {
   try {
-    return parse(JSON.parse(await readFile(profilePath(), "utf8")));
+    // turbopackIgnore: profilePath() is dynamic (env override or a
+    // gitignored local file), and without this, Turbopack traces the
+    // whole project into the output trying to pin it down statically.
+    return parse(JSON.parse(await readFile(/* turbopackIgnore: true */ profilePath(), "utf8")));
   } catch {
     return null;
   }
@@ -173,7 +176,8 @@ export function portfolioPath(): string {
 
 export async function loadPortfolio(): Promise<Portfolio | null> {
   try {
-    return parsePortfolio(JSON.parse(await readFile(portfolioPath(), "utf8")));
+    // turbopackIgnore: same reasoning as loadProfile above.
+    return parsePortfolio(JSON.parse(await readFile(/* turbopackIgnore: true */ portfolioPath(), "utf8")));
   } catch {
     return null;
   }
