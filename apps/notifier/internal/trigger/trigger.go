@@ -181,13 +181,21 @@ func evaluateTrigger(row db.SelectUnnotifiedJobGroupsRow) (name string, ok bool)
 }
 
 // urgencyFor is docs/11 section 3's per-trigger urgency class. Every
-// trigger this package evaluates is INSTANT except newgrad_match, which is
-// BATCHED — "accumulated and delivered hourly on the hour" — the one
-// urgency class below INSTANT that P1's Deliverer actually implements
-// (apps/notifier/internal/deliver's own sendBatch); DIGEST belongs to
-// apps/notifier/internal/digest, a separate daily process, not this table.
+// named trigger this package evaluates is INSTANT except newgrad_match and
+// any_match, which are BATCHED — "accumulated and delivered hourly on the
+// hour" — the one urgency class below INSTANT that P1's Deliverer actually
+// implements (apps/notifier/internal/deliver's own sendBatch); DIGEST
+// belongs to apps/notifier/internal/digest, a separate daily process, not
+// this table.
+//
+// any_match BATCHED (requested 2026-10-21, same request that added the
+// trigger itself): an instant Telegram ping per job, at any_match's
+// realistic volume once GitHub Actions' schedule is actually firing every
+// 15 minutes, is exactly the "mutes it within a week" failure docs/11
+// section 1 warns about — hourly, one grouped message via the existing
+// sendBatch path, is what was actually asked for.
 func urgencyFor(triggerName string) string {
-	if triggerName == "newgrad_match" {
+	if triggerName == "newgrad_match" || triggerName == "any_match" {
 		return "batched"
 	}
 	return "instant"
