@@ -1,12 +1,13 @@
 -- GCC and enterprise coverage — docs/05-source-catalog.md section 5.2's
 -- "curated seed list... ~150 entries... not glamorous, and by far the
 -- highest yield per hour spent," now unblocked by the Workday adapter
--- (P3). 39 entities here, not 150 — see this file's own closing comment
+-- (P3). 40 entities here, not 150 — see this file's own closing comment
 -- for why that gap is honest rather than padded with guesses.
 --
--- Every URL below was checked live on 2026-08-18 or 2026-08-19 (real,
--- non-empty postings, matching this project's existing verification bar
--- from sources.sql) via two methods:
+-- Every URL below was checked live on 2026-08-18, 2026-08-19, or (PwC,
+-- fifth Workday batch) 2026-10-21 (real, non-empty postings, matching
+-- this project's existing verification bar from sources.sql) via two
+-- methods:
 --   1. Public search: querying each employer's name alongside
 --      "myworkdayjobs.com" or "smartrecruiters.com" to find its actual
 --      careers portal.
@@ -83,7 +84,8 @@ values
     ('statestreet-gcc', 'State Street', 'state street', 'gcc', 'heuristic', 'seed'),
     ('stryker-gcc', 'Stryker', 'stryker', 'gcc', 'heuristic', 'seed'),
     ('abbott-gcc', 'Abbott', 'abbott', 'gcc', 'heuristic', 'seed'),
-    ('aig-gcc', 'AIG', 'aig', 'gcc', 'heuristic', 'seed')
+    ('aig-gcc', 'AIG', 'aig', 'gcc', 'heuristic', 'seed'),
+    ('pwc', 'PwC', 'pwc', 'services_consulting', 'heuristic', 'seed')
 on conflict (slug) do nothing;
 
 -- Workday CXS sources. url is the {tenant}.{wdN}.myworkdayjobs.com/wday/cxs/{tenant}/{site}/jobs
@@ -230,6 +232,25 @@ join (values
 ) as v(slug, url, adapter_config, note) on v.slug = c.slug
 on conflict (url_hash) do nothing;
 
+-- Fifth Workday source, found 2026-10-21. ADR-020 Phase 2's own
+-- careerpage_sources.sql comment had written PwC off as "the Workday CXS
+-- API itself was never found" — true of the career page's own client-side
+-- traffic (it renders job rows server-side, no XHR to discover), but the
+-- "Apply" links on www.pwc.in/careers/experienced-jobs.html point straight
+-- at a real tenant/site: pwc.wd3.myworkdayjobs.com, site
+-- Global_Experienced_Careers. Same adapter as every other row in this
+-- file, no new code needed.
+insert into source (company_id, kind, url, url_hash, legal_posture, status, base_interval_s, max_rps, adapter_config, notes)
+select c.id, 'ats_workday', v.url, digest(v.url, 'sha256'), 'permitted', 'pending_review', 900, 0.5,
+       v.adapter_config::jsonb, v.note
+from company as c
+join (values
+    ('pwc', 'https://pwc.wd3.myworkdayjobs.com/wday/cxs/pwc/Global_Experienced_Careers/jobs',
+        '{"search_text": "Bengaluru"}',
+        'Public Workday CXS endpoint, no auth. Verified live (3,861 total, 139 Bengaluru) 2026-10-21.')
+) as v(slug, url, adapter_config, note) on v.slug = c.slug
+on conflict (url_hash) do nothing;
+
 -- SmartRecruiters sources — same public, unauthenticated posting-search
 -- API every other SmartRecruiters-hosted source in this project uses
 -- (see adapters/ats/smartrecruiters' own package comment).
@@ -285,10 +306,18 @@ on conflict (url_hash) do nothing;
 -- Workday; the only myworkdayjobs.com hit is the unrelated Les Schwab
 -- Tire Centers), and several SuccessFactors-only or bespoke-portal GCCs from docs/05's
 -- own table (TCS, Infosys, Wipro, Cognizant, Accenture, Capgemini,
--- Deloitte, EY, KPMG, PwC) that section 6's own coverage table already
+-- Deloitte, EY, KPMG) that section 6's own coverage table already
 -- marks as P5, not P3 — no adapter exists for SuccessFactors or a
 -- bespoke portal, so seeding a source row for one would just be a
--- permanently-broken row.
+-- permanently-broken row. PwC was on this list too as of the Phase 2
+-- careerpage_sources.sql pass; it turned out to be real Workday after
+-- all and is seeded in the fifth batch above — see that batch's own
+-- comment. EY (careers.ey.com, Oracle-style ATS, 8,906 job URLs found in
+-- that same pass) and KPMG (kpmgindia.talentrecruit.com, TalentRecruit,
+-- client-rendered SPA) were re-checked the same way this pass and still
+-- need a dedicated adapter, not this one: EY's job rows aren't behind
+-- "Apply" links to any myworkdayjobs.com tenant, and KPMG's aren't behind
+-- any discoverable API at all in the page's own network traffic.
 --
 -- Walmart Global Tech was in this "not resolved" list as of 2026-08-18,
 -- on the theory that the real tenant it found (wd5) was hitting a
