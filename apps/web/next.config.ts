@@ -22,7 +22,14 @@ const nextConfig: NextConfig = {
   // web.Dockerfile's runtime stage ships only that, not node_modules or
   // the pnpm store, which is most of why the Go services' images are a
   // few MB and a naive Next.js image would otherwise be hundreds.
-  output: "standalone",
+  //
+  // Skipped on Vercel (which sets VERCEL=1 on every build): Vercel does
+  // its own file tracing and serverless packaging, and the two conflict —
+  // "standalone" output there produces a build that completes but then
+  // fails Vercel's own onBuildComplete step with ENOENT on
+  // .next/next-server.js.nft.json, since Vercel never looks for the
+  // .next/standalone directory this mode produces.
+  output: process.env.VERCEL ? undefined : "standalone",
   // The token never reaches the browser, so nothing here needs to know
   // it — and the `X-Powered-By: Next.js` banner is free information.
   poweredByHeader: false,
