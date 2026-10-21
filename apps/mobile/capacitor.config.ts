@@ -1,12 +1,14 @@
 import type { CapacitorConfig } from "@capacitor/cli";
 
-// SCOUT_MOBILE_SERVER_URL — decided 2026-08-28: Tailscale, scoped to just
-// the phone<->laptop leg, not a reversal of ADR-018 (see the server block
-// below for the full reasoning). Read at config build time (`npx cap
-// sync` re-reads this file), not at app runtime, so changing it always
-// needs a `cap sync` + rebuild, never just an env change on a running
-// install. Defaults to the Android emulator's own host-loopback alias,
-// which needs no Tailscale at all — set this for a real device.
+// SCOUT_MOBILE_SERVER_URL — updated 2026-10-21 for ADR-019's cardless
+// hosted pipeline: points at the public Vercel deployment
+// (https://scout-pi-sepia.vercel.app), not a laptop or a tailnet
+// address. Read at config build time (`npx cap sync` re-reads this
+// file), not at app runtime, so changing it always needs a `cap sync`
+// + rebuild, never just an env change on a running install. Defaults
+// to the Android emulator's own host-loopback alias when unset, which
+// needs no network setup at all — only relevant for local emulator
+// development against `make dev`, never for a real device anymore.
 const serverURL = process.env.SCOUT_MOBILE_SERVER_URL || "http://10.0.2.2:3000";
 
 const config: CapacitorConfig = {
@@ -23,32 +25,18 @@ const config: CapacitorConfig = {
     // ADR-012's whole architecture: "WebView → the deployed Next.js app
     // (identical UI to the browser, no fork)". This is that pointer.
     //
-    // THE GAP AND THE DECISION: ADR-012 (2026-08-07) assumed Tailscale
-    // gave the phone a MagicDNS name to reach the laptop by. ADR-018
-    // (2026-08-19) removed Tailscale entirely — "no remote host, no
-    // Tailscale, no Oracle... the web dashboard is reached at localhost
-    // while the stack is running" — without revisiting what that means
-    // for a physically separate phone. Decided 2026-08-28: **Tailscale,
-    // re-added scoped to just the phone<->laptop leg.** This is not a
-    // reversal of ADR-018 — that ADR's reasoning was about not needing a
-    // remote HOST (no Oracle A1, no dead-man's switch, no public
-    // ingress), all of which stays true. A tailnet between two of the
-    // same person's own devices needs none of that; it's the same shape
-    // as any other personal-device mesh. Rejected the alternative (LAN
-    // IP + binding apps/api/apps/web to 0.0.0.0) because that widens
-    // reachability to literally anything on the same Wi-Fi gated only by
-    // SCOUT_AUTH_TOKEN, whereas Tailscale's own device identity is a
-    // second, independent gate — and it keeps working away from home
-    // Wi-Fi, which a LAN IP never would.
-    //
-    // infra/compose/local.yml's api/web services now bind
-    // SCOUT_HOST_BIND_ADDR (.env.example's own setup steps) instead of a
-    // hardcoded 127.0.0.1 — set it to this laptop's Tailscale IP
-    // (`tailscale ip -4`) to actually finish this. Until that's done,
-    // the default below (10.0.2.2, Android's own always-on alias for
-    // "the host machine's localhost from inside the emulator") is what's
-    // actually reachable — real for emulator development, not a stand-in
-    // for a real phone.
+    // SUPERSEDED HISTORY: ADR-012 (2026-08-07) assumed Tailscale gave the
+    // phone a MagicDNS name to reach the laptop by. ADR-018 (2026-08-19)
+    // removed Tailscale/the remote host entirely for the backend, and a
+    // 2026-08-28 patch re-added Tailscale scoped to just the phone<->
+    // laptop leg so the app could still reach a laptop-hosted backend.
+    // ADR-019 (2026-10-21) replaced the laptop-hosted backend with the
+    // cardless hosted pipeline (GitHub Actions + Neon + Upstash + Render
+    // + Vercel), which has a real public URL — so the phone<->laptop
+    // Tailscale leg this comment used to document is gone too. The app
+    // now just points at Vercel directly, same as any other internet
+    // client; SCOUT_AUTH_TOKEN / SCOUT_LOGIN_PASSCODE (apps/web/lib/
+    // auth.ts) remain the only gate, same as the browser dashboard.
     url: serverURL,
     cleartext: serverURL.startsWith("http://"),
   },
