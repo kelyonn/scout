@@ -47,16 +47,19 @@
 --   real job content being fetchable: EY (careers.ey.com, Oracle-style ATS,
 --   8,906 job URLs — the single largest candidate found, worth a dedicated
 --   adapter on its own), Kearney (kearney.recsolu.com, Yello Enterprise,
---   fully client-rendered SPA, no JSON-LD and no API call found), PwC
---   (pwc.com/gx/en/careers/job-results.html — Workday-backed per
---   gx-territories.json, but the Workday CXS API itself was never found;
---   the rendered page server-side-embeds job data as plain text, not
---   JSON-LD — and the India graduate-careers filter returned only one
---   result in the one sample checked, so yield may be low even once an
---   adapter exists), KPMG (kpmgindia.talentrecruit.com, TalentRecruit
---   platform, client-rendered SPA, no JSON-LD; KPMG also runs two Oracle
---   Fusion Cloud HCM sites — oraclecloud.com/hcmUI/CandidateExperience —
---   not investigated).
+--   fully client-rendered SPA, no JSON-LD and no API call found), KPMG
+--   (kpmgindia.talentrecruit.com, TalentRecruit platform, client-rendered
+--   SPA, no JSON-LD; KPMG also runs two Oracle Fusion Cloud HCM sites —
+--   oraclecloud.com/hcmUI/CandidateExperience — not investigated).
+--   Revisited 2026-10-21: PwC (pwc.com/gx/en/careers/job-results.html —
+--   Workday-backed per gx-territories.json) was written off here because
+--   the career page's own client-side traffic never calls the Workday CXS
+--   API; it renders job rows server-side instead. But the "Apply" links on
+--   www.pwc.in/careers/experienced-jobs.html point at a real tenant,
+--   pwc.wd3.myworkdayjobs.com, site Global_Experienced_Careers — the same
+--   ats_workday adapter every other GCC source uses, no dedicated adapter
+--   needed after all. Seeded in infra/seed/gcc_sources.sql's fifth Workday
+--   batch instead of here.
 --   Rejected, not a fit — Accenture Strategy (same Accenture India sitemap
 --   already rejected above, no <lastmod>); Tata Strategic Management Group
 --   has no independent careers portal at all — tsmg.com redirects to
