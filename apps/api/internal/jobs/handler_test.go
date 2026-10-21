@@ -259,6 +259,37 @@ func TestList_FiltersBySeniority(t *testing.T) {
 	}
 }
 
+// TestList_HardFiltersSeniorityByDefault reproduces a real bug found
+// 2026-10-21: the dashboard feed showed senior/staff roles wall to wall
+// for a user whose target_seniority is {internship, new_grad} and whose
+// seniority_filter_enabled is TRUE (the default both the schema and
+// infra/seed/seed.sql.example set), with no seniority= query param in
+// play at all. notification.sql's SelectUnnotifiedJobGroups already
+// enforced this hard gate correctly — a senior role never got pushed —
+// but feed.sql, which browsing goes through, never implemented it; only
+// the explicit optional seniority= narg (TestList_FiltersBySeniority,
+// above) filtered anything, and it defaults to showing every level when
+// unset, which is every real browse of the dashboard.
+func TestList_HardFiltersSeniorityByDefault(t *testing.T) {
+	pool := testPool(t)
+	h := testHandler(pool)
+	intern := insertJobFixture(t, pool, fixtureOpts{seniority: "internship", priority: 70})
+	senior := insertJobFixture(t, pool, fixtureOpts{seniority: "senior", priority: 70})
+	unknown := insertJobFixture(t, pool, fixtureOpts{seniority: "unknown", priority: 70})
+
+	resp := doList(t, h, "limit=200")
+
+	if !containsGroupID(resp.Data, intern.groupID) {
+		t.Error("expected the internship fixture in the default (unfiltered) feed")
+	}
+	if containsGroupID(resp.Data, senior.groupID) {
+		t.Error("did not expect the senior fixture in the default feed — seniority_filter_enabled should hard-exclude it even with no seniority= param set")
+	}
+	if !containsGroupID(resp.Data, unknown.groupID) {
+		t.Error("expected the unknown-seniority fixture in the default feed — an undetected seniority must not read as detected and excluded")
+	}
+}
+
 func TestList_FiltersByRoleFamily(t *testing.T) {
 	pool := testPool(t)
 	h := testHandler(pool)
