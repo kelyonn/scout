@@ -13,6 +13,19 @@
 -- now admit too — but an unmatched/excluded job never shows regardless), the
 -- rest are optional narg()s that pass through when NULL.
 --
+-- seniority_filter_enabled (000012) is one of those hard-eligibility checks,
+-- not an optional narg — found missing here 2026-10-21 when the dashboard
+-- showed senior/staff roles wall to wall despite the user's own
+-- target_seniority being {internship, new_grad} and the toggle being on.
+-- The notification path enforced this correctly (a senior role never got
+-- pushed); this feed query, which this file's own header comment already
+-- claimed matched that pattern, simply never implemented it — the only
+-- seniority filtering here was the optional `seniorities` narg, which
+-- defaults to showing every level when the caller doesn't set it. Same
+-- "'unknown' admitted either way" reasoning as notification.sql: a role
+-- whose seniority classification failed must not read as "classified and
+-- excluded."
+--
 -- role_family/seniority/work_mode filters are cast through ::text[] then
 -- ::role_family[]/::seniority[]/::work_mode[] rather than bound directly
 -- as native enum arrays — the same pgx-has-no-codec-for-a-custom-enum-
@@ -53,9 +66,15 @@ left join job_score as js on j.id = js.job_id
     and js.weight_version = sqlc.arg(weight_version)::text
 left join user_job_state as ujs on jg.id = ujs.job_group_id
     and ujs.user_id = sqlc.arg(user_id)::uuid
+inner join user_profile as up on up.user_id = sqlc.arg(user_id)::uuid
 where j.status = 'open'
     and j.in_scope = TRUE
     and (j.paid = 'paid' or (j.paid = 'unknown' and coalesce(js.priority, 0) >= 92))
+    and (
+        not up.seniority_filter_enabled
+        or j.seniority = any(up.target_seniority)
+        or j.seniority = 'unknown'
+    )
     and (
         sqlc.narg(role_families)::text [] is NULL
         or j.role_family = any(sqlc.narg(role_families)::text []::role_family [])
