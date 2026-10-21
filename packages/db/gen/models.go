@@ -254,6 +254,7 @@ const (
 	NotificationTriggerDigest              NotificationTrigger = "digest"
 	NotificationTriggerDeadlineT72h        NotificationTrigger = "deadline_t72h"
 	NotificationTriggerDeadlineT24h        NotificationTrigger = "deadline_t24h"
+	NotificationTriggerAnyMatch            NotificationTrigger = "any_match"
 )
 
 func (e *NotificationTrigger) Scan(src interface{}) error {

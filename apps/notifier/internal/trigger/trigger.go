@@ -166,8 +166,17 @@ func evaluateTrigger(row db.SelectUnnotifiedJobGroupsRow) (name string, ok bool)
 		return "prestige_opening", true
 	case isNewGrad && row.Priority >= newgradMatchThreshold:
 		return "newgrad_match", true
+	// any_match (000026): requested 2026-10-21 — every row reaching this
+	// function already cleared SelectUnnotifiedJobGroups' hard-eligibility
+	// gate (in_scope, open, paid, seniority_filter_enabled's
+	// target_seniority match), so "didn't also clear one of the six named
+	// quality bars above" is not the same as "not relevant." This is a
+	// deliberate override of docs/11 section 1's "interrupt rarely" default
+	// posture, not a bug — the user wants maximum instant coverage over a
+	// quiet channel right now. digest still runs daily on whatever this
+	// misses, which in practice is nothing once this case is unconditional.
 	default:
-		return "", false
+		return "any_match", true
 	}
 }
 

@@ -25,11 +25,17 @@ The practical consequence is that most discovered jobs do *not* generate a
 notification. At Year 1 scale Scout will discover ~800 new jobs per day, filter
 to perhaps 40 relevant ones, and notify on 5–15. The dashboard holds the rest.
 
+**As of 2026-10-21 this project's one actual user has asked for the opposite**
+— section 2's `any_match` trigger below fires on every one of those ~40, not
+5–15. This paragraph still describes the governing design principle and the
+default anyone extending this project should assume; it just isn't the live
+configuration right now.
+
 ---
 
 ## 2. Triggers
 
-`SCOUT-NOTIF-001`. Seven named triggers, each with its own threshold, urgency,
+`SCOUT-NOTIF-001`. Eight named triggers, each with its own threshold, urgency,
 and channel routing.
 
 | Trigger | Fires when | Urgency | Threshold |
@@ -40,8 +46,20 @@ and channel routing.
 | `watchlist_hiring` | A watchlisted company posts any relevant role | **INSTANT** | priority ≥ 60 |
 | `prestige_opening` | Curated prestige list organization | **INSTANT** | priority ≥ 70 |
 | `newgrad_match` | Seniority `new_grad`, matches target profile | BATCHED | priority ≥ 80 |
+| `any_match` | Cleared the hard-eligibility gate but no other trigger above fired | **INSTANT** | any |
 | `deadline_approaching` | Saved job at T-72h and T-24h | **INSTANT** | any saved job |
 | `digest` | Daily summary of everything below threshold | DIGEST | — |
+
+**`any_match` (added 2026-10-21) is a deliberate, requested override of this
+section's own "interrupt rarely" posture**, not a bug and not the default this
+project would choose on its own — see section 1 above, which still describes
+the actual design intent. It fires for literally everything that reaches
+`evaluateTrigger` without matching one of the six quality-bar triggers above
+it, since every such row already cleared `SelectUnnotifiedJobGroups`' hard
+eligibility gate (`in_scope`, `open`, `paid`, `seniority_filter_enabled`'s
+`target_seniority` match) — "didn't also clear a quality bar" is not the same
+as "not relevant." In practice this makes `digest` almost always empty: there
+is nothing left below `any_match`'s threshold of zero for it to summarize.
 
 **Why `bengaluru_match` has a lower threshold than `high_score`.** The user's
 stated top preference is Bengaluru. A priority-80 Bengaluru role should reach
