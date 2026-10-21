@@ -27,7 +27,8 @@ to perhaps 40 relevant ones, and notify on 5–15. The dashboard holds the rest.
 
 **As of 2026-10-21 this project's one actual user has asked for the opposite**
 — section 2's `any_match` trigger below fires on every one of those ~40, not
-5–15. This paragraph still describes the governing design principle and the
+5–15, batched into one hourly Telegram message rather than 5–15 instant
+pings. This paragraph still describes the governing design principle and the
 default anyone extending this project should assume; it just isn't the live
 configuration right now.
 
@@ -46,7 +47,7 @@ and channel routing.
 | `watchlist_hiring` | A watchlisted company posts any relevant role | **INSTANT** | priority ≥ 60 |
 | `prestige_opening` | Curated prestige list organization | **INSTANT** | priority ≥ 70 |
 | `newgrad_match` | Seniority `new_grad`, matches target profile | BATCHED | priority ≥ 80 |
-| `any_match` | Cleared the hard-eligibility gate but no other trigger above fired | **INSTANT** | any |
+| `any_match` | Cleared the hard-eligibility gate but no other trigger above fired | BATCHED | any |
 | `deadline_approaching` | Saved job at T-72h and T-24h | **INSTANT** | any saved job |
 | `digest` | Daily summary of everything below threshold | DIGEST | — |
 
@@ -60,6 +61,10 @@ eligibility gate (`in_scope`, `open`, `paid`, `seniority_filter_enabled`'s
 `target_seniority` match) — "didn't also clear a quality bar" is not the same
 as "not relevant." In practice this makes `digest` almost always empty: there
 is nothing left below `any_match`'s threshold of zero for it to summarize.
+BATCHED, not INSTANT — an instant ping per job at `any_match`'s realistic
+volume is exactly the "mutes it within a week" failure section 1 warns
+about, so it accumulates and delivers as one grouped Telegram message hourly
+via the same `sendBatch` path `newgrad_match` already used.
 
 **Why `bengaluru_match` has a lower threshold than `high_score`.** The user's
 stated top preference is Bengaluru. A priority-80 Bengaluru role should reach
