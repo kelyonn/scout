@@ -295,13 +295,23 @@ func TestRun_NoFireBelowThreshold(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if countNotifications(t, pool, fixture.JobGroupID) != 0 {
-		t.Error("a below-threshold job should not produce a notification")
+	// any_match (000026) fires for literally any row that clears the hard
+	// eligibility gate, regardless of the six named quality-bar thresholds
+	// above it — a below-threshold job still notifies, just not as any of
+	// the six named triggers. See evaluateTrigger's own comment.
+	var trig string
+	err := pool.QueryRow(context.Background(),
+		`select trigger from notification where job_group_id = $1::uuid`, fixture.JobGroupID).Scan(&trig)
+	if err != nil {
+		t.Fatalf("select trigger: %v", err)
+	}
+	if trig != "any_match" {
+		t.Errorf("trigger = %q, want any_match", trig)
 	}
 
 	// Still marked notified, so it is not re-evaluated forever.
 	var notifiedAt pgtype.Timestamptz
-	err := pool.QueryRow(context.Background(),
+	err = pool.QueryRow(context.Background(),
 		`select notified_at from job_group where id = $1::uuid`, fixture.JobGroupID).Scan(&notifiedAt)
 	if err != nil {
 		t.Fatalf("query notified_at: %v", err)
@@ -489,7 +499,16 @@ func TestRun_RemoteHighQualityRequiresTier3(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if countNotifications(t, pool, fixture.JobGroupID) != 0 {
+	// any_match (000026) still fires — it still should not fire as
+	// remote_high_quality specifically, which is what this test actually
+	// checks.
+	var trig string
+	err := pool.QueryRow(context.Background(),
+		`select trigger from notification where job_group_id = $1::uuid`, fixture.JobGroupID).Scan(&trig)
+	if err != nil {
+		t.Fatalf("select trigger: %v", err)
+	}
+	if trig == "remote_high_quality" {
 		t.Error("a tier-4 job at the tier-3 threshold should not fire remote_high_quality")
 	}
 }
@@ -541,7 +560,15 @@ func TestRun_WatchlistHiringRequiresWatchlistEntry(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if countNotifications(t, pool, fixture.JobGroupID) != 0 {
+	// any_match (000026) still fires — it still should not fire as
+	// watchlist_hiring specifically, which is what this test actually checks.
+	var trig string
+	err := pool.QueryRow(context.Background(),
+		`select trigger from notification where job_group_id = $1::uuid`, fixture.JobGroupID).Scan(&trig)
+	if err != nil {
+		t.Fatalf("select trigger: %v", err)
+	}
+	if trig == "watchlist_hiring" {
 		t.Error("a non-watchlisted company at watchlist_hiring's threshold should not fire it")
 	}
 }
@@ -620,7 +647,15 @@ func TestRun_PrestigeOpeningRequiresException(t *testing.T) {
 		t.Fatalf("Run: %v", err)
 	}
 
-	if countNotifications(t, pool, fixture.JobGroupID) != 0 {
+	// any_match (000026) still fires — it still should not fire as
+	// prestige_opening specifically, which is what this test actually checks.
+	var trig string
+	err := pool.QueryRow(context.Background(),
+		`select trigger from notification where job_group_id = $1::uuid`, fixture.JobGroupID).Scan(&trig)
+	if err != nil {
+		t.Fatalf("select trigger: %v", err)
+	}
+	if trig == "prestige_opening" {
 		t.Error("prestige_exception = false at prestige_opening's threshold should not fire it")
 	}
 }

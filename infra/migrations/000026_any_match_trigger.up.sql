@@ -1,0 +1,13 @@
+-- docs/11-notifications.md section 2's seven named triggers all gate on a
+-- priority threshold, by design — "interrupt rarely, and mean it," most
+-- discovered jobs land in the daily digest, not an instant push. Requested
+-- 2026-10-21: an eighth mode for a user who explicitly wants every job that
+-- clears the existing hard-eligibility gates (in_scope, open, paid,
+-- seniority_filter_enabled's target_seniority match) to notify instantly,
+-- with no further quality bar. Same "ALTER TYPE ... ADD VALUE runs
+-- standalone, not used later in this same migration" transaction-safety
+-- shape 000016 already established, for the same reason: Postgres forbids
+-- using a new enum value in the transaction that added it on some
+-- versions, and apps/notifier/internal/trigger only starts inserting this
+-- value after this migration has committed.
+ALTER TYPE notification_trigger ADD VALUE 'any_match';
